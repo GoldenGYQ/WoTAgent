@@ -1,0 +1,15 @@
+{
+  "@context": "https://www.w3.org/2022/wot/td/v1.1",
+  "id": "urn:dev:wot:exhaust-002",
+  "title": "Bathroom1Exhaust",
+  "location": "bathroom1",
+  "capabilities": ["ventilation"],
+  "actions": {
+    "turnOn": { "input": { "type": "boolean" } },
+    "setSpeed": { "input": { "type": "number" } }
+  },
+  "properties": {
+    "on": { "type": "boolean" },
+    "speed": { "type": "number" }
+  }
+}

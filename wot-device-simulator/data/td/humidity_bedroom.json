@@ -1,0 +1,16 @@
+{
+  "@context": "https://www.w3.org/2022/wot/td/v1.1",
+  "id": "urn:dev:wot:humidifier-001",
+  "title": "BedroomHumidifier",
+  "location": "bedroom1",
+  "capabilities": ["humidity"],
+  "actions": {
+    "turnOn": { "input": { "type": "boolean" } },
+    "setMistLevel": { "input": { "type": "number" } }
+  },
+  "properties": {
+    "on": { "type": "boolean" },
+    "currentHumidity": { "type": "number" },
+    "mistLevel": { "type": "number" }
+  }
+}

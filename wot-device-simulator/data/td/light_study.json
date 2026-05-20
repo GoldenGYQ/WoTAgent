@@ -1,0 +1,15 @@
+{
+  "@context": "https://www.w3.org/2022/wot/td/v1.1",
+  "id": "urn:dev:wot:light-004",
+  "title": "StudyLight",
+  "location": "study",
+  "capabilities": ["luminance"],
+  "actions": {
+    "turnOn": { "input": { "type": "boolean" } },
+    "setBrightness": { "input": { "type": "number" } }
+  },
+  "properties": {
+    "on": { "type": "boolean" },
+    "brightness": { "type": "number" }
+  }
+}

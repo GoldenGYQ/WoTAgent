@@ -1,0 +1,12 @@
+{
+  "@context": "https://www.w3.org/2022/wot/td/v1.1",
+  "id": "urn:dev:wot:gas_sensor-001",
+  "title": "KitchenGasSensor",
+  "location": "kitchen",
+  "capabilities": ["gas_detection"],
+  "actions": {},
+  "properties": {
+    "gasLevel": { "type": "number" },
+    "alarm": { "type": "boolean" }
+  }
+}

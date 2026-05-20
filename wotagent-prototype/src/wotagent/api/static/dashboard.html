@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WoTAgent 智能家居面板</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; height: 100vh; display: flex; flex-direction: column; }
+  .header { background: linear-gradient(135deg, #1e293b, #0f172a); padding: 12px 24px; border-bottom: 1px solid #334155; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+  .header h1 { font-size: 18px; font-weight: 600; }
+  .header .badge { font-size: 11px; padding: 3px 10px; border-radius: 12px; background: #22c55e; color: #052e16; }
+  .main { display: flex; flex: 1; overflow: hidden; }
+  .left { flex: 2; overflow-y: auto; padding: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-content: start; }
+  .right { width: 380px; flex-shrink: 0; border-left: 1px solid #334155; display: flex; flex-direction: column; overflow: hidden; }
+  .right-panel { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+  .right-panel:first-child { border-bottom: 1px solid #334155; }
+  .right-panel h3 { font-size: 13px; font-weight: 500; color: #94a3b8; padding: 10px 14px 6px; flex-shrink: 0; }
+  .right-panel .scroll { flex: 1; overflow-y: auto; padding: 0 14px 8px; }
+  .room { background: #1e293b; border-radius: 10px; padding: 12px; border: 1px solid #334155; }
+  .room h2 { font-size: 13px; font-weight: 500; color: #94a3b8; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #334155; }
+  .room.full { grid-column: 1 / -1; }
+  .devices { display: flex; flex-wrap: wrap; gap: 6px; }
+  .device { background: #0f172a; border-radius: 6px; padding: 8px 10px; min-width: 90px; flex: 1 0 auto; border: 1px solid #1e293b; transition: all 0.3s; cursor: default; }
+  .device.on { border-color: #22c55e; }
+  .device.off { border-color: #334155; opacity: 0.6; }
+  .device.alert { border-color: #ef4444; animation: pulse 1.5s infinite; }
+  .device .icon { font-size: 18px; margin-bottom: 2px; }
+  .device .name { font-size: 11px; color: #64748b; }
+  .device .value { font-size: 14px; font-weight: 600; margin-top: 1px; }
+  .device .value.temp { color: #f97316; }
+  .device .value.humid { color: #38bdf8; }
+  .device .value.on-state { color: #22c55e; }
+  .device .value.off-state { color: #475569; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+  .chat-msg { margin-bottom: 8px; }
+  .chat-msg .who { font-size: 11px; font-weight: 600; margin-bottom: 2px; }
+  .chat-msg.user .who { color: #60a5fa; }
+  .chat-msg.agent .who { color: #22c55e; }
+  .chat-msg .bubble { font-size: 13px; padding: 6px 10px; border-radius: 8px; line-height: 1.5; }
+  .chat-msg.user .bubble { background: #1e3a5f; color: #e2e8f0; }
+  .chat-msg.agent .bubble { background: #1a2e1a; color: #e2e8f0; }
+  .event-entry { font-size: 11px; color: #64748b; padding: 3px 0; font-family: 'Cascadia Code', 'Consolas', monospace; border-bottom: 1px solid #1e293b; }
+  .event-entry:hover { color: #94a3b8; }
+  .chat-bar { display: flex; gap: 8px; padding: 10px 14px; background: #1e293b; border-top: 1px solid #334155; flex-shrink: 0; }
+  .chat-bar input { flex: 1; background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 8px 12px; color: #e2e8f0; font-size: 13px; outline: none; }
+  .chat-bar input:focus { border-color: #3b82f6; }
+  .chat-bar button { background: #3b82f6; color: white; border: none; border-radius: 6px; padding: 8px 16px; font-size: 13px; cursor: pointer; white-space: nowrap; }
+  .chat-bar button:hover { background: #2563eb; }
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>🏠 WoTAgent · 智能家居面板</h1>
+  <div><span class="badge" id="statusBadge">● 在线</span></div>
+</div>
+
+<div class="main">
+  <!-- Left: Floor Plan -->
+  <div class="left" id="dashboard">
+    <div class="room full" id="room-living_room"><h2>🛋️ 客厅</h2><div class="devices"></div></div>
+    <div class="room" id="room-bedroom1"><h2>🛏️ 主卧</h2><div class="devices"></div></div>
+    <div class="room" id="room-bathroom1"><h2>🚿 主卫</h2><div class="devices"></div></div>
+    <div class="room" id="room-kitchen"><h2>🍳 厨房</h2><div class="devices"></div></div>
+    <div class="room" id="room-bathroom2"><h2>🚻 客卫</h2><div class="devices"></div></div>
+    <div class="room" id="room-bedroom2"><h2>🛏️ 次卧</h2><div class="devices"></div></div>
+    <div class="room" id="room-study"><h2>📚 书房</h2><div class="devices"></div></div>
+  </div>
+
+  <!-- Right: Chat History + Event Log -->
+  <div class="right">
+    <div class="right-panel" style="flex:3">
+      <h3>💬 对话记录</h3>
+      <div class="scroll" id="chatHistory"></div>
+    </div>
+    <div class="right-panel" style="flex:2">
+      <h3>📋 事件日志</h3>
+      <div class="scroll" id="eventLog"></div>
+    </div>
+  </div>
+</div>
+
+<div class="chat-bar">
+  <input id="chatInput" placeholder="输入指令，如：把客厅灯打开、空调调到26度…" onkeydown="if(event.key==='Enter')sendChat()">
+  <button onclick="sendChat()">发送</button>
+</div>
+
+<script>
+const DEVICE_ICONS = {
+  'light': '💡', 'ac': '❄️', 'tv': '📺', 'purifier': '🌬️',
+  'humidifier': '💧', 'fan': '🌀', 'exhaust': '💨',
+  'gas_sensor': '⚠️', 'default': '🔌'
+};
+const SSE_SESSION = 'web_ui';
+
+// ── Device rendering ──
+
+function deviceIcon(devId) {
+  for (const [k, v] of Object.entries(DEVICE_ICONS))
+    if (devId.startsWith(k)) return v;
+  return DEVICE_ICONS.default;
+}
+
+function deviceValue(dev) {
+  const reallyOn = dev.on === true || dev.on === 'true' || (dev.brightness != null && dev.brightness > 0);
+  if (reallyOn) {
+    if (dev.currentTemperature != null) return { text: `${dev.currentTemperature}°C`, cls: 'temp' };
+    if (dev.currentHumidity != null) return { text: `${dev.currentHumidity}%`, cls: 'humid' };
+    if (dev.brightness != null) return { text: `${dev.brightness}%`, cls: 'on-state' };
+    return { text: '🟢 开', cls: 'on-state' };
+  }
+  if (dev.currentTemperature != null) return { text: `${dev.currentTemperature}°C`, cls: 'temp' };
+  if (dev.currentHumidity != null) return { text: `${dev.currentHumidity}%`, cls: 'humid' };
+  if (dev.gasLevel != null) return { text: `燃气 ${dev.gasLevel}`, cls: dev.gasLevel > 20 ? 'on-state' : 'temp' };
+  if (dev.pm25 != null) return { text: `PM2.5 ${dev.pm25}`, cls: dev.pm25 > 80 ? 'temp' : 'on-state' };
+  return { text: '⚫ 关', cls: 'off-state' };
+}
+
+function isAlert(dev) {
+  return dev.alarm === true || (dev.gasLevel != null && dev.gasLevel > 30);
+}
+
+function updateDevice(devId, state) {
+  let card = document.querySelector(`[data-device="${devId}"]`);
+  if (!card) {
+    const roomEl = document.getElementById(`room-${state._location || 'living_room'}`);
+    if (!roomEl) return;
+    const container = roomEl.querySelector('.devices');
+    card = document.createElement('div');
+    card.className = 'device';
+    card.dataset.device = devId;
+    card.innerHTML = '<div class="icon"></div><div class="name"></div><div class="value"></div>';
+    container.appendChild(card);
+  }
+  const isOn = state.on === true || state.on === 'true' || (state.brightness != null && state.brightness > 0);
+  card.className = 'device' + (isAlert(state) ? ' alert' : isOn ? ' on' : ' off');
+  card.querySelector('.icon').textContent = deviceIcon(devId);
+  card.querySelector('.name').textContent = devId;
+  const v = deviceValue(state);
+  const valEl = card.querySelector('.value');
+  valEl.textContent = v.text;
+  valEl.className = 'value ' + v.cls;
+}
+
+async function refreshDevices() {
+  const [stateRes, devRes] = await Promise.all([fetch('/api/perception/state'), fetch('/api/devices')]);
+  const stateData = await stateRes.json();
+  const devData = await devRes.json();
+  const tdMap = {};
+  for (const d of devData.devices || []) tdMap[d.id] = d;
+  for (const [devId, state] of Object.entries(stateData.devices || {})) {
+    if (tdMap[devId]) state._location = tdMap[devId].location;
+    updateDevice(devId, state);
+  }
+}
+
+// ── Chat UI ──
+
+let _currentMsgEl = null;      // agent message bubble being streamed into
+let _currentThinking = '';     // accumulated thinking text
+let _thinkingEl = null;        // collapsible thinking element
+let _activeRun = false;        // true while a agent run is in progress
+
+function addChatMessage(who, text, isDelta = false) {
+  const el = document.getElementById('chatHistory');
+  if (who === 'agent' && isDelta && _currentMsgEl) {
+    // Append to existing agent bubble
+    const bubble = _currentMsgEl.querySelector('.bubble');
+    bubble.textContent += text;
+    el.scrollTop = el.scrollHeight;
+    return;
+  }
+  // New message
+  const msg = document.createElement('div');
+  msg.className = `chat-msg ${who}`;
+  const label = who === 'user' ? '👤 你' : '🤖 智能体';
+  let extra = '';
+  if (who === 'agent') extra = '<div class="thinking" style="display:none"></div>';
+  msg.innerHTML = `<div class="who">${label}</div><div class="bubble">${text}</div>${extra}`;
+  el.appendChild(msg);
+  el.scrollTop = el.scrollHeight;
+  if (who === 'agent') { _currentMsgEl = msg; _thinkingEl = msg.querySelector('.thinking'); }
+  // Trim excess
+  if (el.children.length > 100) el.firstChild.remove();
+}
+
+function showThinking(text) {
+  _currentThinking += text;
+  if (_thinkingEl) {
+    if (_thinkingEl.style.display === 'none') {
+      _thinkingEl.style.display = 'block';
+      _thinkingEl.innerHTML = `<details><summary>🤔 思考中</summary><pre style="font-size:11px;color:#94a3b8;margin:4px 0">${_currentThinking}</pre></details>`;
+    } else {
+      _thinkingEl.querySelector('pre').textContent = _currentThinking;
+    }
+  }
+}
+
+function addEventLog(label, raw) {
+  const el = document.getElementById('eventLog');
+  let data;
+  try { data = JSON.parse(raw); } catch { data = raw; }
+  const text = typeof data === 'object' ? JSON.stringify(data).slice(0, 300) : String(raw).slice(0, 300);
+  const entry = document.createElement('div');
+  entry.className = 'event-entry';
+  entry.textContent = `[${new Date().toLocaleTimeString()}] ${label}: ${text}`;
+  el.appendChild(entry);
+  el.scrollTop = el.scrollHeight;
+  if (el.children.length > 200) el.firstChild.remove();
+}
+
+// ── SSE events from agent ──
+
+function connectSSE() {
+  const evtSource = new EventSource('/api/events/all');
+
+  evtSource.addEventListener('wot.session.started', e => {
+    _activeRun = true;
+    _currentThinking = '';
+    _currentMsgEl = null;
+    _thinkingEl = null;
+    addEventLog('🚀 会话开始', e.data);
+    addChatMessage('agent', '⏳ 处理中...');
+  });
+
+  evtSource.addEventListener('wot.agent.plan', e => {
+    try {
+      const d = JSON.parse(e.data);
+      const plan = d.data || {};
+      addEventLog('📋 计划', `intent=${plan.intent} rationale=${plan.rationale}`);
+      // Show plan as thinking detail
+      showThinking(`[Plan] ${plan.rationale}\nintent: ${plan.intent}\n`);
+    } catch { }
+  });
+
+  evtSource.addEventListener('wot.agent.thought', e => {
+    try {
+      const d = JSON.parse(e.data);
+      const content = (d.data && d.data.content) || '';
+      showThinking(content);
+    } catch { }
+  });
+
+  evtSource.addEventListener('wot.agent.action.started', e => {
+    try {
+      const d = JSON.parse(e.data);
+      const act = d.data || {};
+      addEventLog('🔧 工具', `${act.action} → ${act.device || act.device_id}`);
+    } catch { }
+  });
+
+  evtSource.addEventListener('wot.agent.action.completed', e => {
+    try {
+      const d = JSON.parse(e.data);
+      const act = d.data || {};
+      addEventLog('✅ 工具完成', `${act.action} → ${act.device || act.device_id}`);
+    } catch { }
+  });
+
+  evtSource.addEventListener('wot.agent.action.failed', e => {
+    try {
+      const d = JSON.parse(e.data);
+      addEventLog('❌ 工具失败', (d.data && d.data.error) || '');
+    } catch { }
+  });
+
+  evtSource.addEventListener('wot.agent.response', e => {
+    // Final response — replace the "processing" bubble
+    try {
+      const d = JSON.parse(e.data);
+      const text = (d.data && d.data.response) || '';
+      if (text && _currentMsgEl) {
+        _currentMsgEl.querySelector('.bubble').textContent = text;
+      } else if (text) {
+        addChatMessage('agent', text);
+      }
+    } catch { }
+  });
+
+  evtSource.addEventListener('wot.agent.error', e => {
+    try {
+      const d = JSON.parse(e.data);
+      const err = (d.data && d.data.error) || '未知错误';
+      if (_currentMsgEl) {
+        _currentMsgEl.querySelector('.bubble').textContent = `⚠️ ${err}`;
+      } else {
+        addChatMessage('agent', `⚠️ ${err}`);
+      }
+      addEventLog('❌ 错误', err);
+    } catch { }
+    _activeRun = false;
+  });
+
+  evtSource.addEventListener('wot.session.ended', e => {
+    _activeRun = false;
+    addEventLog('🏁 会话结束', e.data);
+    setTimeout(refreshDevices, 500);
+  });
+
+  evtSource.addEventListener('wot.perception.rule_triggered', e => {
+    try {
+      const d = JSON.parse(e.data);
+      const plan = (d.data && d.data.plan) || {};
+      addEventLog('⚡ 规则触发', `${d.data.rule}: ${d.data.description}`);
+      // Show auto-trigger as system message
+      addChatMessage('agent', `⚡ [自动] ${d.data.description} (${d.data.property}=${d.data.value})`);
+    } catch { }
+  });
+
+  // Token-level streaming from executor/responder
+  evtSource.onmessage = e => {
+    if (_activeRun && e.data) {
+      try {
+        // Catch-all: raw data for debug
+      } catch { }
+    }
+  };
+
+  evtSource.onerror = () => {
+    document.getElementById('statusBadge').textContent = '⚠️ 离线';
+    setTimeout(connectSSE, 3000);
+  };
+}
+
+// ── Chat send (non-blocking) ──
+
+async function sendChat() {
+  const input = document.getElementById('chatInput');
+  const msg = input.value.trim();
+  if (!msg || _activeRun) return;
+  input.value = '';
+  addChatMessage('user', msg);
+  addEventLog('👤 用户', msg);
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg, session_id: SSE_SESSION, role: 'operator' })
+    });
+    const data = await res.json();
+    addEventLog('📤 已提交', `session=${data.session_id}`);
+  } catch (e) {
+    addEventLog('❌ 提交失败', e.message);
+  }
+}
+
+// ── Initial load ──
+
+async function loadInitialState() {
+  await refreshDevices();
+}
+
+loadInitialState().then(() => { setInterval(refreshDevices, 5000); });
+connectSSE();
+</script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "@context": "https://www.w3.org/2022/wot/td/v1.1",
+  "id": "urn:dev:wot:ac-002",
+  "title": "Bedroom1AC",
+  "location": "bedroom1",
+  "capabilities": ["temperature"],
+  "actions": {
+    "turnOn": { "input": { "type": "boolean" } },
+    "setTemperature": { "input": { "type": "number" } },
+    "setMode": { "input": { "type": "string" } }
+  },
+  "properties": {
+    "on": { "type": "boolean" },
+    "currentTemperature": { "type": "number" },
+    "targetTemp": { "type": "number" },
+    "mode": { "type": "string" }
+  }
+}

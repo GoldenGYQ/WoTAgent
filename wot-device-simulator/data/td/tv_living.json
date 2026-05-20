@@ -1,0 +1,15 @@
+{
+  "@context": "https://www.w3.org/2022/wot/td/v1.1",
+  "id": "urn:dev:wot:tv-001",
+  "title": "LivingRoomTV",
+  "location": "living_room",
+  "capabilities": ["entertainment"],
+  "actions": {
+    "turnOn": { "input": { "type": "boolean" } },
+    "setVolume": { "input": { "type": "number" } }
+  },
+  "properties": {
+    "on": { "type": "boolean" },
+    "volume": { "type": "number" }
+  }
+}

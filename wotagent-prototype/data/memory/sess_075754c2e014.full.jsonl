@@ -1,0 +1,6 @@
+{"event": "session_start", "ts": 1779281304.190229, "model": "deepseek-v4-flash", "role": "operator"}
+{"event": "user_message", "ts": 1779281304.190229, "content": "hi"}
+{"event": "plan", "ts": 1779281305.2169569, "intent": "chat", "rationale": "用户只是打招呼，不涉及任何设备或环境。", "steps": []}
+{"event": "llm_input", "ts": 1779281305.2199616, "agent": "responder", "messages": [{"role": "", "content": "[SystemMessage(content=\"You are a Web of Things (WoT) smart-home assistant.\\n\\n## Identity\\n- **Role**: operator\\n- **Session**: sess_075754c2e014\\n\\n## Instructions\\n- Respond naturally and helpfully.\\n- You can discuss IoT devices, but no tools are available in this mode.\\n- If the user asks to control or query devices, let them know you'll handle it.\\n\\n## RBAC\\nYour current role is **operator**.\\n\\nYou can control devices.\", additional_kwargs={}, response_metadata={}), HumanMessage(content='hi', additional_kwargs={}, response_metadata={}, id='83061662-689e-4e94-8aec-535c5095e887')]"}]}
+{"event": "assistant_response", "ts": 1779281307.2353425, "content": "Hello! How can I help you with your smart home today?"}
+{"event": "session_end", "ts": 1779281307.2353425, "duration": 3.0451135635375977}

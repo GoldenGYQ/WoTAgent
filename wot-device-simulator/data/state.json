@@ -1,0 +1,85 @@
+{
+  "devices": {
+    "ac-002": {
+      "on": false,
+      "currentTemperature": 26.9,
+      "targetTemp": 25.8,
+      "mode": ""
+    },
+    "ac-003": {
+      "on": false,
+      "currentTemperature": 24.6,
+      "targetTemp": 24.3,
+      "mode": ""
+    },
+    "exhaust-002": {
+      "on": false,
+      "speed": 0
+    },
+    "exhaust-003": {
+      "on": false,
+      "speed": 0
+    },
+    "exhaust-001": {
+      "on": false,
+      "speed": 0
+    },
+    "fan-001": {
+      "on": false,
+      "speed": 0
+    },
+    "gas_sensor-001": {
+      "gasLevel": 0,
+      "alarm": false
+    },
+    "humidifier-001": {
+      "on": false,
+      "currentHumidity": 41.6,
+      "mistLevel": 0
+    },
+    "light-006": {
+      "on": false,
+      "brightness": 0
+    },
+    "light-007": {
+      "on": false,
+      "brightness": 0
+    },
+    "light-002": {
+      "on": false,
+      "brightness": 0
+    },
+    "light-003": {
+      "on": false,
+      "brightness": 0
+    },
+    "light-005": {
+      "on": false,
+      "brightness": 0
+    },
+    "light-001": {
+      "on": false,
+      "brightness": 0
+    },
+    "light-004": {
+      "on": false,
+      "brightness": 0
+    },
+    "purifier-001": {
+      "on": false,
+      "pm25": 0,
+      "speed": ""
+    },
+    "ac-001": {
+      "on": false,
+      "currentTemperature": 28.2,
+      "targetTemp": 24.7,
+      "mode": ""
+    },
+    "tv-001": {
+      "on": false,
+      "volume": 0
+    }
+  },
+  "saved_at": 1779269595.307559
+}

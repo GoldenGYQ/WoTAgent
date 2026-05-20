@@ -1,0 +1,68 @@
+# --- Environment ---
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+env/
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage/
+htmlcov/
+
+# --- Node.js / Frontend ---
+node_modules/
+frontend/wot-vue/node_modules/
+frontend/wot-vue/dist/
+*.tsbuildinfo
+
+# --- Logs ---
+*.log
+wagent*.log
+
+# --- Data & State ---
+data/memory/
+data/state.db
+data/state.db-*
+chroma_db/
+
+# --- Model files ---
+*.gguf
+*.bin
+*.onnx
+*.pt
+*.pth
+models/
+ollama_models/
+
+# --- IDE & tools ---
+.vscode/
+.idea/
+.claude/
+.claude_settings.json
+
+# --- OS ---
+Thumbs.db
+.DS_Store
+*.swp
+*.swo
+*~
+
+# --- Project specific ---
+wot-device-simulator/*.egg-info/
+wot-device-simulator/.venv/
+
+# --- Thesis / defense documents (NOT part of this project) ---
+预答辩*/

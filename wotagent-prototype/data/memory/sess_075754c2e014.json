@@ -1,0 +1,10 @@
+[
+  {
+    "type": "human",
+    "content": "hi"
+  },
+  {
+    "type": "ai",
+    "content": "Hello! How can I help you with your smart home today?"
+  }
+]

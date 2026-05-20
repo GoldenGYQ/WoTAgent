@@ -1,0 +1,38 @@
+[project]
+name = "wotagent-prototype"
+version = "0.2.0"
+description = "WoTAgent — Event-driven IoT agent powered by LangChain 1.3+"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.110.0",
+  "uvicorn>=0.30.0",
+  "pydantic>=2.7.0",
+  "python-dotenv>=1.0.0",
+  "langchain>=1.0.0",
+  "langchain-openai>=0.1.0",
+  "langchain-community>=0.1.0",
+  "langchain-huggingface>=0.1.0",
+  "langchain-chroma>=0.1.0",
+  "langgraph>=1.0.0",
+  "sentence-transformers>=3.0.0",
+  "chromadb>=0.5.0",
+  "fastmcp>=1.0.0",
+  "psutil>=5.9.0",
+  "pytest>=8.2.0",
+  "httpx>=0.27.0",
+  "sse-starlette>=2.0.0",
+  "websockets>=12.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+
+[project.scripts]
+wotagent = "wotagent.cli:main"
