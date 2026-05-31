@@ -10,9 +10,17 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**Event-driven IoT Smart-Home Agent** — a multi-agent LLM system that understands natural language commands, controls IoT devices via the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/), streams real-time events to a Vue dashboard, and runs automated environment monitoring.
+**Event-driven IoT Smart-Home Agent** — control your devices with natural language, and let the AI understand, plan, and execute. Say "set the living room light to 30%" or "I'm hot" — the Agent handles the rest.
 
-Built on **LangChain 1.3+** with a three-agent pipeline (Intent Classifier → Executor → Observer + Responder shortcut), **FastAPI** WebSocket server, and a **Vue 3** frontend.
+Built on **LangChain 1.3+** with a three-agent pipeline (Intent Classifier → Executor → Observer + Responder shortcut), a **FastAPI** WebSocket server, and a **Vue 3** dashboard.
+
+### Key Capabilities
+
+- **Natural language control**: "set the living room light to 30%" — the Agent classifies the intent, locates the device, executes the action, and returns a structured confirmation
+- **Multi-turn conversation**: "I'm hot" → Agent asks which room → "living room" — it correctly continues the AC control intent instead of drifting into casual chat
+- **Real-time visibility**: The frontend streams every step — intent classification, tool calls, execution results — nothing happens in a black box
+- **Dual-mode deployment**: stdio mode auto-spawns the simulator during development (one terminal, zero config); HTTP mode connects to a remote simulator in production
+- **Automated perception**: Background polling evaluates device states against rules — pure Python, zero LLM tokens. High temperature? Turn on the AC. Low humidity? Start the humidifier.
 
 ---
 
