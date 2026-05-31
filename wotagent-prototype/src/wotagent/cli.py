@@ -42,6 +42,9 @@ ENABLE_THINKING={thinking}
 # --- Perception ---
 ENABLE_PERCEPTION_AUTO_EXEC={auto_exec}
 
+# --- MCP Transport ---
+MCP_TRANSPORT_MODE=stdio
+
 # --- Embeddings (for RAG) ---
 EMBED_PROVIDER=hf
 EMBED_MODEL=BAAI/bge-small-zh-v1.5

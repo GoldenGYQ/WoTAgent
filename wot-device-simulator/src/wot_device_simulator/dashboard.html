@@ -441,7 +441,7 @@
         <p class="subtitle">可视化设备、手动改环境、注入事件、拉取天气并映射到仿真状态。这里不是表单页，而是一个可以直接盯着设备跑的控制面板。</p>
         <div class="hero-actions">
           <button class="btn-primary" onclick="refreshAll()">刷新全局</button>
-          <button class="btn-secondary" onclick="connectWs()">连接事件流</button>
+          <button class="btn-secondary" onclick="togglePoll()">事件轮询</button>
           <button class="btn-ghost" onclick="applyWeatherQuick()">一键天气映射</button>
           <button class="btn-soft" onclick="injectMorningScene()">早晨场景</button>
           <button class="btn-soft" onclick="injectNightScene()">夜晚场景</button>
@@ -578,8 +578,7 @@
               <div class="desc">设备控制、环境变更、规则触发都会在这里滚动。</div>
             </div>
             <div class="toolbar">
-              <button class="btn-ghost" onclick="connectWs()">连接</button>
-              <button class="btn-ghost" onclick="disconnectWs()">断开</button>
+              <button class="btn-ghost" onclick="togglePoll()" id="pollBtn">轮询中</button>
             </div>
           </div>
           <div class="event-feed" id="events"></div>
@@ -609,12 +608,13 @@
   </div>
 
   <script>
-    let ws = null;
     let allDevices = [];
     let allState = {};
     let recentEvents = [];
     let selectedRoom = 'all';
     let selectedDeviceId = '';
+    let pollTimer = null;
+    let pollEnabled = true;
 
     function json(value) {
       return JSON.stringify(value, null, 2);
@@ -1088,37 +1088,34 @@
       await refreshState();
     }
 
-    function connectWs() {
-      if (ws) return;
-      ws = new WebSocket(`ws://${location.host}/ws/events`);
-      ws.onmessage = (m) => {
-        try {
-          const evt = JSON.parse(m.data);
-          recentEvents.unshift(evt);
-          recentEvents = recentEvents.slice(0, 50);
-          renderEvents();
-          updateStats();
-        } catch {
-          // ignore malformed frames
-        }
-      };
-      ws.onclose = () => { ws = null; };
-      ws.onerror = () => { document.getElementById('heroStatus').textContent = '状态：事件流连接异常'; };
-      document.getElementById('heroStatus').textContent = '状态：事件流已连接';
+    function startPoll() {
+      if (pollTimer) return;
+      pollEnabled = true;
+      pollTimer = setInterval(refreshEvents, 3000);
+      document.getElementById('pollBtn').textContent = '轮询中';
+      document.getElementById('pollBtn').className = 'btn-ghost';
+      document.getElementById('heroStatus').textContent = '状态：事件轮询已启动（3s）';
     }
 
-    function disconnectWs() {
-      if (ws) {
-        ws.close();
-        ws = null;
+    function stopPoll() {
+      pollEnabled = false;
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
       }
-      document.getElementById('heroStatus').textContent = '状态：事件流已断开';
+      document.getElementById('pollBtn').textContent = '已暂停';
+      document.getElementById('pollBtn').className = 'btn-soft';
+      document.getElementById('heroStatus').textContent = '状态：事件轮询已暂停';
+    }
+
+    function togglePoll() {
+      if (pollTimer) stopPoll(); else startPoll();
     }
 
     async function init() {
       await refreshAll();
       await refreshEvents();
-      connectWs();
+      startPoll();
     }
 
     init();

@@ -1,5 +1,7 @@
 # WoTAgent Architecture
 
+[English](ARCHITECTURE.md) | [简体中文](ARCHITECTURE.zh-CN.md)
+
 ## Overview
 
 WoTAgent is an event-driven IoT smart-home agent built on LangChain 1.3+/LangGraph. It uses an **intent-classification-first pipeline** (Intent Classifier + Responder/Executor/Observer) to decouple routing, device control, and response formatting, plus a **rule-based Perception Engine** for automated environment monitoring.

@@ -526,7 +526,7 @@ async def invoke_agent_stream(
         from ..perception import get_perception_engine
         engine = get_perception_engine(auto_start=False)
         if engine.is_running:
-            perception_ctx = engine.get_context()
+            perception_ctx = await engine.get_context()
     except Exception:
         pass
 

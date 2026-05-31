@@ -1,43 +1,17 @@
 """Perception engine — background environment monitoring and rule evaluation.
 
-Architecture::
-
-                    ┌──────────────────────────────────┐
-                    │       PerceptionEngine            │
-                    │  ┌──────────┐   ┌──────────────┐  │
-                    │  │ drift()  │   │ evaluate()   │  │
-                    │  │ (simulate│   │ (match rules) │  │
-                    │  │  change) │   └──────┬───────┘  │
-                    │  └──────────┘          │          │
-                    │         │              ▼          │
-                    │         │      ┌──────────────┐  │
-                    │         │      │ emit Plan via │  │
-                    │         │      │  EventBus     │  │
-                    │         │      └──────────────┘  │
-                    └─────────┼────────────────────────┘
-                              │
-                              ▼
-                    ┌──────────────────┐
-                    │  Executor → Obs  │ (skips Planner)
-                    └──────────────────┘
+All device state queries go through MCP to the simulator project.
+No direct imports from ``wot-device-simulator``.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import sys
-from pathlib import Path
 from typing import Any
 
 from ..events import Event, get_bus
 from . import rules as perception_rules
-
-_SIM_SRC = Path(__file__).resolve().parents[4] / "wot-device-simulator" / "src"
-if _SIM_SRC.is_dir() and str(_SIM_SRC) not in sys.path:
-    sys.path.insert(0, str(_SIM_SRC))
-
-from wot_device_simulator.simulator import DeviceStateStore  # noqa: E402  # type: ignore[reportMissingImports]
 
 EnvironmentRule = Any
 default_rules = perception_rules.default_rules
@@ -49,15 +23,18 @@ logger = logging.getLogger(__name__)
 # Perception engine
 # ---------------------------------------------------------------------------
 
+
 class PerceptionEngine:
     """Background engine that polls device state and evaluates rules.
+
+    All state access is via MCP — no direct simulator dependency.
 
     Usage::
 
         engine = PerceptionEngine(polling_interval=30)
         engine.start()       # launch background asyncio task
         await engine.poll_once()  # manual poll
-        summary = engine.get_context()  # text summary for LLM injection
+        summary = await engine.get_context()  # text summary for LLM injection
         engine.stop()        # cancel background task
     """
 
@@ -71,6 +48,7 @@ class PerceptionEngine:
         self._task: asyncio.Task[None] | None = None
         self._running = False
         self._stats: dict[str, int] = {"polls": 0, "triggers": 0}
+        self._cached_states: dict[str, dict[str, Any]] = {}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -81,7 +59,6 @@ class PerceptionEngine:
         if self._running:
             return
         self._running = True
-        DeviceStateStore.initialize()
         try:
             loop = asyncio.get_event_loop()
         except RuntimeError:
@@ -110,11 +87,48 @@ class PerceptionEngine:
         return dict(self._stats)
 
     # ------------------------------------------------------------------
+    # MCP-backed state access
+    # ------------------------------------------------------------------
+
+    async def _fetch_all_states(self) -> dict[str, dict[str, Any]]:
+        """Fetch all device runtime states via MCP and update local cache."""
+        try:
+            from ..tools.mcp_client import get_mcp_client
+
+            client = await get_mcp_client()
+            result = await client.call_tool("query_all_states", {})
+            text = result.get("text", "")
+            if text:
+                import json
+
+                states = json.loads(text)
+                if isinstance(states, dict):
+                    self._cached_states = states
+                    return states
+        except Exception as exc:
+            logger.debug("MCP query_all_states failed (will retry): %s", exc)
+        return self._cached_states
+
+    async def _trigger_drift(self) -> None:
+        """Trigger one drift cycle via MCP."""
+        try:
+            from ..tools.mcp_client import get_mcp_client
+
+            client = await get_mcp_client()
+            await client.call_tool("drift", {})
+        except Exception as exc:
+            logger.debug("MCP drift failed (will retry): %s", exc)
+
+    async def get_all_states(self) -> dict[str, dict[str, Any]]:
+        """Return all device runtime states (public API, e.g. for HTTP endpoints)."""
+        return await self._fetch_all_states()
+
+    # ------------------------------------------------------------------
     # Core logic
     # ------------------------------------------------------------------
 
     async def _run_loop(self) -> None:
-        """Background loop — drift, evaluate, sleep."""
+        """Background loop — drift via MCP, evaluate rules, sleep."""
         logger.info(
             "Perception engine started | interval=%ds rules=%d",
             self.polling_interval,
@@ -122,7 +136,7 @@ class PerceptionEngine:
         )
         try:
             while self._running:
-                DeviceStateStore.drift()
+                await self._trigger_drift()
                 await self._evaluate_rules()
                 self._stats["polls"] += 1
                 await asyncio.sleep(self.polling_interval)
@@ -131,12 +145,13 @@ class PerceptionEngine:
 
     async def poll_once(self) -> list[dict[str, Any]]:
         """Drift state and evaluate rules once. Returns triggered plans."""
-        DeviceStateStore.drift()
+        await self._trigger_drift()
         self._stats["polls"] += 1
         return await self._evaluate_rules()
 
     async def _evaluate_rules(self) -> list[dict[str, Any]]:
-        """Check all rules; emit events for triggered ones. Return plan list."""
+        """Check all rules against current device states; emit events for triggered ones."""
+        states = await self._fetch_all_states()
         bus = get_bus()
         triggered: list[dict[str, Any]] = []
 
@@ -144,10 +159,8 @@ class PerceptionEngine:
             if not rule.enabled:
                 continue
 
-            prop_val = DeviceStateStore.get_property(
-                rule.condition.device_id,
-                rule.condition.property_name,
-            )
+            device_state = states.get(rule.condition.device_id, {})
+            prop_val = device_state.get(rule.condition.property_name)
             if prop_val is None:
                 continue
 
@@ -189,9 +202,18 @@ class PerceptionEngine:
     # LLM context
     # ------------------------------------------------------------------
 
-    def get_context(self, max_length: int = 500) -> str:
-        """Return a short environment summary for LLM prompt injection."""
-        summary = DeviceStateStore.format_summary()
+    async def get_context(self, max_length: int = 500) -> str:
+        """Return a short environment summary for LLM prompt injection.
+
+        Fetches fresh state via MCP. If MCP is unavailable, returns cached data
+        or empty string.
+        """
+        states = await self._fetch_all_states()
+        parts: list[str] = []
+        for device_id, state in states.items():
+            items = ", ".join(f"{k}={v}" for k, v in state.items())
+            parts.append(f"{device_id}({items})")
+        summary = " | ".join(parts)
         if len(summary) > max_length:
             summary = summary[:max_length] + "..."
         if not summary:

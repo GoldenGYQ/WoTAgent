@@ -226,13 +226,26 @@ async def health():
 
 @app.get("/api/diag")
 async def diag():
-    from ..perception.engine import DeviceStateStore  # type: ignore
-    DeviceStateStore.initialize()
-    device_count = len(DeviceStateStore.get_all())
+    from ..wot import find_devices
+    device_count = len(find_devices())
+    # Check MCP connection status
+    mcp_status = "unknown"
+    try:
+        from ..tools.mcp_client import get_mcp_client
+        client = await get_mcp_client()
+        # Try a lightweight call to check connectivity
+        try:
+            await client.call_tool("list_devices", {})
+            mcp_status = "connected"
+        except Exception:
+            mcp_status = "disconnected"
+    except Exception:
+        mcp_status = "disconnected"
     return {
         "pipeline": "wot_pipeline_main",
         "device_count": device_count,
         "sessions_active": _session_manager.count,
+        "mcp_status": mcp_status,
     }
 
 
@@ -406,7 +419,12 @@ async def session_messages(session_id: str):
 async def list_devices(location: str | None = None):
     """List IoT devices, optionally filtered by location."""
     devices = find_devices(location=location) if location else find_devices()
-    from ..perception.engine import DeviceStateStore  # type: ignore
+    # Get runtime state via perception engine (MCP-backed, no direct SQLite)
+    all_states: dict[str, dict[str, Any]] = {}
+    try:
+        all_states = await _perception_engine.get_all_states()
+    except Exception:
+        pass
     return {
         "devices": [
             {
@@ -415,7 +433,7 @@ async def list_devices(location: str | None = None):
                 "location": d.location,
                 "capabilities": d.capabilities,
                 "actions": [a.name for a in d.actions],
-                "state": DeviceStateStore.get(d.device_id),
+                "state": all_states.get(d.device_id, {}),
             }
             for d in devices
         ]
@@ -425,13 +443,16 @@ async def list_devices(location: str | None = None):
 @app.get("/api/perception/state")
 async def perception_state():
     """Current environment state snapshot from the perception engine."""
-    from ..perception.engine import DeviceStateStore  # type: ignore
-    DeviceStateStore.initialize()
+    all_states: dict[str, dict[str, Any]] = {}
+    try:
+        all_states = await _perception_engine.get_all_states()
+    except Exception:
+        pass
     return {
         "engine_running": _perception_engine.is_running,
         "stats": _perception_engine.stats,
-        "summary": _perception_engine.get_context(),
-        "devices": DeviceStateStore.get_all(),
+        "summary": await _perception_engine.get_context(),
+        "devices": all_states,
     }
 
 

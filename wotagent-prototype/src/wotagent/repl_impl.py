@@ -305,7 +305,7 @@ async def run_repl(
         if raw == "/perception":
             print(f"  Engine: {'RUNNING' if percept_running else 'STOPPED'}")
             print(f"  Polls: {percept_engine.stats['polls']}, Triggers: {percept_engine.stats['triggers']}")
-            ctx = percept_engine.get_context()
+            ctx = await percept_engine.get_context()
             if ctx:
                 print(f"  Environment: {ctx}")
             print()

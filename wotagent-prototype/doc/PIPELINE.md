@@ -1,5 +1,7 @@
 # Multi-Agent Pipeline
 
+[English](PIPELINE.md) | [简体中文](PIPELINE.zh-CN.md)
+
 ## Why Pipeline Instead of Single Agent
 
 A single ReAct agent (the default `create_agent` pattern) works by giving the LLM

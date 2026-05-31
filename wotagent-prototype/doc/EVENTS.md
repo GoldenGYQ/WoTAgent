@@ -1,5 +1,7 @@
 # Event System
 
+[English](EVENTS.md) | [简体中文](EVENTS.zh-CN.md)
+
 ## CloudEvents Format
 
 All agent events follow the [CloudEvents 1.0](https://cloudevents.io/) schema:

@@ -216,7 +216,7 @@ async def get_mcp_client(
     if _mcp_client is None:
         mode = transport_mode or os.getenv("MCP_TRANSPORT_MODE", "stdio")
         if mode.lower() == "http":
-            url = server_url or os.getenv("MCP_SERVER_URL", "http://localhost:8000/mcp")
+            url = server_url or os.getenv("MCP_SERVER_URL", "http://localhost:18080/mcp")
             _mcp_client = MCPToolClient(server_url=url)
         else:
             file_path = os.getenv("MCP_SERVER_FILE", "")

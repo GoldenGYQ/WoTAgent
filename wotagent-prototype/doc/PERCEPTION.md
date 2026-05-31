@@ -1,5 +1,7 @@
 # Perception Agent
 
+[English](PERCEPTION.md) | [简体中文](PERCEPTION.zh-CN.md)
+
 ## Overview
 
 The Perception Agent is a **rule-based environment monitoring engine** — it continuously evaluates device states against predefined rules and triggers automated actions without LLM involvement.

@@ -1,26 +1,33 @@
+"""Simulator REST API + MCP over HTTP — single FastMCP server, no FastAPI wrapper.
+
+All endpoints run on the same FastMCP HTTP server via ``custom_route()``.
+Agent connects to ``/mcp`` (Streamable HTTP).  Dashboard uses REST endpoints.
+"""
+
 from __future__ import annotations
 
-import asyncio
 import json
 import subprocess
 from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from starlette.requests import Request
+from starlette.responses import HTMLResponse, JSONResponse
 
 from .simulator import DeviceStateStore, get_simulator
 from .td import find_devices, get_device_by_id, load_tds
 
-app = FastAPI(
-    title="wot-device-simulator",
-    description="Standalone IoT simulation service",
-    version="0.1.0",
-)
-
+# ── Simulator engine ─────────────────────────────────────────────────────
 _sim = get_simulator(polling_interval=30, auto_start=True)
 
+# ── FastMCP server (MCP tools + REST endpoints in one process) ──────────
+from .mcp_server import _build_server
+
+mcp = _build_server(sim=_sim)
+
+
+# ── Dashboard ────────────────────────────────────────────────────────────
 
 def _dashboard_path() -> Path:
     return Path(__file__).resolve().parent / "dashboard.html"
@@ -32,6 +39,8 @@ def _load_dashboard() -> str:
         return fp.read_text(encoding="utf-8")
     return "<h1>Dashboard not found</h1>"
 
+
+# ── Weather helpers ──────────────────────────────────────────────────────
 
 def _normalize_weather(payload: dict[str, Any], city: str) -> dict[str, Any]:
     cond = (payload.get("current_condition") or [{}])[0]
@@ -70,18 +79,6 @@ def _fetch_weather_shell(city: str) -> dict[str, Any]:
     return _normalize_weather(payload, city)
 
 
-def _parse_bool(v: Any, default: bool = False) -> bool:
-    if isinstance(v, bool):
-        return v
-    if isinstance(v, str):
-        t = v.strip().lower()
-        if t in ("1", "true", "yes", "on"):
-            return True
-        if t in ("0", "false", "no", "off"):
-            return False
-    return default
-
-
 def _parse_value(v: Any) -> Any:
     if isinstance(v, (bool, int, float)):
         return v
@@ -98,38 +95,29 @@ def _parse_value(v: Any) -> Any:
     return v
 
 
-@app.get("/", response_class=HTMLResponse)
-async def dashboard_root() -> str:
-    return _load_dashboard()
+# ── REST endpoints via custom_route ──────────────────────────────────────
 
 
-@app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard_page() -> str:
-    return _load_dashboard()
+@mcp.custom_route("/", methods=["GET"])
+async def dashboard_root(request: Request) -> HTMLResponse:
+    return HTMLResponse(_load_dashboard())
 
 
-@app.get("/api/health")
-async def health() -> dict[str, Any]:
-    return {"status": "ok", "engine_running": _sim.is_running}
+@mcp.custom_route("/dashboard", methods=["GET"])
+async def dashboard_page(request: Request) -> HTMLResponse:
+    return HTMLResponse(_load_dashboard())
 
 
-@app.get("/api/td")
-async def list_tds() -> dict[str, Any]:
-    return {"tds": [td.raw for td in load_tds()]}
+@mcp.custom_route("/api/health", methods=["GET"])
+async def health(request: Request) -> JSONResponse:
+    return JSONResponse({"status": "ok", "engine_running": _sim.is_running})
 
 
-@app.get("/api/td/{device_id}")
-async def get_td(device_id: str) -> dict[str, Any]:
-    td = get_device_by_id(device_id)
-    if td is None:
-        return {"success": False, "error": f"TD '{device_id}' not found"}
-    return {"success": True, "td": td.raw}
-
-
-@app.get("/api/devices")
-async def list_devices(location: str | None = None) -> dict[str, Any]:
+@mcp.custom_route("/api/devices", methods=["GET"])
+async def list_devices(request: Request) -> JSONResponse:
+    location = request.query_params.get("location")
     devices = find_devices(location=location) if location else find_devices()
-    return {
+    return JSONResponse({
         "devices": [
             {
                 "id": d.device_id,
@@ -142,128 +130,124 @@ async def list_devices(location: str | None = None) -> dict[str, Any]:
             }
             for d in devices
         ]
-    }
+    })
 
 
-@app.get("/api/state")
-async def state() -> dict[str, Any]:
+@mcp.custom_route("/api/state", methods=["GET"])
+async def state(request: Request) -> JSONResponse:
     DeviceStateStore.initialize()
-    return {
+    return JSONResponse({
         "summary": _sim.get_context(),
         "stats": _sim.stats,
         "devices": DeviceStateStore.get_all(),
-    }
+    })
 
 
-@app.get("/api/state/{device_id}")
-async def state_by_device(device_id: str) -> dict[str, Any]:
+@mcp.custom_route("/api/state/{device_id}", methods=["GET"])
+async def state_by_device(request: Request) -> JSONResponse:
+    device_id = request.path_params["device_id"]
     DeviceStateStore.initialize()
-    return {
+    return JSONResponse({
         "device_id": device_id,
         "state": DeviceStateStore.get(device_id),
-    }
+    })
 
 
-@app.post("/api/control")
-async def control(payload: dict[str, Any]) -> dict[str, Any]:
-    return await _sim.control_device(
-        device_id=str(payload.get("device_id", "")),
-        action=str(payload.get("action", "")),
-        parameters=payload.get("parameters", {}),
-    )
-
-
-@app.post("/api/poll")
-async def poll_once() -> dict[str, Any]:
+@mcp.custom_route("/api/poll", methods=["POST"])
+async def poll_once(request: Request) -> JSONResponse:
     rules = await _sim.poll_once()
-    return {"triggered": len(rules), "rules": rules}
+    return JSONResponse({"triggered": len(rules), "rules": rules})
 
 
-@app.get("/api/events")
-async def list_events(limit: int = 50) -> dict[str, Any]:
-    return {"events": _sim.recent_events(limit=limit)}
+@mcp.custom_route("/api/events", methods=["GET"])
+async def list_events(request: Request) -> JSONResponse:
+    limit = int(request.query_params.get("limit", 50))
+    return JSONResponse({"events": _sim.recent_events(limit=limit)})
 
 
-@app.post("/api/events/inject")
-async def inject_event(payload: dict[str, Any]) -> dict[str, Any]:
-    event_type = str(payload.get("type", "wot.sim.manual_event"))
-    data = payload.get("data", {}) if isinstance(payload.get("data"), dict) else {}
-    return await _sim.inject_event(event_type=event_type, data=data)
+@mcp.custom_route("/api/events/inject", methods=["POST"])
+async def inject_event(request: Request) -> JSONResponse:
+    body = await request.json()
+    event_type = str(body.get("type", "wot.sim.manual_event"))
+    data = body.get("data", {}) if isinstance(body.get("data"), dict) else {}
+    result = await _sim.inject_event(event_type=event_type, data=data)
+    return JSONResponse(result)
 
 
-@app.post("/api/state/patch")
-async def patch_state(payload: dict[str, Any]) -> dict[str, Any]:
-    device_id = str(payload.get("device_id", ""))
-    prop = str(payload.get("property", ""))
+@mcp.custom_route("/api/state/patch", methods=["POST"])
+async def patch_state(request: Request) -> JSONResponse:
+    body = await request.json()
+    device_id = str(body.get("device_id", ""))
+    prop = str(body.get("property", ""))
     if not device_id or not prop:
-        return {"success": False, "error": "device_id and property are required"}
-    val = _parse_value(payload.get("value"))
-    return await _sim.patch_state(device_id=device_id, property_name=prop, value=val)
+        return JSONResponse({"success": False, "error": "device_id and property are required"})
+    val = _parse_value(body.get("value"))
+    result = await _sim.patch_state(device_id=device_id, property_name=prop, value=val)
+    return JSONResponse(result)
 
 
-@app.post("/api/environment/set")
-async def set_environment(payload: dict[str, Any]) -> dict[str, Any]:
+@mcp.custom_route("/api/environment/set", methods=["POST"])
+async def set_environment(request: Request) -> JSONResponse:
+    body = await request.json()
     values: dict[str, Any] = {}
     for key in ("temperature", "humidity", "pm25", "gasLevel"):
-        if key in payload and payload[key] is not None:
-            values[key] = _parse_value(payload[key])
-    location = payload.get("location")
-    return await _sim.apply_environment(values=values, location=str(location) if location else None)
+        if key in body and body[key] is not None:
+            values[key] = _parse_value(body[key])
+    location = body.get("location")
+    result = await _sim.apply_environment(values=values, location=str(location) if location else None)
+    return JSONResponse(result)
 
 
-@app.get("/api/weather/fetch")
-async def weather_fetch(city: str = "beijing", mode: str = "shell") -> dict[str, Any]:
-    use_shell = str(mode).strip().lower() == "shell"
+@mcp.custom_route("/api/weather/fetch", methods=["GET"])
+async def weather_fetch(request: Request) -> JSONResponse:
+    city = request.query_params.get("city", "beijing")
+    mode = request.query_params.get("mode", "shell")
+    use_shell = mode.strip().lower() == "shell"
     try:
         weather = _fetch_weather_shell(city) if use_shell else _fetch_weather_http(city)
-        return {"success": True, "source": "shell" if use_shell else "http", "weather": weather}
+        return JSONResponse({"success": True, "source": "shell" if use_shell else "http", "weather": weather})
     except Exception as exc:
-        return {"success": False, "error": str(exc)}
+        return JSONResponse({"success": False, "error": str(exc)})
 
 
-@app.post("/api/weather/apply")
-async def weather_apply(payload: dict[str, Any]) -> dict[str, Any]:
-    city = str(payload.get("city", "beijing"))
-    mode = str(payload.get("mode", "shell"))
-    location = payload.get("location")
+@mcp.custom_route("/api/weather/apply", methods=["POST"])
+async def weather_apply(request: Request) -> JSONResponse:
+    body = await request.json()
+    city = str(body.get("city", "beijing"))
+    mode = str(body.get("mode", "shell"))
+    location = body.get("location")
 
     try:
         weather = _fetch_weather_shell(city) if mode == "shell" else _fetch_weather_http(city)
     except Exception as exc:
-        return {"success": False, "error": str(exc)}
+        return JSONResponse({"success": False, "error": str(exc)})
 
     values = {
         "temperature": weather.get("temperature"),
         "humidity": weather.get("humidity"),
     }
     result = await _sim.apply_environment(values=values, location=str(location) if location else None)
-    return {
+    return JSONResponse({
         "success": True,
         "weather": weather,
         "applied": result,
-    }
+    })
 
 
-@app.websocket("/ws/events")
-async def ws_events(websocket: WebSocket):
-    await websocket.accept()
-    q = _sim.subscribe()
-    try:
-        while True:
-            evt = await q.get()
-            await websocket.send_json(evt)
-    except WebSocketDisconnect:
-        pass
-    finally:
-        _sim.unsubscribe(q)
+# ── Legacy alias: POST /api/control (kept for dashboard button) ─────────
 
+@mcp.custom_route("/api/control", methods=["POST"])
+async def control(request: Request) -> JSONResponse:
+    body = await request.json()
+    result = await _sim.control_device(
+        device_id=str(body.get("device_id", "")),
+        action=str(body.get("action", "")),
+        parameters=body.get("parameters", {}),
+    )
+    return JSONResponse(result)
+
+
+# ── Entry point ──────────────────────────────────────────────────────────
 
 def main() -> None:
-    import uvicorn
-
-    uvicorn.run(
-        "wot_device_simulator.service:app",
-        host="127.0.0.1",
-        port=18080,
-        reload=False,
-    )
+    mcp.run(transport="http", host="127.0.0.1", port=18080)

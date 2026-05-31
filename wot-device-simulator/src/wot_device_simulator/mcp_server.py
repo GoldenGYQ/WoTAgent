@@ -27,10 +27,17 @@ from .simulator import DeviceStateStore, get_simulator
 from .td import find_devices, get_device_by_id, load_tds
 
 
-def _build_server():
+def _build_server(sim=None):
+    """Build the FastMCP server with all IoT simulator tools.
+
+    Args:
+        sim: Optional SimulatorEngine instance. If omitted, creates one
+             via the global singleton (``get_simulator(auto_start=True)``).
+    """
     from fastmcp import FastMCP
 
-    sim = get_simulator(auto_start=True)
+    if sim is None:
+        sim = get_simulator(auto_start=True)
     mcp = FastMCP("wot-device-simulator")
 
     @mcp.tool()
@@ -63,6 +70,18 @@ def _build_server():
     def query_state(device_id: str) -> dict[str, Any]:
         DeviceStateStore.initialize()
         return {"device_id": device_id, "state": DeviceStateStore.get(device_id)}
+
+    @mcp.tool()
+    def query_all_states() -> dict[str, dict[str, Any]]:
+        """Return current runtime state for ALL devices in one call."""
+        DeviceStateStore.initialize()
+        return DeviceStateStore.get_all()
+
+    @mcp.tool()
+    def drift() -> dict[str, Any]:
+        """Trigger one drift cycle — simulates environmental changes."""
+        DeviceStateStore.drift()
+        return {"success": True, "message": "Drift cycle completed"}
 
     @mcp.tool()
     async def control_device(device_id: str, action: str, parameters: dict[str, Any] | None = None) -> dict[str, Any]:

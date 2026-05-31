@@ -1,4 +1,9 @@
-"""Tests for the perception module."""
+"""Tests for the perception module.
+
+Note: ``DeviceStateStore`` is owned by ``wot-device-simulator``. Tests for it
+live in that project.  Here we test only rule models and the perception engine
+with mocked MCP calls.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -73,62 +78,39 @@ class TestEnvironmentRule:
 
 
 # ======================================================================
-# DeviceStateStore
+# PerceptionEngine (with mocked MCP)
 # ======================================================================
 
 
-class TestDeviceStateStore:
-    def test_initialise(self):
-        from wotagent.perception import DeviceStateStore
-
-        DeviceStateStore.reset()
-        DeviceStateStore.initialize()
-        state = DeviceStateStore.get_all()
-        assert len(state) >= 3
-        assert "light-001" in state
-        assert "ac-001" in state
-        assert "humidifier-001" in state
-
-    def test_get_property(self):
-        from wotagent.perception import DeviceStateStore
-
-        DeviceStateStore.reset()
-        DeviceStateStore.initialize()
-        temp = DeviceStateStore.get_property("ac-001", "currentTemperature")
-        assert isinstance(temp, float)
-
-    def test_set_property(self):
-        from wotagent.perception import DeviceStateStore
-
-        DeviceStateStore.reset()
-        DeviceStateStore.initialize()
-        DeviceStateStore.set_property("light-001", "on", True)
-        assert DeviceStateStore.get_property("light-001", "on") is True
-
-    def test_drift_changes_values(self):
-        from wotagent.perception import DeviceStateStore
-
-        DeviceStateStore.reset()
-        DeviceStateStore.initialize()
-        before = DeviceStateStore.get_property("ac-001", "currentTemperature")
-        for _ in range(10):
-            DeviceStateStore.drift()
-        after = DeviceStateStore.get_property("ac-001", "currentTemperature")
-        assert before != after or abs(before - after) > 0.01
-
-    def test_format_summary(self):
-        from wotagent.perception import DeviceStateStore
-
-        DeviceStateStore.reset()
-        DeviceStateStore.initialize()
-        summary = DeviceStateStore.format_summary()
-        assert summary
-        assert "ac-001" in summary
+def _mock_states(**overrides) -> dict:
+    """Return a realistic set of device states for testing."""
+    states = {
+        "light-001": {"on": False, "brightness": 0},
+        "ac-001": {"on": False, "currentTemperature": 25.0, "targetTemp": 24.0, "mode": "cool"},
+        "humidifier-001": {"on": False, "currentHumidity": 50.0},
+    }
+    states.update(overrides)
+    return states
 
 
-# ======================================================================
-# PerceptionEngine
-# ======================================================================
+class _MockMCPClient:
+    """Mock MCP client that returns predefined states."""
+
+    def __init__(self, states: dict | None = None):
+        self._states = states or _mock_states()
+
+    async def call_tool(self, tool_name: str, params: dict) -> dict:
+        import json
+
+        if tool_name == "query_all_states":
+            return {"text": json.dumps(self._states)}
+        if tool_name == "drift":
+            return {"text": json.dumps({"success": True})}
+        if tool_name == "query_state":
+            device_id = params.get("device_id", "")
+            state = self._states.get(device_id, {})
+            return {"text": json.dumps({"device_id": device_id, "state": state})}
+        return {"text": "{}"}
 
 
 class TestPerceptionEngine:
@@ -136,14 +118,17 @@ class TestPerceptionEngine:
         """Should not trigger rules at mild temperatures."""
 
         async def run():
-            from wotagent.perception import DeviceStateStore, PerceptionEngine
-
-            DeviceStateStore.reset()
-            DeviceStateStore.initialize()
-            DeviceStateStore.set_property("ac-001", "currentTemperature", 25.0)
-            DeviceStateStore.set_property("humidifier-001", "currentHumidity", 50.0)
+            from wotagent.perception import PerceptionEngine
 
             engine = PerceptionEngine(polling_interval=9999)
+            engine._fetch_all_states = lambda: _MockMCPClient(
+                _mock_states(
+                    ac_001={"on": False, "currentTemperature": 25.0, "targetTemp": 24.0, "mode": "cool"},
+                    humidifier_001={"on": False, "currentHumidity": 50.0},
+                )
+            ).call_tool("query_all_states", {})
+            engine._trigger_drift = lambda: _MockMCPClient().call_tool("drift", {})
+
             triggered = await engine.poll_once()
             assert triggered == []
 
@@ -153,13 +138,16 @@ class TestPerceptionEngine:
         """Trigger high_temperature rule when temp > 32°C."""
 
         async def run():
-            from wotagent.perception import DeviceStateStore, PerceptionEngine
-
-            DeviceStateStore.reset()
-            DeviceStateStore.initialize()
-            DeviceStateStore.set_property("ac-001", "currentTemperature", 36.0)
+            from wotagent.perception import PerceptionEngine
 
             engine = PerceptionEngine(polling_interval=9999)
+            engine._fetch_all_states = lambda: _MockMCPClient(
+                _mock_states(
+                    ac_001={"on": False, "currentTemperature": 36.0, "targetTemp": 24.0, "mode": "cool"},
+                )
+            ).call_tool("query_all_states", {})
+            engine._trigger_drift = lambda: _MockMCPClient().call_tool("drift", {})
+
             for r in engine.rules:
                 if r.name == "high_temperature":
                     r.last_triggered = 0
@@ -174,13 +162,16 @@ class TestPerceptionEngine:
         """Rule should NOT re-trigger within cooldown."""
 
         async def run():
-            from wotagent.perception import DeviceStateStore, PerceptionEngine
-
-            DeviceStateStore.reset()
-            DeviceStateStore.initialize()
-            DeviceStateStore.set_property("ac-001", "currentTemperature", 36.0)
+            from wotagent.perception import PerceptionEngine
 
             engine = PerceptionEngine(polling_interval=9999)
+            engine._fetch_all_states = lambda: _MockMCPClient(
+                _mock_states(
+                    ac_001={"on": False, "currentTemperature": 36.0, "targetTemp": 24.0, "mode": "cool"},
+                )
+            ).call_tool("query_all_states", {})
+            engine._trigger_drift = lambda: _MockMCPClient().call_tool("drift", {})
+
             for r in engine.rules:
                 if r.name == "high_temperature":
                     r.last_triggered = time.time()
@@ -193,14 +184,17 @@ class TestPerceptionEngine:
         asyncio.run(run())
 
     def test_get_context(self):
-        from wotagent.perception import DeviceStateStore, PerceptionEngine
+        async def run():
+            from wotagent.perception import PerceptionEngine
 
-        DeviceStateStore.reset()
-        DeviceStateStore.initialize()
-        engine = PerceptionEngine(polling_interval=9999)
-        ctx = engine.get_context()
-        assert ctx
-        assert "ac-001" in ctx or "Current environment" in ctx
+            engine = PerceptionEngine(polling_interval=9999)
+            engine._fetch_all_states = lambda: _MockMCPClient().call_tool("query_all_states", {})
+
+            ctx = await engine.get_context()
+            assert ctx
+            assert "ac-001" in ctx or "Current environment" in ctx
+
+        asyncio.run(run())
 
     def test_start_stop(self):
         async def run():
@@ -240,6 +234,26 @@ class TestPerceptionEngine:
 
         engine.toggle_rule("test_toggle")
         assert rule.enabled
+
+    def test_get_all_states_returns_cached_on_mcp_fail(self):
+        """get_all_states should return cached data when MCP is unavailable."""
+        async def run():
+            from wotagent.perception import PerceptionEngine
+
+            engine = PerceptionEngine(polling_interval=9999)
+            # Set some cached states
+            engine._cached_states = {
+                "light-001": {"on": True, "brightness": 50},
+            }
+            # Make MCP fail
+            async def _failing_fetch():
+                raise ConnectionError("MCP unavailable")
+            engine._fetch_all_states = _failing_fetch
+
+            states = await engine.get_all_states()
+            assert states == engine._cached_states
+
+        asyncio.run(run())
 
 
 # ======================================================================
