@@ -33,6 +33,20 @@ Unlike the intent-classification step (which uses an LLM for routing), the Perce
         └────────────────┘            └──────────────────┘
 ```
 
+### Auto-Execute Mode (optional, off by default)
+
+When `ENABLE_PERCEPTION_AUTO_EXEC=true` in `.env`, triggered rules automatically run
+``Executor → Observer`` to carry out the action (e.g. turn on the AC). This consumes
+LLM tokens for the Executor and Observer calls.
+
+When disabled (default), rules still fire events to the EventBus and frontend sees them,
+but **no action is taken** — it's monitoring-only mode.
+
+```python
+# .env
+ENABLE_PERCEPTION_AUTO_EXEC=true
+```
+
 ### Two Trigger Paths
 
 | Source | Route | LLM cost |

@@ -191,6 +191,7 @@ WoTAgent/
 | `ENABLE_THINKING` | `true` | DeepSeek chain-of-thought |
 | `ENABLE_PERCEPTION` | `true` | Start perception engine |
 | `PERCEPTION_INTERVAL` | `60` | Polling interval (seconds) |
+| `ENABLE_PERCEPTION_AUTO_EXEC` | `false` | Auto-execute triggered rules via Executor → Observer (requires LLM tokens) |
 | `MCP_TRANSPORT_MODE` | `stdio` | MCP transport (`stdio` / `http`) |
 | `MCP_SERVER_URL` | `http://localhost:8000/mcp` | MCP HTTP server URL |
 

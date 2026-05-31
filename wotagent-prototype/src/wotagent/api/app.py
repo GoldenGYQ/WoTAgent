@@ -6,6 +6,8 @@ Agent produces events → EventBus → WebSocket for real-time chat.
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 import uuid
 from pathlib import Path
 from typing import Any
@@ -15,6 +17,7 @@ import logging
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 logger = logging.getLogger("wotagent.api")
@@ -37,10 +40,10 @@ def _enqueue_latest(queue: asyncio.Queue[Event], evt: Event) -> None:
 _env_path = Path(__file__).resolve().parents[3] / ".env"
 load_dotenv(_env_path, encoding="utf-8")
 
-from ..core import create_wot_pipeline, get_session_manager, invoke_agent, invoke_agent_stream, AgentContext
+from ..core import create_wot_pipeline, execute_plan_directly, get_session_manager, invoke_agent, invoke_agent_stream, AgentContext
 from ..events import Event, get_bus
 from ..logging import configure_logging, install_event_bus_handler
-from ..memory import SessionTranscript
+from ..memory import ConversationMemory, SessionTranscript
 from ..perception import get_perception_engine
 from ..wot import find_devices, load_tds
 
@@ -57,6 +60,36 @@ _session_manager = get_session_manager(timeout_minutes=30)
 
 # Start perception engine
 _perception_engine = get_perception_engine(polling_interval=60, auto_start=True)
+
+# ── Perception auto-execute ────────────────────────────────────────────────
+# When a rule triggers, run Executor → Observer automatically.
+# Controlled by ENABLE_PERCEPTION_AUTO_EXEC env var (default: false).
+_ENABLE_AUTO_EXEC = os.getenv("ENABLE_PERCEPTION_AUTO_EXEC", "false").lower() in ("1", "true", "yes")
+
+if _ENABLE_AUTO_EXEC:
+    bus = get_bus()
+    _auto_exec_memory = ConversationMemory()  # single memory for all auto-exec turns
+
+    async def _on_rule_triggered(evt: Event) -> None:
+        """Handle a perception rule trigger by executing the plan."""
+        plan = evt.data.get("plan")
+        if not plan:
+            return
+        await execute_plan_directly(
+            _pipeline,
+            plan_json=json.dumps(plan, ensure_ascii=False),
+            plan=plan,
+            session_id="perception_auto",
+            user_role="admin",
+            memory=_auto_exec_memory,
+        )
+
+    _auto_exec_unsub = bus.subscribe(_on_rule_triggered, event_type="wot.perception.rule_triggered")
+    logger.info("Perception auto-execution ENABLED (ENABLE_PERCEPTION_AUTO_EXEC=true)")
+else:
+    _auto_exec_unsub = None
+    logger.info("Perception auto-execution DISABLED (default)")
+# ────────────────────────────────────────────────────────────────────────────
 
 # ---------------------------------------------------------------------------
 # FastAPI app
@@ -108,6 +141,84 @@ class SessionInfoResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+
+@app.get("/", response_class=HTMLResponse)
+async def root():
+    return HTMLResponse("""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WoTAgent</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    .container { text-align: center; padding: 2rem; max-width: 600px; }
+    h1 {
+      font-size: 2.5rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, #38bdf8, #818cf8);
+      background-clip: text;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 0.75rem;
+    }
+    .subtitle { color: #94a3b8; font-size: 1.1rem; margin-bottom: 2rem; }
+    .badge {
+      display: inline-block;
+      background: rgba(56, 189, 248, 0.15);
+      color: #38bdf8;
+      padding: 0.3rem 1rem;
+      border-radius: 999px;
+      font-size: 0.85rem;
+      margin-bottom: 2rem;
+    }
+    .links { display: flex; flex-direction: column; gap: 0.75rem; }
+    a {
+      display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+      padding: 0.85rem 1.5rem;
+      border-radius: 12px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      color: #e2e8f0;
+      text-decoration: none;
+      font-size: 1rem;
+      transition: all 0.2s;
+    }
+    a:hover {
+      background: rgba(255,255,255,0.1);
+      border-color: #38bdf8;
+      transform: translateY(-1px);
+    }
+    .footer { margin-top: 2.5rem; color: #475569; font-size: 0.8rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>WoTAgent</h1>
+    <p class="subtitle">Event-driven IoT Smart-Home Agent</p>
+    <div class="badge">&#10003; 服务运行中</div>
+    <div class="links">
+      <a href="/docs">&#128221; API 文档 (Swagger)</a>
+      <a href="/redoc">&#128214; API 文档 (ReDoc)</a>
+      <a href="/api/health">&#128154; 健康检查</a>
+      <a href="/api/diag">&#128202; 运行诊断</a>
+    </div>
+    <p class="footer">WoTAgent v0.3.0 &mdash; FastAPI + LangChain + WebSocket</p>
+  </div>
+</body>
+</html>""")
+
 
 @app.get("/api/health")
 async def health():

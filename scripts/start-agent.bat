@@ -28,10 +28,5 @@ echo [INFO] Syncing backend dependencies...
 uv sync
 if errorlevel 1 exit /b 1
 
-if not exist ".env" if exist ".env.example" (
-  copy /Y ".env.example" ".env" >nul
-  echo [INFO] Created .env from .env.example. Update API key if needed.
-)
-
 echo [INFO] Starting WoTAgent backend on http://127.0.0.1:8000
-uv run --project . wotagent api --host 127.0.0.1 --port 8000
+uv run --project . python -m wotagent.cli api --host 127.0.0.1 --port 8000
