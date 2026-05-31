@@ -23,10 +23,10 @@ All agent events follow the [CloudEvents 1.0](https://cloudevents.io/) schema:
 |------|----------|------|
 | `wot.session.started` | `invoke_agent_stream` / `execute_plan_directly` | Agent invocation begins |
 | `wot.session.ended` | `invoke_agent_stream` / `execute_plan_directly` | Agent invocation ends |
-| `wot.agent.plan` | Intent Classifier / Observer | Structured intent + plan produced |
+| `wot.agent.plan` | Intent Classifier | Structured intent + routing plan produced |
 | `wot.agent.thought` | LLM | DeepSeek reasoning_content (thinking mode) |
 | `wot.agent.token` | Pipeline | Response text fragment (streaming) |
-| `wot.agent.observation` | Executor / Observer | Validation output, tool observations |
+| `wot.agent.observation` | (reserved) | Optional validation/observation event |
 | `wot.agent.action.started` | Executor | A tool call is initiated |
 | `wot.agent.action.completed` | Executor | A tool call succeeds |
 | `wot.agent.action.failed` | Executor | A tool call errors |
@@ -60,8 +60,7 @@ for evt in bus.history(start_cursor=42):
 ```
 
 - `max_history` (default 1000) limits retained events
-- Each event gets a cursor for SSE replay
-- SSE endpoint at `GET /api/events/{session_id}`
+- Each event gets a cursor for history replay
 
 ## Consumer: Logging
 
@@ -114,21 +113,7 @@ The server forwards all `EventBus` events to the WebSocket as JSON messages.
 ← {"type": "event", "event_type": "wot.session.ended", "data": {}, ...}
 ```
 
-The WebSocket is the **primary** transport for the Vue frontend. SSE endpoints
-are retained for backward compatibility and dashboard use.
-
-## Consumer: SSE (legacy, retained for compatibility)
-
-The FastAPI endpoint `GET /api/events/{session_id}` streams events to frontend
-clients using Server-Sent Events:
-
-```
-event: wot.agent.plan
-data: {"specversion":"1.0",...,"data":{"plan":{...}}}
-
-event: wot.agent.action.started
-data: {"specversion":"1.0",...,"data":{"action":"control_device"}}
-```
+The WebSocket is the **primary** transport for the Vue frontend.
 
 ## Event Flow Diagram
 
@@ -146,7 +131,7 @@ invoke_agent_stream()
      │                                │
      ├── executor.astream_events()    ├── WebSocket → Frontend
      │   ├── emit action.started     │
-     │   ├── emit action.completed   ├── SSE → Dashboard (legacy)
+     │   ├── emit action.completed   │
      │   └── emit action.failed      │
      │                               ├── Log → wotagent.log
      ├── emit wot.agent.response     │
@@ -169,10 +154,9 @@ PerceptionEngine.poll_once()
      ├── _evaluate_rules()
      │   └── Condition.evaluate() → True
      │
-     ├── emit wot.perception.rule_triggered  ──┐
-     │    data: {rule, plan, value, threshold}  ├── SSE → Frontend
-     │                                          │
-     ▼                                          │
+     ├── emit wot.perception.rule_triggered     │
+     │    data: {rule, plan, value, threshold}  │
+     ▼                                           │
 execute_plan_directly()                        │
      │                                          │
      ├── emit wot.session.started               │

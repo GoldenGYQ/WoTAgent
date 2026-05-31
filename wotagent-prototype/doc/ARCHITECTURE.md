@@ -2,49 +2,29 @@
 
 ## Overview
 
-WoTAgent is an event-driven IoT smart-home agent built on LangChain 1.3+/LangGraph. It uses a **multi-agent pipeline** (Planner → Executor → Observer) to decouple intent recognition, device control, and result validation, plus a **rule-based Perception Engine** for automated environment monitoring.
+WoTAgent is an event-driven IoT smart-home agent built on LangChain 1.3+/LangGraph. It uses an **intent-classification-first pipeline** (Intent Classifier + Responder/Executor/Observer) to decouple routing, device control, and response formatting, plus a **rule-based Perception Engine** for automated environment monitoring.
 
 ```
-                    ┌──────────────────┐
-                    │  Perception      │  ←── Rule-based (0 LLM tokens)
-                    │  Engine          │
-                    │  (polling loop)  │
-                    └───────┬──────────┘
-                            │ triggered Plan
-                            ▼
-User ──→ ┌─────────────────────────────────────────────────────┐
-          │                   AgentPipeline                     │
-          │                                                     │
-          │  ┌──────────────────┐    ┌──────────────────┐       │
-          │  │ Intent Classifier│───▶│   Executor       │control│
-          │  │ (tool-calling,   │    │ (tools + MCP)    │query  │
-          │  │  temperature=0)  │    └────────┬─────────┘       │
-          │  └────────┬─────────┘             │                 │
-          │           │                       ▼                 │
-          │           │                ┌────────────┐           │
-          │           └─────chat─────▶│  Responder │           │
-          │                           │ (no tools) │           │
-          │                           └────────────┘           │
-          │                                      │             │
-          │                           ┌──────────┘             │
-          │                           ▼                        │
-          │                      ┌──────────┐                  │
-          │                      │ Observer │  ← response      │
-          │                      │(validate │    formatting    │
-          │                      │ & reply) │                  │
-          │                      └──────────┘                  │
-          └─────────────────────────────────────────────────────┘
-                  │              │              │
-                  ▼              ▼              ▼
-              Event Bus ───► WebSocket ──► Frontend (Vue)
-              Event Bus ───► SSE (legacy) ──► Other consumers
-              Event Bus ───► Log ──► wotagent.log
-```
+User message
+  |
+  v
+Intent Classifier (tool-calling, temp=0)
+  |
+  +--> chat -----------> Responder (no tools)
+  |
+  +--> control/query --> Executor (tools + MCP) --> Observer
+
+PerceptionEngine (rule trigger)
+  |
+  +--> pre-structured plan -----> Executor --> Observer
+
+All outputs -> EventBus -> WebSocket (primary) -> Frontend
+             -> Log / Transcript
 ```
 
 Two trigger paths:
-- **User message** → Intent Classifier (tool-calling) → Executor/Observer — full pipeline
-- **Rule triggered** → Executor/Observer directly — Planner/Classifier skipped
+- **User message** → Intent Classifier → Responder for chat, or Executor → Observer for control/query
+- **Rule triggered** → Executor → Observer directly — intent-classification step skipped
 
 ### Intent Continuity
 
@@ -81,7 +61,7 @@ src/wotagent/
 ├── rag/
 │   └── retriever.py   # ChromaDB vector retrieval for TD docs
 ├── api/
-│   └── app.py         # FastAPI server with WebSocket + SSE endpoints
+│   └── app.py         # FastAPI server with WebSocket endpoints
 ├── cli.py             # CLI entry point (repl, api, log subcommands)
 └── logging/
     └── logger.py      # Structured logging with event bus integration
@@ -94,9 +74,8 @@ All agent actions produce CloudEvents on the **EventBus**, which feeds two trans
 | Transport | Endpoint | Status |
 |-----------|----------|--------|
 | WebSocket | `ws://host/ws` | **Primary** — Vue frontend |
-| SSE | `GET /api/events/{session_id}` and `/api/events/all` | **Legacy** — backward compatibility |
 
-WebSocket also accepts command messages (`chat`, `ping`) and routes responses back
+WebSocket accepts command messages (`chat`, `ping`) and routes responses back
 through the same connection, providing a single bidirectional channel.
 
 ## Pipeline Flow
@@ -157,7 +136,7 @@ Step 1 ─── Executor → query_device("temp-001") → "25°C"
 Step 2 ─── Observer → "客厅当前温度25°C"
 ```
 
-### Perception path (rule-triggered, skip Planner)
+### Perception path (rule-triggered, skip intent classification)
 
 ```
 Environment: ac-001 temperature drifts to 33.5°C
@@ -238,7 +217,7 @@ sanitized via `_sanitize()`.
                     │ session_id                   │
                     │ user_role                    │
                     │ user_message                 │
-                    │ plan_json     ← set by       │ Planner / Perception
+                    │ plan_json     ← set by       │ Intent Classifier / Perception
                     │ execution_results ← set by   │ Executor
                     │ perception_context ← set by  │ PerceptionEngine
                     └──────────────────────────────┘
@@ -254,15 +233,15 @@ See [PERCEPTION.md](PERCEPTION.md) for full design.
 Key points:
 - **Zero LLM tokens**: rule evaluation is pure Python comparisons
 - **Background polling**: drifts simulated device states + evaluates rules
-- **Injects context** into Planner system prompt for zero-tool-query awareness
+- **Injects context** into intent-classifier prompt for better follow-up routing
 - **Cooldown mechanism**: prevents rapid re-triggering (default 10 min)
 
 ## Single-Agent vs Multi-Agent
 
 | Aspect | Single ReAct (legacy) | Multi-Agent Pipeline |
 |--------|----------------------|---------------------|
-| How it decides | LLM decides everything in one loop | Planner structures intent first |
-| Tool access | All tools, LLM chooses | Planner: awareness only; Executor: full |
+| How it decides | LLM decides everything in one loop | Intent Classifier routes first |
+| Tool access | All tools, LLM chooses | Responder: none; Executor: full |
 | Chat efficiency | LLM runs tool-calling loop anyway | Responder shortcut skips tools |
 | Observability | One black-box stream | Each phase emits typed events |
 | Failure recovery | LLM may or may not retry | Observer validates and reports |

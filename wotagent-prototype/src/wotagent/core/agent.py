@@ -1,13 +1,13 @@
-"""Multi-agent pipeline: Planner → Executor/Observer with conditional routing.
+"""Multi-agent pipeline with intent-classification-first conditional routing.
 
 Architecture:
 
     User message
          │
          ▼
-    ┌──────────┐
-    │ Planner  │ ── intent analysis → structured plan
-    └────┬─────┘
+    ┌──────────────────┐
+    │ Intent Classifier│ ── intent analysis → structured plan
+    └────────┬─────────┘
          │
     ┌────┴────────────┐
     │ intent=chat     │ intent=control|query
@@ -58,7 +58,7 @@ class AgentContext(BaseModel):
     session_id: str = Field(default="", description="Current session ID")
     user_role: str = Field(default="operator", description="RBAC role")
     user_message: str = Field(default="", description="The raw user message")
-    plan_json: str = Field(default="{}", description="Plan from planner (JSON)")
+    plan_json: str = Field(default="{}", description="Plan from intent classifier or perception rule (JSON)")
     execution_results: str = Field(default="", description="Executor output for observer")
     perception_context: str = Field(default="", description="Current environment state summary")
 
@@ -68,7 +68,7 @@ class AgentContext(BaseModel):
 # ---------------------------------------------------------------------------
 
 class PipelinePlan(BaseModel):
-    """Structured plan output by the Planner agent."""
+    """Structured plan output by the intent-classification stage."""
     intent: str = Field(description="chat | query | control")
     rationale: str = Field(default="", description="Why this plan")
     steps: list[dict[str, Any]] = Field(default_factory=list, description="Action steps")
@@ -165,7 +165,7 @@ def _sanitize(obj: Any) -> Any:
 
     LangChain types (``ToolMessage``, ``AIMessage``, etc.) and any other
     objects that ``json.dumps`` can't handle are converted to strings so they
-    can safely flow through EventBus → WebSocket / SSE.
+    can safely flow through EventBus → WebSocket.
     """
     if obj is None or isinstance(obj, (bool, int, float, str)):
         return obj
@@ -221,7 +221,11 @@ async def _on_agent_event(
 
 @dataclass
 class AgentPipeline:
-    """Container for the four agents that make up the WoT pipeline."""
+    """Container for pipeline roles.
+
+    Note: ``planner`` is currently kept for compatibility and future extension;
+    the active runtime route is intent-classification-first.
+    """
     planner: Any
     executor: Any
     observer: Any
@@ -239,7 +243,7 @@ def create_wot_pipeline(
     """Create the multi-agent pipeline.
 
     Returns an ``AgentPipeline`` with ``.planner``, ``.executor``,
-    ``.observer``, and ``.responder`` attributes.
+    ``.observer``, and ``.responder`` attributes. ``.planner`` is reserved.
     """
     llm = _build_llm(
         model_name=model_name,
@@ -369,7 +373,7 @@ async def execute_plan_directly(
     memory: ConversationMemory | None = None,
 ) -> str:
     """Execute a pre-structured plan (e.g. from perception rules) through
-    Executor → Observer, **skipping the Planner** entirely.
+    Executor → Observer, **skipping intent classification** entirely.
 
     This is the entry point for rule-triggered actions. Returns the final
     response text.
@@ -396,7 +400,7 @@ async def execute_plan_directly(
     exec_final = ""
 
     try:
-        # Phase 1: Executor — run the plan (skip Planner)
+        # Phase 1: Executor — run the pre-structured plan (skip intent classification)
         message = f"Execute this plan: {plan_json}"
         exec_context = AgentContext(
             session_id=session_id,
@@ -501,7 +505,7 @@ async def invoke_agent_stream(
 
     Yields dicts with ``type``:
 
-    - ``"plan"`` — structured plan from planner
+    - ``"plan"`` — structured plan from intent classification
     - ``"thinking"`` — DeepSeek ``reasoning_content``
     - ``"token"`` — a response text fragment
     - ``"wot.agent.action.started/completed/failed"`` — tool events

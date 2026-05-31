@@ -36,7 +36,7 @@ def print_header(thinking: bool, streaming: bool, perception: bool = False) -> N
     badge_str = "  ·  ".join(badges)
     print("  +--------------------------------------------+")
     print("  |     WoTAgent  ·  LangChain 1.3+            |")
-    print("  |  Event-driven IoT Agent with SSE           |")
+    print("  |  Event-driven IoT Agent with WebSocket     |")
     print(f"  |  [{badge_str}]          |")
     print("  |                                            |")
     print("  |  /think  /stream  /devices  /session        |")

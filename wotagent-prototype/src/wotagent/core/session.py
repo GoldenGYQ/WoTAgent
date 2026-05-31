@@ -4,7 +4,7 @@ Each session holds:
 - A LangChain agent instance (CompiledStateGraph)
 - Conversation memory
 - RBAC context (user role)
-- Event cursor for SSE replay
+- Event history cursor for replay
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ class AgentSession:
         )
         self.created_at = datetime.now(timezone.utc)
         self.last_active = self.created_at
-        self.event_cursor = 0  # for SSE replay
+        self.event_cursor = 0  # for event replay
         self.timeout_minutes = timeout_minutes
         self.state = ConversationState()  # intent continuity across turns
 

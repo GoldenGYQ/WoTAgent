@@ -1,7 +1,7 @@
 """WoTAgent — LangChain-powered Web of Things agent with event-driven architecture.
 
 Event-driven architecture:
-  Agent produces events → EventBus → Logging / SSE / Frontend
+    Agent produces events → EventBus → Logging / WebSocket / Frontend
 """
 
 from __future__ import annotations

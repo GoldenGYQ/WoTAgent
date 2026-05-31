@@ -1,12 +1,11 @@
-"""FastAPI application with SSE event streaming.
+"""FastAPI application with WebSocket chat and event streaming.
 
-Agent produces events → EventBus → SSE streaming → Frontend consumes.
+Agent produces events → EventBus → WebSocket for real-time chat.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import uuid
 from pathlib import Path
 from typing import Any
@@ -16,7 +15,6 @@ import logging
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 logger = logging.getLogger("wotagent.api")
@@ -117,7 +115,7 @@ async def health():
 
 @app.get("/api/diag")
 async def diag():
-    from ..perception import DeviceStateStore
+    from ..perception.engine import DeviceStateStore  # type: ignore
     DeviceStateStore.initialize()
     device_count = len(DeviceStateStore.get_all())
     return {
@@ -128,7 +126,7 @@ async def diag():
 
 
 # ---------------------------------------------------------------------------
-# WebSocket endpoint — replaces SSE for real-time chat
+# WebSocket endpoint — primary real-time chat channel
 # ---------------------------------------------------------------------------
 
 
@@ -191,7 +189,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 )
                 session.memory.load()
 
-                # Launch agent — events flow to EventBus → WebSocket forwarder
+                # Launch agent — events flow to EventBus and are forwarded to the WebSocket client
                 asyncio.create_task(_run_agent_task(session, message))
 
                 await websocket.send_json({
@@ -217,13 +215,13 @@ async def websocket_endpoint(websocket: WebSocket):
 async def chat(req: ChatRequest):
     """Send a message to the agent.
 
-    Returns immediately with ``session_id``.  Agent events (plan, thinking,
-    tool calls, response tokens) are streamed asynchronously via the
-    ``/api/events/all`` or ``/api/events/{session_id}`` SSE endpoints.
+    Returns immediately with ``session_id``. Agent events (plan, thinking,
+    tool calls, response tokens) are emitted on the EventBus and consumed
+    by the primary WebSocket channel.
 
     The frontend should listen for ``wot.agent.plan``, ``wot.agent.thought``,
     ``wot.agent.action.*``, ``wot.agent.response``, and ``wot.session.ended``
-    events on its existing SSE connection.
+    events on its WebSocket connection when possible.
     """
     session_id = req.session_id or "web_ui"
     session = _session_manager.get_or_create(
@@ -233,7 +231,7 @@ async def chat(req: ChatRequest):
     )
     session.memory.load()
 
-    # Launch agent in background — events flow to EventBus → SSE
+    # Launch agent in background — events flow to EventBus and are picked up by the active transports
     asyncio.create_task(_run_agent_task(session, req.message))
 
     return {"session_id": session.session_id, "status": "processing"}
@@ -297,7 +295,7 @@ async def session_messages(session_id: str):
 async def list_devices(location: str | None = None):
     """List IoT devices, optionally filtered by location."""
     devices = find_devices(location=location) if location else find_devices()
-    from ..perception import DeviceStateStore
+    from ..perception.engine import DeviceStateStore  # type: ignore
     return {
         "devices": [
             {
@@ -316,7 +314,7 @@ async def list_devices(location: str | None = None):
 @app.get("/api/perception/state")
 async def perception_state():
     """Current environment state snapshot from the perception engine."""
-    from ..perception import DeviceStateStore
+    from ..perception.engine import DeviceStateStore  # type: ignore
     DeviceStateStore.initialize()
     return {
         "engine_running": _perception_engine.is_running,
@@ -358,93 +356,3 @@ async def perception_poll():
     }
 
 
-@app.get("/api/events/{session_id}")
-async def stream_events(session_id: str):
-    """SSE endpoint — streams agent events for a session in real-time.
-
-    The frontend can connect to this endpoint to receive a live feed
-    of agent thoughts, actions, observations, and responses.
-    """
-    bus = get_bus()
-    start_cursor = bus.cursor()
-    queue: asyncio.Queue[Event] = asyncio.Queue(maxsize=100)
-
-    # Subscribe to all events for this session
-    unsub = bus.subscribe(
-        lambda evt: _enqueue_latest(queue, evt) if not evt.session_id or evt.session_id == session_id else None,
-    )
-
-    async def event_generator():
-        try:
-            # Send past events first (replay)
-            for evt in bus.history(start_cursor):
-                if not evt.session_id or evt.session_id == session_id:
-                    yield _format_sse(evt)
-
-            # Stream new events
-            while True:
-                try:
-                    evt = await asyncio.wait_for(queue.get(), timeout=30.0)
-                    if evt.type == "wot.session.ended" and evt.session_id == session_id:
-                        yield _format_sse(evt)
-                        yield "event: done\ndata: \n\n"
-                        break
-                    yield _format_sse(evt)
-                except asyncio.TimeoutError:
-                    # Keep-alive
-                    yield ": heartbeat\n\n"
-        except asyncio.CancelledError:
-            pass
-        finally:
-            unsub()
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-
-@app.get("/api/events/all")
-async def stream_all_events():
-    """SSE endpoint — streams ALL events from the bus (dashboard use)."""
-    bus = get_bus()
-    start_cursor = bus.cursor()
-    queue: asyncio.Queue[Event] = asyncio.Queue(maxsize=200)
-
-    unsub = bus.subscribe(lambda evt: _enqueue_latest(queue, evt))
-
-    async def event_generator():
-        try:
-            for evt in bus.history(start_cursor):
-                yield _format_sse(evt)
-            while True:
-                try:
-                    evt = await asyncio.wait_for(queue.get(), timeout=30.0)
-                    yield _format_sse(evt)
-                except asyncio.TimeoutError:
-                    yield ": heartbeat\n\n"
-        except asyncio.CancelledError:
-            pass
-        finally:
-            unsub()
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-
-def _format_sse(event: Event) -> str:
-    """Format an Event as a Server-Sent Event message."""
-    data = json.dumps(event.model_dump(mode="json"), ensure_ascii=False)
-    return f"event: {event.type}\ndata: {data}\n\n"

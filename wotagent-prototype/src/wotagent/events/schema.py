@@ -37,7 +37,7 @@ class Event(BaseModel):
     """CloudEvents 1.0-inspired event envelope.
 
     Every agent action produces an Event. The event bus delivers these
-    to subscribed consumers (logging, SSE, persistence).
+    to subscribed consumers (logging, persistence).
     """
 
     specversion: str = Field(default="1.0", description="CloudEvents spec version")

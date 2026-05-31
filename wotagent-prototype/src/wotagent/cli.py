@@ -3,7 +3,7 @@
 Usage:
     wotagent repl              Interactive chat REPL
     wotagent log               Tail the wotagent.log file
-    wotagent api               Start the FastAPI + SSE server
+    wotagent api               Start the FastAPI server with WebSocket endpoints
 """
 
 from __future__ import annotations
@@ -60,8 +60,8 @@ def _run_api(args: argparse.Namespace) -> None:
     from wotagent.logging import configure_logging
 
     configure_logging(mode="console")
-    print(f"  WoTAgent API → http://{args.host}:{args.port}")
-    print(f"  SSE events   → http://{args.host}:{args.port}/api/events/{{session_id}}")
+    print(f"  WoTAgent API  → http://{args.host}:{args.port}")
+    print(f"  WebSocket     → ws://{args.host}:{args.port}/ws")
     uvicorn.run(
         "wotagent.api.app:app",
         host=args.host,
@@ -109,7 +109,7 @@ def main() -> None:
     )
 
     # --- api ---
-    api_parser = sub.add_parser("api", help="Start the FastAPI + SSE server")
+    api_parser = sub.add_parser("api", help="Start the FastAPI server with WebSocket endpoints")
     api_parser.add_argument("--host", default="127.0.0.1", help="Bind host")
     api_parser.add_argument("--port", type=int, default=8000, help="Bind port")
     api_parser.add_argument("--reload", action="store_true", help="Auto-reload on code changes")

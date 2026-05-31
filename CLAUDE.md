@@ -10,8 +10,8 @@ Two main projects under a monorepo:
 WoTAgent/
 ├── wotagent-prototype/    # Backend (Python) + Vue frontend
 │   ├── src/wotagent/      # Python package
-│   │   ├── api/app.py     # FastAPI + WebSocket + SSE endpoints
-│   │   ├── core/agent.py  # Multi-agent pipeline (Intent→Planner→Executor→Observer→Responder)
+│   │   ├── api/app.py     # FastAPI + WebSocket endpoints
+│   │   ├── core/agent.py  # Multi-agent pipeline (Intent Classifier + Responder/Executor/Observer)
 │   │   ├── core/session.py # Session management
 │   │   ├── core/state.py  # ConversationState — intent continuity across turns
 │   │   ├── events/        # EventBus (pub/sub), CloudEvents schema
@@ -41,7 +41,7 @@ Intent continuity: ConversationState tracks non-chat intent across turns (方案
 SessionTranscript: dual JSONL logging (full + chat) for each session
 ```
 
-**Event flow:** Agent actions → EventBus (CloudEvents format) → WebSocket/SSE → Frontend
+**Event flow:** Agent actions → EventBus (CloudEvents format) → WebSocket → Frontend
 
 **IoT tool chain:** Agent → `control_device()` / `list_devices()` / `query_device()` → MCP client → Simulation MCP server → DeviceStateStore
 

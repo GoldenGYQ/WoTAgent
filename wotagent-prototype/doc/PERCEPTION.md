@@ -4,7 +4,7 @@
 
 The Perception Agent is a **rule-based environment monitoring engine** — it continuously evaluates device states against predefined rules and triggers automated actions without LLM involvement.
 
-Unlike the Planner (which uses LLM to parse natural language intent), the Perception Agent uses **zero LLM tokens** — all condition evaluation is pure Python comparison.
+Unlike the intent-classification step (which uses an LLM for routing), the Perception Agent uses **zero LLM tokens** for rule evaluation — all condition checks are pure Python comparison.
 
 ## Architecture
 
@@ -26,9 +26,9 @@ Unlike the Planner (which uses LLM to parse natural language intent), the Percep
                 ┌───────────────┴──────────────┐
                 ▼                               ▼
         ┌────────────────┐            ┌──────────────────┐
-        │ execute_plan    │            │ WebSocket (primary)│
-        │ directly()     │            │ SSE (legacy)    │
-        │ (Executor →    │            │ → Frontend      │
+        │ execute_plan   │            │ WebSocket        │
+        │ directly()     │            │ (primary)        │
+        │ (Executor →    │            │ → Frontend       │
         │  Observer)     │            │                  │
         └────────────────┘            └──────────────────┘
 ```
@@ -38,18 +38,18 @@ Unlike the Planner (which uses LLM to parse natural language intent), the Percep
 | Source | Route | LLM cost |
 |--------|-------|----------|
 | User says "开空调" | Intent Classifier → Executor → Observer | Intent LLM + Executor LLM |
-| Rule: temp > 32°C | Executor → Observer directly | Executor LLM only (Planner skipped) |
+| Rule: temp > 32°C | Executor → Observer directly | Executor LLM only (intent classification skipped) |
 
 ### Rule → LLM Context Injection
 
-When a user sends a message, the current environment state is injected as `perception_context` into the Planner's system prompt:
+When a user sends a message, the current environment state is injected as `perception_context` into the intent-classifier prompt:
 
 ```
 [Current environment state]
 ac-001(currentTemperature=33.5) | light-001(on=False) | humidifier-001(currentHumidity=45.2)
 ```
 
-This lets the LLM answer "what's the temperature?" without calling a tool — zero extra tokens for the query.
+This helps the intent-classification step and downstream prompts keep context across turns without extra transport calls.
 
 ## Module Structure
 
@@ -141,7 +141,7 @@ final_text = await execute_plan_directly(
 )
 ```
 
-Skips the Planner entirely and runs Executor → Observer with the pre-structured plan.
+Skips intent classification entirely and runs Executor → Observer with the pre-structured plan.
 
 ## REPL Usage
 

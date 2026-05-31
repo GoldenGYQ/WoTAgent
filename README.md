@@ -8,48 +8,93 @@
 
 # WoTAgent
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 **Event-driven IoT Smart-Home Agent** — a multi-agent LLM system that understands natural language commands, controls IoT devices via the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/), streams real-time events to a Vue dashboard, and runs automated environment monitoring — all with zero manual rule programming.
 
-Built on **LangChain 1.3+** with a four-agent pipeline (Intent Classifier → Executor → Observer + Responder), **FastAPI** WebSocket server, and a **Vue 3** frontend.
+Built on **LangChain 1.3+** with a separate intent-classification step and three active agent roles (Responder, Executor, Observer), **FastAPI** WebSocket server, and a **Vue 3** frontend.
 
 ---
 
 ## Architecture
 
 ```
-               ┌──────────────────────┐
-               │   Perception Engine  │ ←── Rule-based (0 LLM tokens)
-               │   (background poll)  │
-               └──────────┬───────────┘
-                          │ triggered plan
-                          ▼
-User ──→ ┌─────────────────────────────────────────────────────┐
-         │                    AgentPipeline                     │
-         │  ┌──────────────────┐    ┌──────────────────┐        │
-         │  │ Intent Classifier│───▶│    Executor      │control │
-         │  │ (tool-calling,   │    │ (MCP tools)      │query   │
-         │  │  temperature=0)  │    └────────┬─────────┘        │
-         │  └────────┬─────────┘             │                  │
-         │           │                       ▼                  │
-         │           ├──chat──▶ Responder ───┼──▶ Observer      │
-         │           │          (no tools)   │   (format reply) │
-         └───────────┼───────────────────────┼──────────────────┘
-                     ▼                       ▼
-               EventBus (CloudEvents) ──► WebSocket ──► Vue Frontend
-                                         └── SSE (legacy)
-                                         └── Log
-                                         └── Session Transcript
+User message
+  |
+  v
++--------------------------+
+| Intent Classifier        |
+| tool-calling, temp = 0   |
++-----------+--------------+
+      |
+    +-----+------+
+    |            |
+    | chat       | control / query
+    v            v
++-------------+   +----------------+
+| Responder   |   | Executor       |
+| no tools    |   | MCP tools      |
++------+------+   +--------+-------+
+     |                   |
+     |                   v
+     |             +-----+------+
+     |             | Observer   |
+     |             | format reply
+     |             +-----+------+
+     |                   |
+     +-------------------+-------> EventBus -> WebSocket -> Vue Frontend
+                   |
+                   +-> Log
+                   +-> Session Transcript
+
+Perception Engine
+  |
+  v
+ready plan -> Executor -> Observer
 ```
 
-Two trigger paths:
-- **User message** → Intent Classifier → Executor → Observer (or Responder for chat)
-- **Rule triggered** → Executor → Observer directly (zero LLM for intent parsing)
+Trigger paths:
+- User message -> Intent Classifier -> Responder for chat, or Intent Classifier -> Executor -> Observer for control/query
+- Rule triggered -> Perception Engine -> Executor -> Observer, with no intent-classification step
 
 ---
 
 ## Quick Start
 
-### 1. Backend
+### One-Click Start (Recommended)
+
+You can start the whole stack with one-click scripts from the repo root.
+
+Start order (important):
+1. Simulator platform
+2. Agent backend
+3. Frontend
+
+Run each script in a separate terminal:
+
+```bat
+scripts\start-simulator.bat
+scripts\start-agent.bat
+scripts\start-frontend.bat
+```
+
+After startup:
+- Frontend: `http://localhost:5173`
+- Agent API: `http://127.0.0.1:8000`
+- Simulator dashboard: `http://127.0.0.1:18080/dashboard`
+
+### Manual Start
+
+### 1. Simulator platform (first)
+
+```bash
+cd wot-device-simulator
+uv venv
+uv sync
+uv run --project . wot-sim-api
+```
+
+### 2. Agent backend
 
 ```bash
 cd wotagent-prototype
@@ -64,16 +109,7 @@ uv run --project . wotagent api
 # Or: python -m wotagent.cli api
 ```
 
-### 2. IoT Simulator (separate terminal)
-
-```bash
-cd wot-device-simulator
-uv venv
-uv sync
-python -m wot_device_simulator.mcp_server
-```
-
-### 3. Frontend (separate terminal)
+### 3. Frontend
 
 ```bash
 cd frontend/wot-vue
@@ -83,7 +119,7 @@ npm run dev
 
 Open `http://localhost:5173` — the dashboard connects to the backend via WebSocket automatically.
 
-### 4. Or try the REPL
+### 4. Optional: REPL
 
 ```bash
 uv run --project . wotagent repl
@@ -95,7 +131,7 @@ uv run --project . wotagent repl
 
 | Feature | Description |
 |---------|-------------|
-| **🧠 Multi-Agent Pipeline** | Intent Classifier → Executor → Observer: each phase has a focused role, producing typed CloudEvents at every step |
+| **🧠 Multi-Agent Pipeline** | Intent Classifier + Responder/Executor/Observer: each stage has a focused role, producing typed CloudEvents at every step |
 | **💬 Natural Language Control** | "把客厅灯调到30%" → automatic intent classification → device control → confirmation |
 | **🔄 Intent Continuity** | Follow-ups like "我在客厅呢" inherit the previous control intent via 方案A (context injection) + 方案B (continuation hint) |
 | **📡 Real-Time Streaming** | All agent actions stream as CloudEvents via WebSocket to the Vue frontend — thinking, tool calls, results |
@@ -111,9 +147,13 @@ uv run --project . wotagent repl
 
 ```
 WoTAgent/
+├── scripts/                    # One-click startup scripts
+│   ├── start-agent.bat
+│   ├── start-frontend.bat
+│   └── start-simulator.bat
 ├── wotagent-prototype/          # Backend (Python)
 │   ├── src/wotagent/
-│   │   ├── api/app.py           # FastAPI + WebSocket + SSE
+│   │   ├── api/app.py           # FastAPI + WebSocket
 │   │   ├── core/                # Multi-agent pipeline, session, state
 │   │   ├── events/              # EventBus, CloudEvents schema
 │   │   ├── tools/               # IoT tools, MCP client, system tools
@@ -160,10 +200,12 @@ WoTAgent/
 
 | Document | Contents |
 |----------|---------|
-| [Architecture](doc/ARCHITECTURE.md) | System design, modules, routing, event transport |
-| [Pipeline](doc/PIPELINE.md) | Multi-agent pipeline flow, streaming, transcript |
-| [Events](doc/EVENTS.md) | CloudEvents schema, event types, WebSocket protocol |
-| [Perception](doc/PERCEPTION.md) | Rule engine, polling loop, cooldown mechanism |
+| [Architecture](wotagent-prototype/doc/ARCHITECTURE.md) | System design, modules, routing, event transport |
+| [Pipeline](wotagent-prototype/doc/PIPELINE.md) | Multi-agent pipeline flow, streaming, transcript |
+| [Events](wotagent-prototype/doc/EVENTS.md) | CloudEvents schema, event types, WebSocket protocol |
+| [Perception](wotagent-prototype/doc/PERCEPTION.md) | Rule engine, polling loop, cooldown mechanism |
+| [Technical Guide](doc/TECHNICAL_GUIDE.md) | Agent and simulator file-by-file responsibilities |
+| [API Guide](doc/API_GUIDE.md) | Backend and simulator API usage with examples |
 
 ---
 
@@ -193,6 +235,8 @@ Executor (all tools)
 
 Observer (response formatting)
   └→ "客厅灯已经调暗到30%了"
+
+Chat intent short-circuits to Responder and does not enter the Executor/Observer path.
 ```
 
 ### Real-Time Events

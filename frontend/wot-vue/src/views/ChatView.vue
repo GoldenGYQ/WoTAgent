@@ -28,7 +28,7 @@ function scrollToBottom() {
   });
 }
 
-// ── SSE Event handling ──
+// ── Real-time event handling ──
 
 function handleRuntimeEvent(event: any) {
   if (!event || !event.event_type) return;

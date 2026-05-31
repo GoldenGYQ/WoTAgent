@@ -94,7 +94,8 @@ const DEVICE_ICONS = {
   'humidifier': '💧', 'fan': '🌀', 'exhaust': '💨',
   'gas_sensor': '⚠️', 'default': '🔌'
 };
-const SSE_SESSION = 'web_ui';
+const SESSION_ID = 'web_ui';
+const WS_URL = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`;
 
 // ── Device rendering ──
 
@@ -212,116 +213,111 @@ function addEventLog(label, raw) {
   if (el.children.length > 200) el.firstChild.remove();
 }
 
-// ── SSE events from agent ──
+let _ws = null;
+let _wsReconnectTimer = null;
 
-function connectSSE() {
-  const evtSource = new EventSource('/api/events/all');
+// ── WebSocket events from agent ──
 
-  evtSource.addEventListener('wot.session.started', e => {
-    _activeRun = true;
-    _currentThinking = '';
-    _currentMsgEl = null;
-    _thinkingEl = null;
-    addEventLog('🚀 会话开始', e.data);
-    addChatMessage('agent', '⏳ 处理中...');
-  });
+function connectWebSocket() {
+  if (_ws && (_ws.readyState === WebSocket.OPEN || _ws.readyState === WebSocket.CONNECTING)) return;
+  if (_wsReconnectTimer) {
+    clearTimeout(_wsReconnectTimer);
+    _wsReconnectTimer = null;
+  }
 
-  evtSource.addEventListener('wot.agent.plan', e => {
-    try {
-      const d = JSON.parse(e.data);
-      const plan = d.data || {};
+  _ws = new WebSocket(WS_URL);
+
+  _ws.onopen = () => {
+    document.getElementById('statusBadge').textContent = '● 在线';
+  };
+
+  _ws.onmessage = event => {
+    let msg;
+    try { msg = JSON.parse(event.data); } catch { return; }
+    if (msg.type !== 'event' || !msg.event_type) return;
+
+    if (msg.event_type === 'wot.session.started') {
+      _activeRun = true;
+      _currentThinking = '';
+      _currentMsgEl = null;
+      _thinkingEl = null;
+      addEventLog('🚀 会话开始', JSON.stringify(msg.data || {}));
+      addChatMessage('agent', '⏳ 处理中...');
+      return;
+    }
+
+    if (msg.event_type === 'wot.agent.plan') {
+      const plan = msg.data || {};
       addEventLog('📋 计划', `intent=${plan.intent} rationale=${plan.rationale}`);
-      // Show plan as thinking detail
       showThinking(`[Plan] ${plan.rationale}\nintent: ${plan.intent}\n`);
-    } catch { }
-  });
+      return;
+    }
 
-  evtSource.addEventListener('wot.agent.thought', e => {
-    try {
-      const d = JSON.parse(e.data);
-      const content = (d.data && d.data.content) || '';
+    if (msg.event_type === 'wot.agent.thought') {
+      const content = (msg.data && msg.data.content) || '';
       showThinking(content);
-    } catch { }
-  });
+      return;
+    }
 
-  evtSource.addEventListener('wot.agent.action.started', e => {
-    try {
-      const d = JSON.parse(e.data);
-      const act = d.data || {};
+    if (msg.event_type === 'wot.agent.action.started') {
+      const act = msg.data || {};
       addEventLog('🔧 工具', `${act.action} → ${act.device || act.device_id}`);
-    } catch { }
-  });
+      return;
+    }
 
-  evtSource.addEventListener('wot.agent.action.completed', e => {
-    try {
-      const d = JSON.parse(e.data);
-      const act = d.data || {};
+    if (msg.event_type === 'wot.agent.action.completed') {
+      const act = msg.data || {};
       addEventLog('✅ 工具完成', `${act.action} → ${act.device || act.device_id}`);
-    } catch { }
-  });
+      return;
+    }
 
-  evtSource.addEventListener('wot.agent.action.failed', e => {
-    try {
-      const d = JSON.parse(e.data);
-      addEventLog('❌ 工具失败', (d.data && d.data.error) || '');
-    } catch { }
-  });
+    if (msg.event_type === 'wot.agent.action.failed') {
+      addEventLog('❌ 工具失败', (msg.data && msg.data.error) || '');
+      return;
+    }
 
-  evtSource.addEventListener('wot.agent.response', e => {
-    // Final response — replace the "processing" bubble
-    try {
-      const d = JSON.parse(e.data);
-      const text = (d.data && d.data.response) || '';
+    if (msg.event_type === 'wot.agent.response') {
+      const text = (msg.data && msg.data.response) || '';
       if (text && _currentMsgEl) {
         _currentMsgEl.querySelector('.bubble').textContent = text;
       } else if (text) {
         addChatMessage('agent', text);
       }
-    } catch { }
-  });
+      return;
+    }
 
-  evtSource.addEventListener('wot.agent.error', e => {
-    try {
-      const d = JSON.parse(e.data);
-      const err = (d.data && d.data.error) || '未知错误';
+    if (msg.event_type === 'wot.agent.error') {
+      const err = (msg.data && msg.data.error) || '未知错误';
       if (_currentMsgEl) {
         _currentMsgEl.querySelector('.bubble').textContent = `⚠️ ${err}`;
       } else {
         addChatMessage('agent', `⚠️ ${err}`);
       }
       addEventLog('❌ 错误', err);
-    } catch { }
-    _activeRun = false;
-  });
+      _activeRun = false;
+      return;
+    }
 
-  evtSource.addEventListener('wot.session.ended', e => {
-    _activeRun = false;
-    addEventLog('🏁 会话结束', e.data);
-    setTimeout(refreshDevices, 500);
-  });
+    if (msg.event_type === 'wot.session.ended') {
+      _activeRun = false;
+      addEventLog('🏁 会话结束', JSON.stringify(msg.data || {}));
+      setTimeout(refreshDevices, 500);
+      return;
+    }
 
-  evtSource.addEventListener('wot.perception.rule_triggered', e => {
-    try {
-      const d = JSON.parse(e.data);
-      const plan = (d.data && d.data.plan) || {};
-      addEventLog('⚡ 规则触发', `${d.data.rule}: ${d.data.description}`);
-      // Show auto-trigger as system message
-      addChatMessage('agent', `⚡ [自动] ${d.data.description} (${d.data.property}=${d.data.value})`);
-    } catch { }
-  });
-
-  // Token-level streaming from executor/responder
-  evtSource.onmessage = e => {
-    if (_activeRun && e.data) {
-      try {
-        // Catch-all: raw data for debug
-      } catch { }
+    if (msg.event_type === 'wot.perception.rule_triggered') {
+      addEventLog('⚡ 规则触发', `${msg.data.rule}: ${msg.data.description}`);
+      addChatMessage('agent', `⚡ [自动] ${msg.data.description} (${msg.data.property}=${msg.data.value})`);
     }
   };
 
-  evtSource.onerror = () => {
+  _ws.onclose = () => {
     document.getElementById('statusBadge').textContent = '⚠️ 离线';
-    setTimeout(connectSSE, 3000);
+    _wsReconnectTimer = setTimeout(connectWebSocket, 3000);
+  };
+
+  _ws.onerror = () => {
+    document.getElementById('statusBadge').textContent = '⚠️ 离线';
   };
 }
 
@@ -338,7 +334,7 @@ async function sendChat() {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: msg, session_id: SSE_SESSION, role: 'operator' })
+      body: JSON.stringify({ message: msg, session_id: SESSION_ID, role: 'operator' })
     });
     const data = await res.json();
     addEventLog('📤 已提交', `session=${data.session_id}`);
@@ -354,7 +350,7 @@ async function loadInitialState() {
 }
 
 loadInitialState().then(() => { setInterval(refreshDevices, 5000); });
-connectSSE();
+connectWebSocket();
 </script>
 </body>
 </html>

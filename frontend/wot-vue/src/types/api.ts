@@ -28,7 +28,7 @@ export interface GGEvent {
   timestamp: number;
 }
 
-// ── WoT-specific event types (SSE events from backend) ──
+// ── WoT-specific event types (backend events) ──
 
 export type WoTEventType =
   | "wot.session.started"
