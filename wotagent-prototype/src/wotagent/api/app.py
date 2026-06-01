@@ -1,6 +1,6 @@
-"""FastAPI application with WebSocket chat and event streaming.
+﻿"""FastAPI application with WebSocket chat and event streaming.
 
-Agent produces events → EventBus → WebSocket for real-time chat.
+Agent produces events -> EventBus -> WebSocket for real-time chat.
 """
 
 from __future__ import annotations
@@ -21,6 +21,13 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 logger = logging.getLogger("wotagent.api")
+
+
+def _bool_env(key: str, default: bool = True) -> bool:
+    val = os.getenv(key)
+    if val is None:
+        return default
+    return val.strip().lower() in ("1", "true", "yes", "on")
 
 
 def _enqueue_latest(queue: asyncio.Queue[Event], evt: Event) -> None:
@@ -45,6 +52,7 @@ from ..events import Event, get_bus
 from ..logging import configure_logging, install_event_bus_handler
 from ..memory import ConversationMemory, SessionTranscript
 from ..perception import get_perception_engine
+from ..models import DeviceActionResponse, DeviceListEntry, DeviceListResponse
 from ..wot import find_devices, load_tds
 
 # ---------------------------------------------------------------------------
@@ -55,23 +63,22 @@ configure_logging()
 install_event_bus_handler()
 
 # Create the agent once at startup
-_pipeline = create_wot_pipeline()
+_pipeline = create_wot_pipeline(
+    enable_streaming=_bool_env("ENABLE_STREAMING", default=True),
+)
 _session_manager = get_session_manager(timeout_minutes=30)
 
 # Start perception engine
 _perception_engine = get_perception_engine(polling_interval=60, auto_start=True)
 
-# ── Perception auto-execute ────────────────────────────────────────────────
-# When a rule triggers, run Executor → Observer automatically.
-# Controlled by ENABLE_PERCEPTION_AUTO_EXEC env var (default: false).
+# ---- Perception auto-execute ----
 _ENABLE_AUTO_EXEC = os.getenv("ENABLE_PERCEPTION_AUTO_EXEC", "false").lower() in ("1", "true", "yes")
 
 if _ENABLE_AUTO_EXEC:
     bus = get_bus()
-    _auto_exec_memory = ConversationMemory()  # single memory for all auto-exec turns
+    _auto_exec_memory = ConversationMemory()
 
     async def _on_rule_triggered(evt: Event) -> None:
-        """Handle a perception rule trigger by executing the plan."""
         plan = evt.data.get("plan")
         if not plan:
             return
@@ -85,11 +92,10 @@ if _ENABLE_AUTO_EXEC:
         )
 
     _auto_exec_unsub = bus.subscribe(_on_rule_triggered, event_type="wot.perception.rule_triggered")
-    logger.info("Perception auto-execution ENABLED (ENABLE_PERCEPTION_AUTO_EXEC=true)")
+    logger.info("Perception auto-execution ENABLED")
 else:
     _auto_exec_unsub = None
     logger.info("Perception auto-execution DISABLED (default)")
-# ────────────────────────────────────────────────────────────────────────────
 
 # ---------------------------------------------------------------------------
 # FastAPI app
@@ -97,11 +103,10 @@ else:
 
 app = FastAPI(
     title="WoTAgent",
-    description="Web of Things Agent — LangChain-powered IoT control with event streaming",
+    description="Web of Things Agent -- LangChain-powered IoT control with event streaming",
     version="0.3.0",
 )
 
-# Allow Vue dev server (5173) and production
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:8000"],
@@ -114,6 +119,7 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 # Request / Response models
 # ---------------------------------------------------------------------------
+
 
 class ChatRequest(BaseModel):
     message: str
@@ -130,12 +136,72 @@ class SessionCreateRequest(BaseModel):
     role: str = "operator"
 
 
+class SessionCreateResponse(BaseModel):
+    session_id: str
+    role: str
+
+
 class SessionInfoResponse(BaseModel):
     session_id: str
     created_at: str
     user_role: str
     message_count: int
     last_active: str
+
+
+class SessionListResponse(BaseModel):
+    sessions: list[SessionInfoResponse]
+
+
+class DeleteSessionResponse(BaseModel):
+    status: str
+    session_id: str
+
+
+class SessionMessagesResponse(BaseModel):
+    session_id: str
+    messages: list[dict[str, Any]]
+
+
+class ChatSubmitResponse(BaseModel):
+    session_id: str
+    status: str
+
+
+class HealthResponse(BaseModel):
+    status: str
+    pipeline: str
+
+
+class DiagResponse(BaseModel):
+    pipeline: str
+    device_count: int
+    sessions_active: int
+    mcp_status: str
+
+
+class PerceptionStateResponse(BaseModel):
+    engine_running: bool
+    stats: dict[str, int]
+    summary: str
+    devices: dict[str, dict[str, Any]]
+
+
+class RuleEntry(BaseModel):
+    name: str
+    description: str
+    enabled: bool
+    condition: dict[str, Any]
+    ready: bool
+
+
+class PerceptionRulesResponse(BaseModel):
+    rules: list[RuleEntry]
+
+
+class PerceptionPollResponse(BaseModel):
+    triggered: int
+    rules: list[str]
 
 
 # ---------------------------------------------------------------------------
@@ -147,93 +213,35 @@ class SessionInfoResponse(BaseModel):
 async def root():
     return HTMLResponse("""<!DOCTYPE html>
 <html lang="zh-CN">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WoTAgent</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-      color: #e2e8f0;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-    }
-    .container { text-align: center; padding: 2rem; max-width: 600px; }
-    h1 {
-      font-size: 2.5rem;
-      font-weight: 700;
-      background: linear-gradient(135deg, #38bdf8, #818cf8);
-      background-clip: text;
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      margin-bottom: 0.75rem;
-    }
-    .subtitle { color: #94a3b8; font-size: 1.1rem; margin-bottom: 2rem; }
-    .badge {
-      display: inline-block;
-      background: rgba(56, 189, 248, 0.15);
-      color: #38bdf8;
-      padding: 0.3rem 1rem;
-      border-radius: 999px;
-      font-size: 0.85rem;
-      margin-bottom: 2rem;
-    }
-    .links { display: flex; flex-direction: column; gap: 0.75rem; }
-    a {
-      display: flex; align-items: center; justify-content: center; gap: 0.5rem;
-      padding: 0.85rem 1.5rem;
-      border-radius: 12px;
-      background: rgba(255,255,255,0.05);
-      border: 1px solid rgba(255,255,255,0.1);
-      color: #e2e8f0;
-      text-decoration: none;
-      font-size: 1rem;
-      transition: all 0.2s;
-    }
-    a:hover {
-      background: rgba(255,255,255,0.1);
-      border-color: #38bdf8;
-      transform: translateY(-1px);
-    }
-    .footer { margin-top: 2.5rem; color: #475569; font-size: 0.8rem; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h1>WoTAgent</h1>
-    <p class="subtitle">Event-driven IoT Smart-Home Agent</p>
-    <div class="badge">&#10003; 服务运行中</div>
-    <div class="links">
-      <a href="/docs">&#128221; API 文档 (Swagger)</a>
-      <a href="/redoc">&#128214; API 文档 (ReDoc)</a>
-      <a href="/api/health">&#128154; 健康检查</a>
-      <a href="/api/diag">&#128202; 运行诊断</a>
-    </div>
-    <p class="footer">WoTAgent v0.3.0 &mdash; FastAPI + LangChain + WebSocket</p>
-  </div>
-</body>
-</html>""")
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>WoTAgent</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%);color:#e2e8f0;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.container{text-align:center;padding:2rem;max-width:600px}
+h1{font-size:2.5rem;font-weight:700;background:linear-gradient(135deg,#38bdf8,#818cf8);background-clip:text;-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:.75rem}
+.subtitle{color:#94a3b8;font-size:1.1rem;margin-bottom:2rem}
+.badge{display:inline-block;background:rgba(56,189,248,0.15);color:#38bdf8;padding:.3rem 1rem;border-radius:999px;font-size:.85rem;margin-bottom:2rem}
+.links{display:flex;flex-direction:column;gap:.75rem}
+a{display:flex;align-items:center;justify-content:center;gap:.5rem;padding:.85rem 1.5rem;border-radius:12px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:#e2e8f0;text-decoration:none;font-size:1rem;transition:all .2s}
+a:hover{background:rgba(255,255,255,0.1);border-color:#38bdf8;transform:translateY(-1px)}
+.footer{margin-top:2.5rem;color:#475569;font-size:.8rem}
+</style></head>
+<body><div class=container><h1>WoTAgent</h1><p class=subtitle>Event-driven IoT Smart-Home Agent</p><div class=badge>&#10003; Service running</div><div class=links><a href=/docs>&#128221; API Docs (Swagger)</a><a href=/redoc>&#128214; API Docs (ReDoc)</a><a href=/api/health>&#128154; Health Check</a><a href=/api/diag>&#128202; Diagnostics</a></div><p class=footer>WoTAgent v0.3.0 &mdash; FastAPI + LangChain + WebSocket</p></div></body></html>""")
 
 
-@app.get("/api/health")
-async def health():
-    return {"status": "ok", "pipeline": "wot_pipeline_main"}
+@app.get("/api/health", response_model=HealthResponse)
+async def health() -> HealthResponse:
+    return HealthResponse(status="ok", pipeline="wot_pipeline_main")
 
-@app.get("/api/diag")
-async def diag():
+
+@app.get("/api/diag", response_model=DiagResponse)
+async def diag() -> DiagResponse:
     from ..wot import find_devices
     device_count = len(find_devices())
-    # Check MCP connection status
     mcp_status = "unknown"
     try:
         from ..tools.mcp_client import get_mcp_client
         client = await get_mcp_client()
-        # Try a lightweight call to check connectivity
         try:
             await client.call_tool("list_devices", {})
             mcp_status = "connected"
@@ -241,16 +249,14 @@ async def diag():
             mcp_status = "disconnected"
     except Exception:
         mcp_status = "disconnected"
-    return {
-        "pipeline": "wot_pipeline_main",
-        "device_count": device_count,
-        "sessions_active": _session_manager.count,
-        "mcp_status": mcp_status,
-    }
-
-
+    return DiagResponse(
+        pipeline="wot_pipeline_main",
+        device_count=device_count,
+        sessions_active=_session_manager.count,
+        mcp_status=mcp_status,
+    )
 # ---------------------------------------------------------------------------
-# WebSocket endpoint — primary real-time chat channel
+# WebSocket endpoint -- primary real-time chat channel
 # ---------------------------------------------------------------------------
 
 
@@ -260,11 +266,11 @@ async def websocket_endpoint(websocket: WebSocket):
 
     Protocol (JSON messages):
 
-    Client → Server:
+    Client -> Server:
       ``{"type": "chat", "id": "cmd-001", "data": {"message": "...", "session_id": "..."}}``
       ``{"type": "ping", "id": "cmd-002"}``
 
-    Server → Client:
+    Server -> Client:
       ``{"type": "response", "id": "cmd-001", "success": true, "data": {"session_id": "..."}}``
       ``{"type": "event", "event_type": "wot.agent.thought", "data": {...}, "session_id": "...", "timestamp": ...}``
       ``{"type": "error", "id": "...", "message": "..."}``
@@ -277,45 +283,58 @@ async def websocket_endpoint(websocket: WebSocket):
     # Subscribe to ALL events from EventBus
     unsub = bus.subscribe(lambda evt: _enqueue_latest(queue, evt))
 
-    # Background task: forward EventBus events → WebSocket
+    # Background task: forward EventBus events -> WebSocket
     async def forward_events():
         while True:
             try:
-                evt = await queue.get()
-                await websocket.send_json({
+                evt = await asyncio.wait_for(queue.get(), timeout=30)
+                payload = {
                     "type": "event",
                     "event_type": evt.type,
                     "data": evt.data,
                     "session_id": evt.session_id,
-                    "timestamp": evt.time.timestamp() if evt.time else 0,
-                })
-            except asyncio.CancelledError:
-                break
+                    "timestamp": evt.time.isoformat() if evt.time else "",
+                }
+                await websocket.send_json(payload)
+            except asyncio.TimeoutError:
+                try:
+                    await websocket.send_json({"type": "ping"})
+                except Exception:
+                    break
             except Exception:
-                logger.warning("Skipped bad event %s", getattr(evt, "type", "?"), exc_info=True)
-                continue
+                break
 
     forward_task = asyncio.create_task(forward_events())
 
     try:
         while True:
-            data = await websocket.receive_json()
-            msg_type = data.get("type")
-            msg_id = data.get("id", "")
+            raw = await websocket.receive_text()
+            try:
+                msg = json.loads(raw)
+            except json.JSONDecodeError:
+                await websocket.send_json({"type": "error", "message": "Invalid JSON"})
+                continue
+
+            msg_type = msg.get("type", "")
+            msg_id = msg.get("id", "")
+            msg_data = msg.get("data", {})
+
+            if msg_type == "ping":
+                await websocket.send_json({"type": "pong", "id": msg_id})
+                continue
 
             if msg_type == "chat":
-                msg_data = data.get("data", {})
-                message = msg_data.get("message", "")
-                session_id = msg_data.get("session_id", "web_ui")
+                user_message = msg_data.get("message", "")
+                session_id = msg_data.get("session_id", "")
+                user_role = msg_data.get("role", "operator")
 
                 session = _session_manager.get_or_create(
-                    _pipeline, session_id=session_id, user_role="operator",
+                    _pipeline,
+                    session_id=session_id,
+                    user_role=user_role,
                 )
-                session.memory.load()
 
-                # Launch agent — events flow to EventBus and are forwarded to the WebSocket client
-                asyncio.create_task(_run_agent_task(session, message))
-
+                # Send immediate ack
                 await websocket.send_json({
                     "type": "response",
                     "id": msg_id,
@@ -323,25 +342,45 @@ async def websocket_endpoint(websocket: WebSocket):
                     "data": {"session_id": session.session_id},
                 })
 
-            elif msg_type == "ping":
-                await websocket.send_json({"type": "pong", "id": msg_id})
+                # Run agent
+                async for chunk in invoke_agent_stream(
+                    session.agent,
+                    user_message,
+                    session_id=session.session_id,
+                    user_role=session.user_role,
+                    memory=session.memory,
+                    state=session.state,
+                ):
+                    pass  # events flow through EventBus
+
+            else:
+                await websocket.send_json({"type": "error", "id": msg_id, "message": f"Unknown type: {msg_type}"})
 
     except WebSocketDisconnect:
-        logger.info("WebSocket client disconnected")
+        logger.info("WebSocket disconnected")
     except Exception:
         logger.exception("WebSocket error")
     finally:
         forward_task.cancel()
+        try:
+            await forward_task
+        except asyncio.CancelledError:
+            pass
         unsub()
 
 
-@app.post("/api/chat")
-async def chat(req: ChatRequest):
-    """Send a message to the agent.
+# ---------------------------------------------------------------------------
+# REST endpoints
+# ---------------------------------------------------------------------------
 
-    Returns immediately with ``session_id``. Agent events (plan, thinking,
-    tool calls, response tokens) are emitted on the EventBus and consumed
-    by the primary WebSocket channel.
+
+@app.post("/api/chat", response_model=ChatSubmitResponse)
+async def chat(req: ChatRequest) -> ChatSubmitResponse:
+    """Submit a chat message and get a response.
+
+    The agent processes the message asynchronously.  Intermediate events
+    (thoughts, tool calls, response tokens) are emitted on the EventBus
+    and consumed by the primary WebSocket channel.
 
     The frontend should listen for ``wot.agent.plan``, ``wot.agent.thought``,
     ``wot.agent.action.*``, ``wot.agent.response``, and ``wot.session.ended``
@@ -355,10 +394,10 @@ async def chat(req: ChatRequest):
     )
     session.memory.load()
 
-    # Launch agent in background — events flow to EventBus and are picked up by the active transports
+    # Launch agent in background -- events flow to EventBus
     asyncio.create_task(_run_agent_task(session, req.message))
 
-    return {"session_id": session.session_id, "status": "processing"}
+    return ChatSubmitResponse(session_id=session.session_id, status="processing")
 
 
 async def _run_agent_task(session, message: str) -> None:
@@ -372,7 +411,7 @@ async def _run_agent_task(session, message: str) -> None:
             memory=session.memory,
             state=session.state,
         ):
-            pass  # all events flow through EventBus inside invoke_agent_stream
+            pass
     except Exception as exc:
         logger.exception("Background agent task failed")
         bus = get_bus()
@@ -384,107 +423,114 @@ async def _run_agent_task(session, message: str) -> None:
         ))
 
 
-@app.post("/api/session")
-async def create_session(req: SessionCreateRequest):
+@app.post("/api/session", response_model=SessionCreateResponse)
+async def create_session(req: SessionCreateRequest) -> SessionCreateResponse:
     """Create a new agent session."""
     session = _session_manager.create(_pipeline, user_role=req.role)
-    return {"session_id": session.session_id, "role": req.role}
+    return SessionCreateResponse(session_id=session.session_id, role=req.role)
 
 
-@app.get("/api/sessions")
-async def list_sessions():
+@app.get("/api/sessions", response_model=SessionListResponse)
+async def list_sessions() -> SessionListResponse:
     """List active sessions."""
-    return {"sessions": [s.model_dump() for s in _session_manager.list_active()]}
+    return SessionListResponse(
+        sessions=[SessionInfoResponse(
+            session_id=s.session_id,
+            created_at=s.created_at.isoformat() if hasattr(s, "created_at") else "",
+            user_role=s.user_role,
+            message_count=s.message_count,
+            last_active=s.last_active.isoformat() if hasattr(s, "last_active") else "",
+        ) for s in _session_manager.list_active()]
+    )
 
 
-@app.delete("/api/session/{session_id}")
-async def delete_session(session_id: str):
+@app.delete("/api/session/{session_id}", response_model=DeleteSessionResponse)
+async def delete_session(session_id: str) -> DeleteSessionResponse:
     """Delete a session."""
     _session_manager.delete(session_id)
-    return {"status": "deleted", "session_id": session_id}
+    return DeleteSessionResponse(status="deleted", session_id=session_id)
 
 
-@app.get("/api/session/{session_id}/messages")
-async def session_messages(session_id: str):
+@app.get("/api/session/{session_id}/messages", response_model=SessionMessagesResponse)
+async def session_messages(session_id: str) -> SessionMessagesResponse:
     """Load chat message history from session transcript.
 
     Returns user/assistant message pairs recorded during the session.
     Frontend calls this on page load to restore conversation history.
     """
     entries = SessionTranscript.load_chat(session_id)
-    return {"session_id": session_id, "messages": entries}
+    return SessionMessagesResponse(session_id=session_id, messages=entries)
 
 
-@app.get("/api/devices")
-async def list_devices(location: str | None = None):
+@app.get("/api/devices", response_model=DeviceListResponse)
+async def list_devices(location: str | None = None) -> DeviceListResponse:
     """List IoT devices, optionally filtered by location."""
     devices = find_devices(location=location) if location else find_devices()
-    # Get runtime state via perception engine (MCP-backed, no direct SQLite)
     all_states: dict[str, dict[str, Any]] = {}
     try:
         all_states = await _perception_engine.get_all_states()
     except Exception:
         pass
-    return {
-        "devices": [
-            {
-                "id": d.device_id,
-                "title": d.title,
-                "location": d.location,
-                "capabilities": d.capabilities,
-                "actions": [a.name for a in d.actions],
-                "state": all_states.get(d.device_id, {}),
-            }
+    return DeviceListResponse(
+        devices=[
+            DeviceListEntry(
+                id=d.device_id,
+                title=d.title,
+                location=d.location,
+                capabilities=d.capabilities,
+                actions=[a.name for a in d.actions],
+                properties=[p.name for p in d.properties],
+                state=all_states.get(d.device_id, {}),
+            )
             for d in devices
-        ]
-    }
+        ],
+        count=len(devices),
+    )
 
 
-@app.get("/api/perception/state")
-async def perception_state():
+@app.get("/api/perception/state", response_model=PerceptionStateResponse)
+async def perception_state() -> PerceptionStateResponse:
     """Current environment state snapshot from the perception engine."""
     all_states: dict[str, dict[str, Any]] = {}
     try:
         all_states = await _perception_engine.get_all_states()
     except Exception:
         pass
-    return {
-        "engine_running": _perception_engine.is_running,
-        "stats": _perception_engine.stats,
-        "summary": await _perception_engine.get_context(),
-        "devices": all_states,
-    }
+    return PerceptionStateResponse(
+        engine_running=_perception_engine.is_running,
+        stats=_perception_engine.stats,
+        summary=await _perception_engine.get_context(),
+        devices=all_states,
+    )
 
 
-@app.get("/api/perception/rules")
-async def perception_rules():
+@app.get("/api/perception/rules", response_model=PerceptionRulesResponse)
+async def perception_rules() -> PerceptionRulesResponse:
     """List all perception rules and their status."""
-    return {
-        "rules": [
-            {
-                "name": r.name,
-                "description": r.description,
-                "enabled": r.enabled,
-                "condition": {
+    return PerceptionRulesResponse(
+        rules=[
+            RuleEntry(
+                name=r.name,
+                description=r.description,
+                enabled=r.enabled,
+                condition={
                     "device_id": r.condition.device_id,
                     "property": r.condition.property_name,
                     "operator": r.condition.operator,
                     "threshold": r.condition.value,
                 },
-                "ready": r.is_ready(),
-            }
+                ready=r.is_ready(),
+            )
             for r in _perception_engine.rules
         ]
-    }
+    )
 
 
-@app.post("/api/perception/poll")
-async def perception_poll():
+@app.post("/api/perception/poll", response_model=PerceptionPollResponse)
+async def perception_poll() -> PerceptionPollResponse:
     """Trigger a one-shot perception poll cycle."""
     triggered = await _perception_engine.poll_once()
-    return {
-        "triggered": len(triggered),
-        "rules": triggered,
-    }
-
-
+    return PerceptionPollResponse(
+        triggered=len(triggered),
+        rules=triggered,
+    )

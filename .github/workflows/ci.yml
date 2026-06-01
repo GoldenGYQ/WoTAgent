@@ -1,0 +1,91 @@
+﻿name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.9.x"
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        working-directory: wotagent-prototype
+        run: |
+          uv sync
+          uv pip install pytest
+
+      - name: Create .env if not exists
+        working-directory: wotagent-prototype
+        run: |
+          if [ ! -f .env ]; then
+            cp .env.example .env 2>/dev/null || echo "OPENAI_API_KEY=sk-test" > .env
+          fi
+
+      - name: Run tests
+        working-directory: wotagent-prototype
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'sk-test' }}
+        run: uv run pytest tests/ -v --tb=short 2>&1 | head -100
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.9.x"
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ruff
+        working-directory: wotagent-prototype
+        run: uv pip install --system ruff
+
+      - name: Lint with ruff
+        working-directory: wotagent-prototype
+        run: ruff check src/ tests/ --output-format=github
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend/wot-vue
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/wot-vue/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build

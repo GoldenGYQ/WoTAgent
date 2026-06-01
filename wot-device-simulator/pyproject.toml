@@ -23,7 +23,13 @@ wot-sim-state = "wot_device_simulator.state_cli:main"
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[dependency-groups]
+dev = [
+    "pytest-asyncio>=1.4.0",
+]
+
 [tool.pytest.ini_options]
+asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["src"]
 

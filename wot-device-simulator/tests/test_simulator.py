@@ -15,7 +15,9 @@ import pytest
 
 
 class TestDeviceStateStore:
+    """Tests for ``DeviceStateStore`` -- SQLite-backed device state persistence."""
     def test_initialize_creates_tables(self):
+        """Initialization creates all DB tables."""
         from wot_device_simulator.simulator import DeviceStateStore, _DB_PATH
 
         DeviceStateStore.reset()
@@ -32,6 +34,7 @@ class TestDeviceStateStore:
         conn.close()
 
     def test_initialize_seeds_all_devices(self):
+        """Initialization seeds all expected devices."""
         from wot_device_simulator.simulator import DeviceStateStore
 
         DeviceStateStore.reset()
@@ -42,6 +45,7 @@ class TestDeviceStateStore:
         assert "ac-001" in state
 
     def test_get_returns_empty_for_unknown(self):
+        """Unknown device ID returns empty dict."""
         from wot_device_simulator.simulator import DeviceStateStore
 
         DeviceStateStore.reset()
@@ -49,6 +53,7 @@ class TestDeviceStateStore:
         assert DeviceStateStore.get("nonexistent") == {}
 
     def test_get_property(self):
+        """Device property value is retrievable."""
         from wot_device_simulator.simulator import DeviceStateStore
 
         DeviceStateStore.reset()
@@ -57,6 +62,7 @@ class TestDeviceStateStore:
         assert on is False
 
     def test_get_property_nonexistent(self):
+        """Nonexistent property returns None."""
         from wot_device_simulator.simulator import DeviceStateStore
 
         DeviceStateStore.reset()
@@ -64,6 +70,7 @@ class TestDeviceStateStore:
         assert DeviceStateStore.get_property("light-001", "nonexistent_prop") is None
 
     def test_set_property(self):
+        """Property value can be updated."""
         from wot_device_simulator.simulator import DeviceStateStore
 
         DeviceStateStore.reset()
@@ -72,6 +79,7 @@ class TestDeviceStateStore:
         assert DeviceStateStore.get_property("light-001", "on") is True
 
     def test_set_property_creates_new_device(self):
+        """Setting a property creates a new device entry."""
         from wot_device_simulator.simulator import DeviceStateStore
 
         DeviceStateStore.reset()
@@ -81,6 +89,7 @@ class TestDeviceStateStore:
         assert state.get("test") == 42
 
     def test_set_property_persists_to_db(self):
+        """Property change persists to SQLite."""
         from wot_device_simulator.simulator import DeviceStateStore, _DB_PATH
 
         DeviceStateStore.reset()
@@ -97,6 +106,7 @@ class TestDeviceStateStore:
         conn.close()
 
     def test_drift_changes_temperature(self):
+        """Drift simulation changes temperature values."""
         from wot_device_simulator.simulator import DeviceStateStore
 
         DeviceStateStore.reset()
@@ -108,6 +118,7 @@ class TestDeviceStateStore:
         assert abs(before - after) > 0.01
 
     def test_drift_cooling_pulls_temp_down(self):
+        """Cooling drift pulls temperature downward."""
         from wot_device_simulator.simulator import DeviceStateStore
 
         DeviceStateStore.reset()
@@ -125,6 +136,7 @@ class TestDeviceStateStore:
         assert after < before
 
     def test_format_summary(self):
+        """Summary format includes device name and properties."""
         from wot_device_simulator.simulator import DeviceStateStore
 
         DeviceStateStore.reset()
@@ -135,6 +147,7 @@ class TestDeviceStateStore:
         assert "light-001" in summary
 
     def test_get_all_with_info_includes_location(self):
+        """Device list includes location info."""
         from wot_device_simulator.simulator import DeviceStateStore
 
         DeviceStateStore.reset()
@@ -149,6 +162,7 @@ class TestDeviceStateStore:
         assert "on" in light["state"]
 
     def test_get_all_with_info_order(self):
+        """Device list is ordered by device_id."""
         from wot_device_simulator.simulator import DeviceStateStore
 
         DeviceStateStore.reset()
@@ -158,6 +172,7 @@ class TestDeviceStateStore:
         assert ids == sorted(ids)
 
     def test_reset_clears_all(self):
+        """Reset clears all device states."""
         from wot_device_simulator.simulator import DeviceStateStore, _DB_PATH, _get_db
 
         DeviceStateStore.reset()
@@ -183,6 +198,7 @@ class TestDeviceStateStore:
 
 
 class TestSimulatorEngine:
+    """Tests for ``SimulatorEngine`` -- event-driven device simulation."""
     @pytest.mark.asyncio
     async def test_start_stop(self):
         from wot_device_simulator.simulator import SimulatorEngine
@@ -318,6 +334,7 @@ class TestSimulatorEngine:
         assert len(events) >= 1
 
     def test_get_context(self):
+        """Context summary includes device state information."""
         from wot_device_simulator.simulator import DeviceStateStore, SimulatorEngine
 
         DeviceStateStore.reset()
@@ -328,6 +345,7 @@ class TestSimulatorEngine:
         assert "ac-001" in ctx or "Current" in ctx
 
     def test_recent_events_limit(self):
+        """Recent events list respects max length."""
         from wot_device_simulator.simulator import SimulatorEngine
 
         engine = SimulatorEngine(polling_interval=9999)
@@ -335,6 +353,7 @@ class TestSimulatorEngine:
         assert engine.recent_events(-1) == []
 
     def test_subscribe_unsubscribe(self):
+        """Subscribers can subscribe and unsubscribe."""
         from wot_device_simulator.simulator import SimulatorEngine
 
         engine = SimulatorEngine(polling_interval=9999)

@@ -5,7 +5,9 @@ import time
 
 
 class TestCondition:
+    """Tests for ``Condition`` model -- device property threshold evaluation."""
     def test_gt(self):
+        """Greater-than comparison evaluates correctly."""
         from wot_device_simulator.rules import Condition
 
         c = Condition("ac-001", "currentTemperature", "gt", 32)
@@ -14,6 +16,7 @@ class TestCondition:
         assert not c.evaluate(32)
 
     def test_lt(self):
+        """Less-than comparison evaluates correctly."""
         from wot_device_simulator.rules import Condition
 
         c = Condition("humidifier-001", "currentHumidity", "lt", 30)
@@ -22,6 +25,7 @@ class TestCondition:
         assert not c.evaluate(30)
 
     def test_gte(self):
+        """Greater-than-or-equal comparison evaluates correctly."""
         from wot_device_simulator.rules import Condition
 
         c = Condition("ac-001", "currentTemperature", "gte", 32)
@@ -30,6 +34,7 @@ class TestCondition:
         assert not c.evaluate(30)
 
     def test_lte(self):
+        """Less-than-or-equal comparison evaluates correctly."""
         from wot_device_simulator.rules import Condition
 
         c = Condition("ac-001", "currentTemperature", "lte", 25)
@@ -38,6 +43,7 @@ class TestCondition:
         assert not c.evaluate(30)
 
     def test_eq(self):
+        """Equality comparison evaluates correctly."""
         from wot_device_simulator.rules import Condition
 
         c = Condition("light-001", "on", "eq", True)
@@ -45,6 +51,7 @@ class TestCondition:
         assert not c.evaluate(False)
 
     def test_ne(self):
+        """Not-equal comparison evaluates correctly."""
         from wot_device_simulator.rules import Condition
 
         c = Condition("tv-001", "on", "ne", True)
@@ -52,6 +59,7 @@ class TestCondition:
         assert not c.evaluate(True)
 
     def test_non_numeric(self):
+        """Non-numeric values return False on comparison."""
         from wot_device_simulator.rules import Condition
 
         c = Condition("light-001", "on", "gt", 0)
@@ -59,6 +67,7 @@ class TestCondition:
         assert not c.evaluate(None)
 
     def test_unknown_operator(self):
+        """Unknown operator returns False gracefully."""
         from wot_device_simulator.rules import Condition
 
         c = Condition("ac-001", "temp", "unknown_op", 25)
@@ -66,7 +75,9 @@ class TestCondition:
 
 
 class TestEnvironmentRule:
+    """Tests for ``EnvironmentRule`` -- automated perception rules."""
     def test_create_and_ready(self):
+        """New rule is ready to trigger."""
         from wot_device_simulator.rules import Condition, EnvironmentRule, RuleAction
 
         rule = EnvironmentRule(
@@ -82,6 +93,7 @@ class TestEnvironmentRule:
         assert rule.enabled is True
 
     def test_cooldown(self):
+        """Cooldown period prevents re-triggering."""
         from wot_device_simulator.rules import Condition, EnvironmentRule, RuleAction
 
         rule = EnvironmentRule(
@@ -98,6 +110,7 @@ class TestEnvironmentRule:
         assert rule.is_ready()
 
     def test_disabled(self):
+        """Disabled rule is not evaluated."""
         from wot_device_simulator.rules import Condition, EnvironmentRule, RuleAction
 
         rule = EnvironmentRule(
@@ -112,12 +125,14 @@ class TestEnvironmentRule:
         assert rule.enabled
 
     def test_intent_default(self):
+        """Default rule intent is ``control``."""
         from wot_device_simulator.rules import RuleAction
 
         a = RuleAction(steps=[{"action": "test"}])
         assert a.intent == "control"
 
     def test_default_rules(self):
+        """Default rules include expected entries."""
         from wot_device_simulator.rules import default_rules
 
         rules = default_rules()

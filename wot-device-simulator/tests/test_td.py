@@ -3,7 +3,9 @@ from __future__ import annotations
 
 
 class TestTDLoading:
+    """Tests for Thing Description loading and device metadata."""
     def test_load_tds(self):
+        """Thing Descriptions load from remote URL."""
         from wot_device_simulator.td import load_tds
 
         tds = load_tds()
@@ -11,12 +13,14 @@ class TestTDLoading:
         assert len(tds) >= 3
 
     def test_load_tds_local(self):
+        """Thing Descriptions load from local files."""
         from wot_device_simulator.td import load_tds_local
 
         tds = load_tds_local()
         assert len(tds) >= 3
 
     def test_td_has_device_id(self):
+        """Each TD has a valid device_id field."""
         from wot_device_simulator.td import load_tds
 
         for td in load_tds():
@@ -25,6 +29,7 @@ class TestTDLoading:
             assert td.location
 
     def test_td_has_properties(self):
+        """Each TD defines expected properties."""
         from wot_device_simulator.td import load_tds
 
         for td in load_tds():
@@ -34,6 +39,7 @@ class TestTDLoading:
                 assert p.type
 
     def test_td_has_actions(self):
+        """Each TD defines expected actions."""
         from wot_device_simulator.td import load_tds
 
         for td in load_tds():
@@ -44,6 +50,7 @@ class TestTDLoading:
         assert len(with_actions) >= 3
 
     def test_light_has_luminance(self):
+        """Light device TD includes luminance property."""
         from wot_device_simulator.td import find_devices
 
         lights = find_devices(capability="luminance")
@@ -53,18 +60,21 @@ class TestTDLoading:
             assert "luminance" in caps
 
     def test_ac_has_temperature(self):
+        """AC device TD includes temperature property."""
         from wot_device_simulator.td import find_devices
 
         acs = find_devices(capability="temperature")
         assert len(acs) >= 1
 
     def test_find_by_location(self):
+        """Devices can be found by location keyword."""
         from wot_device_simulator.td import find_devices
 
         living_room = find_devices(location="living_room")
         assert len(living_room) > 0
 
     def test_get_device_by_id(self):
+        """Device lookup by ID returns correct device."""
         from wot_device_simulator.td import get_device_by_id
 
         light = get_device_by_id("light-001")
@@ -72,11 +82,13 @@ class TestTDLoading:
         assert light.title
 
     def test_get_device_by_id_nonexistent(self):
+        """Nonexistent device returns None."""
         from wot_device_simulator.td import get_device_by_id
 
         assert get_device_by_id("nonexistent-device") is None
 
     def test_device_id_extraction(self):
+        """Device ID is extracted from TD path."""
         from wot_device_simulator.td import ThingDescription, get_device_by_id
 
         td = get_device_by_id("light-001")
@@ -84,6 +96,7 @@ class TestTDLoading:
         assert td.device_id == "light-001"
 
     def test_location_synonyms(self):
+        """Location matching supports synonyms (e.g. livingroom/living room)."""
         from wot_device_simulator.td import find_devices
 
         # "parlor" should map to living_room

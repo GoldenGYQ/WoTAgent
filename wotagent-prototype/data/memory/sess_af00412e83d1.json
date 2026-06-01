@@ -1,0 +1,18 @@
+[
+  {
+    "type": "human",
+    "content": "灯好暗"
+  },
+  {
+    "type": "ai",
+    "content": "家里有好几个灯呢～你是觉得哪个房间的灯太暗了呀？客厅、卧室、厨房、浴室还是书房？"
+  },
+  {
+    "type": "human",
+    "content": "全部"
+  },
+  {
+    "type": "ai",
+    "content": "I encountered an error: Client is not connected. Use the 'async with client:' context manager first."
+  }
+]

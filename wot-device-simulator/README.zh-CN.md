@@ -21,10 +21,10 @@
 │     │                                       │          │
 │     ▼                                       ▼          │
 │  ┌─────────────────┐  ┌─────────────────────────┐     │
-│  │  FastMCP 服务     │  │  REST 端点              │     │
-│  │  /mcp (MCP HTTP) │  │  /api/state, /api/events│     │
-│  │  Agent 控制/查询  │  │  /api/control, /api/poll│     │
-│  │                   │  │  /api/weather/...       │     │
+│  │  FastMCP 服务    │  │  REST 端点              │     │
+│  │  /mcp (MCP HTTP)|   │  /api/state, /api/events│     │
+│  │  Agent 控制/查询 │  │  /api/control, /api/poll│     │
+│  │                 │  │  /api/weather/...       │     │
 │  └─────────────────┘  ├─────────────────────────┤     │
 │                        │  控制面板                 │     │
 │                        │  /dashboard (HTML UI)  │     │

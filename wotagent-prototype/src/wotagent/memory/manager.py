@@ -1,4 +1,4 @@
-"""Session-scoped memory management.
+﻿"""Session-scoped memory management.
 
 LangChain 1.3.1 delegates memory to LangGraph's checkpointer & store.
 This module provides a lightweight in-memory message buffer for session
@@ -28,16 +28,16 @@ class ConversationMemory:
 
     def __init__(
         self,
-        session_id: str,
+        session_id: str = "default",
         window_size: int = 10,
         memory_key: str = "history",
+        storage_dir: str | None = None,
     ) -> None:
         self.session_id = session_id
         self._memory_key = memory_key
         self._window_size = window_size
+        self._storage_dir = storage_dir
         self._messages: list[BaseMessage] = []
-
-    # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
@@ -125,10 +125,9 @@ class ConversationMemory:
         return Path(__file__).resolve().parents[3]
 
     def _data_path(self) -> Path:
+        if self._storage_dir is not None:
+            return Path(self._storage_dir) / f"{self.session_id}.json"
         return self._project_root() / "data" / "memory" / f"{self.session_id}.json"
-
-    def load_memory_variables(self, **kwargs: Any) -> dict[str, Any]:
-        return {self._memory_key: self.messages}
 
     @property
     def message_count(self) -> int:
@@ -254,6 +253,23 @@ class SessionTranscript:
     def _json_dumps(self, obj: dict[str, Any]) -> str:
         """JSON serialization with automatic object sanitization."""
         return json.dumps(self._sanitize(obj), ensure_ascii=False)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a serializable dict representation of the transcript."""
+        entries: list[dict[str, Any]] = []
+        for evt in self._full_buffer:
+            entries.append(self._sanitize(evt))
+        result: dict[str, Any] = {
+            "session_id": self.session_id,
+            "entries": entries,
+        }
+        for evt in self._full_buffer:
+            if evt.get("event") == "session_start":
+                for k, v in evt.items():
+                    if k not in ("event", "ts"):
+                        result[k] = v
+                break
+        return result
 
     def save(self) -> None:
         """Append buffered events to both JSONL files."""

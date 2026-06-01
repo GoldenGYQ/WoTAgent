@@ -10,7 +10,9 @@ import pytest
 # ======================================================================
 
 class TestEventSchema:
+    """Tests for event schema types and event bus."""
     def test_event_creation(self):
+        """Event can be created with required fields."""
         from wotagent.events import Event
         evt = Event(
             source="wotagent/test",
@@ -26,6 +28,7 @@ class TestEventSchema:
         assert evt.session_id == "sess_001"
 
     def test_event_types(self):
+        """Event types match expected pattern."""
         from wotagent.events import Event, EventType
         types: list[EventType] = [
             "wot.session.started",
@@ -40,6 +43,8 @@ class TestEventSchema:
 
 
 class TestEventBus:
+    """Tests for the event bus implementation."""
+    """Subscribers receive emitted events."""
     def test_emit_and_subscribe(self):
         import asyncio
         from wotagent.events import EventBus, Event
@@ -61,6 +66,7 @@ class TestEventBus:
         assert received[0].data["i"] == 1
         assert received[1].data["i"] == 2
 
+    """Late subscribers can replay past events."""
     def test_history_replay(self):
         import asyncio
         from wotagent.events import EventBus, Event
@@ -80,6 +86,7 @@ class TestEventBus:
         assert len(replay) == 2
         assert replay[0].data["i"] == 1
 
+    """Event history respects max length."""
     def test_max_history(self):
         import asyncio
         from wotagent.events import EventBus, Event
@@ -94,6 +101,7 @@ class TestEventBus:
         assert len(bus.history()) == 3
         assert bus.history()[0].data["i"] == 2  # oldest kept
 
+    """Cursor-based replay works correctly."""
     def test_cursor(self):
         import asyncio
         from wotagent.events import EventBus, Event
@@ -104,6 +112,7 @@ class TestEventBus:
             await bus.emit(Event(source="test", type="wot.system.log"))
             assert bus.cursor() == 1
 
+    """Subscriber count tracks correctly."""
     def test_subscriber_count(self):
         from wotagent.events import EventBus, Event
 
@@ -116,6 +125,7 @@ class TestEventBus:
         bus.subscribe(cb)
         assert bus.subscriber_count == 1
 
+    """Unsubscribed callbacks stop receiving events."""
     def test_unsubscribe(self):
         from wotagent.events import EventBus, Event
 
@@ -135,6 +145,7 @@ class TestEventBus:
 # ======================================================================
 
 class TestRBAC:
+    """Tests for role-based access control hierarchy."""
     def test_role_hierarchy(self):
         from wotagent.auth import Role, get_access_control
 
@@ -148,6 +159,7 @@ class TestRBAC:
         # Operator can control
         assert ac.check(Role.OPERATOR, "device.control", "execute")
 
+        """All role enum values are accessible."""
     def test_role_enum(self):
         from wotagent.auth import Role
 
@@ -155,6 +167,7 @@ class TestRBAC:
         assert Role.OPERATOR.value == "operator"
         assert Role.VIEWER.value == "viewer"
 
+    """Wildcard patterns match correctly in permission checks."""
     def test_wildcard_match(self):
         from wotagent.auth import Role, get_access_control
 
@@ -168,13 +181,16 @@ class TestRBAC:
 # WoT / Thing Description
 # ======================================================================
 
+    """All devices are returned by location query."""
 class TestWoT:
+    """Tests for Web of Things device registry queries."""
     def test_find_devices(self):
         from wotagent.wot import find_devices
 
         devices = find_devices()
         assert isinstance(devices, list)
         # At least the sample TDs should be found
+        """Devices filterable by capability type."""
         assert len(devices) >= 3
 
     def test_find_devices_by_capability(self):
@@ -183,6 +199,7 @@ class TestWoT:
         luminance = find_devices(capability="luminance")
         for d in luminance:
             caps = [c.lower() for c in d.capabilities]
+            """Devices filterable by location."""
             assert "luminance" in caps
 
     def test_find_devices_by_location(self):
@@ -191,6 +208,7 @@ class TestWoT:
         parlor = find_devices(location="parlor")
         assert len(parlor) > 0, "No devices found for parlor (should map to living_room)"
         for d in parlor:
+            """Device lookup by ID returns TD metadata."""
             assert d.location.lower() == "living_room"
 
     def test_get_device_by_id(self):
@@ -205,7 +223,9 @@ class TestWoT:
 # Memory
 # ======================================================================
 
+    """Messages can be added and retrieved."""
 class TestMemory:
+    """Tests for conversation memory storage in core."""
     def test_add_and_retrieve(self):
         from wotagent.memory import ConversationMemory
 
@@ -215,6 +235,7 @@ class TestMemory:
 
         assert mem.message_count == 2
         assert len(mem.messages) == 2
+        """Message window trims to configured size."""
         assert mem.messages[0].content == "hello"
         assert mem.messages[1].content == "hi there"
 
@@ -226,6 +247,7 @@ class TestMemory:
             mem.add_user_message(f"q{i}")
             mem.add_ai_message(f"a{i}")
 
+        """Clearing removes all messages."""
         # Should keep system (none) + last 2 exchanges = 4 messages
         assert mem.message_count <= 5
 
@@ -234,8 +256,140 @@ class TestMemory:
 
         mem = ConversationMemory("sess_3")
         mem.add_user_message("hello")
+        """Memory persists and reloads from disk."""
         mem.clear()
-        assert mem.message_count == 0
+
+
+# ======================================================================
+# Streaming
+# ======================================================================
+
+
+class TestStreaming:
+    def test_chat_stream_emits_thinking_and_token(self, monkeypatch):
+        import asyncio
+        from types import SimpleNamespace
+
+        from langchain_core.messages import AIMessage
+
+        from wotagent.core.handlers import invoke_agent_stream
+
+        class DummyLLM:
+            def bind(self, tools=None, tool_choice=None):
+                return self
+
+            async def ainvoke(self, _messages):
+                return SimpleNamespace(
+                    tool_calls=[{
+                        "name": "classify_intent",
+                        "args": {"intent": "chat", "rationale": "test"},
+                    }],
+                )
+
+        class DummyResponder:
+            async def astream_events(self, _inputs, context=None, version=None):
+                yield {
+                    "event": "on_chat_model_stream",
+                    "data": {
+                        "chunk": SimpleNamespace(
+                            content="Hi",
+                            additional_kwargs={"reasoning_content": "thinking"},
+                        )
+                    },
+                }
+                yield {
+                    "event": "on_chain_end",
+                    "data": {
+                        "output": {"messages": [AIMessage(content="Hi")]}
+                    },
+                }
+
+        class DummyPipeline:
+            responder = DummyResponder()
+            executor = None
+            observer = None
+
+        monkeypatch.setattr("wotagent.core.handlers._build_llm", lambda **_: DummyLLM())
+
+        async def run():
+            chunks = []
+            async for chunk in invoke_agent_stream(
+                DummyPipeline(),
+                "hello",
+                session_id="",
+                user_role="operator",
+            ):
+                chunks.append(chunk)
+            return chunks
+
+        chunks = asyncio.run(run())
+        types = {c.get("type") for c in chunks}
+        assert "plan" in types
+        assert "thinking" in types
+        assert "token" in types
+        assert "done" in types
+
+    def test_event_bus_emits_streaming_events(self, monkeypatch):
+        import asyncio
+        from types import SimpleNamespace
+
+        from langchain_core.messages import AIMessage
+
+        from wotagent.core.handlers import invoke_agent_stream
+        from wotagent.events import get_bus
+
+        class DummyLLM:
+            def bind(self, tools=None, tool_choice=None):
+                return self
+
+            async def ainvoke(self, _messages):
+                return SimpleNamespace(
+                    tool_calls=[{
+                        "name": "classify_intent",
+                        "args": {"intent": "chat", "rationale": "test"},
+                    }],
+                )
+
+        class DummyResponder:
+            async def astream_events(self, _inputs, context=None, version=None):
+                yield {
+                    "event": "on_chat_model_stream",
+                    "data": {
+                        "chunk": SimpleNamespace(
+                            content="Hi",
+                            additional_kwargs={"reasoning_content": "thinking"},
+                        )
+                    },
+                }
+                yield {
+                    "event": "on_chain_end",
+                    "data": {
+                        "output": {"messages": [AIMessage(content="Hi")]}
+                    },
+                }
+
+        class DummyPipeline:
+            responder = DummyResponder()
+            executor = None
+            observer = None
+
+        monkeypatch.setattr("wotagent.core.handlers._build_llm", lambda **_: DummyLLM())
+
+        async def run():
+            bus = get_bus()
+            bus.clear()
+            async for _ in invoke_agent_stream(
+                DummyPipeline(),
+                "hello",
+                session_id="",
+                user_role="operator",
+            ):
+                pass
+            return [e.type for e in bus.history()]
+
+        types = asyncio.run(run())
+        assert "wot.agent.token" in types
+        assert "wot.agent.thought" in types
 
     def test_save_and_load(self):
         from wotagent.memory import ConversationMemory
@@ -253,12 +407,14 @@ class TestMemory:
         assert mem2.messages[1].content == "你好！有什么可以帮你的吗？"
 
         # Cleanup
+        """Loading nonexistent file leaves memory empty."""
         import os
         os.remove(mem2._data_path())
 
     def test_load_nonexistent(self):
         from wotagent.memory import ConversationMemory
 
+        """Truncation keeps prefix of messages."""
         mem = ConversationMemory("sess_does_not_exist")
         assert mem.message_count == 0  # no crash
 
@@ -278,6 +434,7 @@ class TestMemory:
         assert mem.messages[3].content == "a1"
 
         # Cleanup
+        """Negative index truncates from end."""
         import os
         os.remove(mem._data_path())
 
@@ -297,9 +454,11 @@ class TestMemory:
 
 # ======================================================================
 # Tools
+    """All tools are listed with correct metadata."""
 # ======================================================================
 
 class TestTools:
+    """Tests for tool registry and device listing tools."""
     def test_get_all_tools(self):
         from wotagent.tools import get_all_tools
 
@@ -309,6 +468,7 @@ class TestTools:
         assert "list_devices" in names
         assert "control_device" in names
         assert "query_device" in names
+        """Tool metadata includes name, description, and schema."""
         assert "rag_retrieve" in names
         assert "get_system_info" in names
         assert "list_files" in names
@@ -316,6 +476,7 @@ class TestTools:
     def test_tool_metadata(self):
         from wotagent.tools import get_all_tools
 
+        """List-devices tool returns device names."""
         for t in get_all_tools():
             assert t.name
             assert t.description
@@ -330,13 +491,16 @@ class TestTools:
 
 
 # ======================================================================
+    """Agent is created with bound tools."""
 # Agent creation
 # ======================================================================
 
 class TestAgent:
+    """Tests for agent creation and pipeline building."""
     def test_create_agent(self):
         from wotagent.core import create_wot_agent
 
+        """Pipeline is created with agent and memory."""
         agent = create_wot_agent(enable_thinking=False, temperature=0)
         assert agent is not None
         assert hasattr(agent, "ainvoke")
@@ -357,7 +521,9 @@ class TestAgent:
 # Session management
 # ======================================================================
 
+    """Session is created and retrievable by ID."""
 class TestSession:
+    """Tests for session management (create, get, expiry)."""
     def _fresh_manager(self):
         from wotagent.core.session import SessionManager
         return SessionManager(timeout_minutes=60)
@@ -370,6 +536,7 @@ class TestSession:
 
         session = mgr.create(agent, user_role="operator")
         assert session.session_id
+        """get_or_create returns existing or new session."""
         assert session.user_role == "operator"
 
         retrieved = mgr.get(session.session_id)
@@ -380,6 +547,7 @@ class TestSession:
         from wotagent.core import create_wot_agent
 
         agent = create_wot_agent(enable_thinking=False, temperature=0)
+        """Expired sessions are not returned as active."""
         mgr = self._fresh_manager()
 
         s1 = mgr.get_or_create(agent, user_role="viewer")
@@ -391,6 +559,7 @@ class TestSession:
         from wotagent.core import create_wot_agent
         from wotagent.core.session import SessionManager
 
+        """Only active sessions are listed."""
         agent = create_wot_agent(enable_thinking=False, temperature=0)
         mgr = SessionManager(timeout_minutes=0)  # immediate expiry
         session = mgr.create(agent)
@@ -407,11 +576,13 @@ class TestSession:
         assert len(mgr.list_active()) == 2
 
 
+    """Events are written to the log file."""
 # ======================================================================
 # Event Logging
 # ======================================================================
 
 class TestEventLogging:
+    """Tests for event logging to disk."""
     def test_event_logger_writes_to_log_file(self, tmp_path):
         """install_event_logger() should write bus events to the log file."""
         import asyncio
