@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from langchain_core.runnables import Runnable
@@ -9,15 +10,27 @@ from langchain_core.runnables import Runnable
 from .. import prompts
 from .models import AgentContext
 
+logger = logging.getLogger(__name__)
+
 
 def _extract_context(request: Runnable) -> AgentContext:
     """Pull AgentContext from a middleware request."""
     ctx: AgentContext | None = None
     runtime = getattr(request, "runtime", None)
     if runtime is not None:
-        ctx = getattr(runtime, "context", None) or getattr(runtime, "args", None)
+        raw = getattr(runtime, "context", None) or getattr(runtime, "args", None)
+        if isinstance(raw, AgentContext):
+            ctx = raw
+        elif raw is not None:
+            logger.debug("_extract_context: runtime had non-AgentContext value (%s)", type(raw).__name__)
     if ctx is None:
-        ctx = getattr(request, "context", None)
+        raw = getattr(request, "context", None)
+        if isinstance(raw, AgentContext):
+            ctx = raw
+        elif raw is not None:
+            logger.debug("_extract_context: request.context is non-AgentContext (%s)", type(raw).__name__)
+    if ctx is None:
+        logger.debug("_extract_context: no AgentContext found, returning default")
     return ctx or AgentContext()
 
 

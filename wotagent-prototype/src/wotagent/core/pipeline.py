@@ -23,6 +23,46 @@ from .prompt import _make_prompt_builder
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Planner tool-calling schema — guarantees structured output
+# ---------------------------------------------------------------------------
+
+PLAN_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "generate_plan",
+        "description": "Classify user intent and output a structured plan",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "intent": {
+                    "type": "string",
+                    "enum": ["chat", "query", "control"],
+                    "description": "chat=pure chat, query=ask about device/environment, control=operate device/environment",
+                },
+                "rationale": {
+                    "type": "string",
+                    "description": "Brief explanation of the classification",
+                },
+                "steps": {
+                    "type": "array",
+                    "description": "Planned execution steps (empty for chat intent)",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "action": {"type": "string", "description": "Tool or action name"},
+                            "target": {"type": "string", "description": "Target device or subject"},
+                            "params": {"type": "object", "description": "Action parameters"},
+                        },
+                    },
+                },
+            },
+            "required": ["intent", "rationale", "steps"],
+        },
+    },
+}
+
+
 def _build_llm(
     model_name: str | None = None,
     temperature: float = 0.7,
@@ -47,7 +87,8 @@ def _build_llm(
 
 
 # ---------------------------------------------------------------------------
-# Pipeline container with typed roles
+# Pipeline container with typed roles (planner is a tool-calling LLM,
+# executor/responder are ReAct agents; observer is reserved).
 # ---------------------------------------------------------------------------
 
 
@@ -55,13 +96,17 @@ def _build_llm(
 class AgentPipeline:
     """Container for pipeline roles.
 
-    ``planner`` is reserved for future direct-planning extension;
-    the active runtime path is intent-classification-first.
+    The active runtime path:
+      planner (tool-calling LLM, classify+plan)
+        → intent=chat → responder
+        → intent=control|query → executor (ReAct with tools)
+
+    ``observer`` is reserved for future execution-verification use.
     """
     planner: Runnable
     executor: Runnable
-    observer: Runnable
     responder: Runnable
+    observer: Runnable | None = None
 
 
 def create_wot_pipeline(
@@ -85,20 +130,19 @@ def create_wot_pipeline(
         enable_thinking=enable_thinking,
         enable_streaming=enable_streaming,
     )
-    tools = get_all_tools(include_mcp=False)
-
-    planner_mw = [
-        dynamic_prompt(_make_prompt_builder("planner")),
-        ModelRetryMiddleware(max_retries=1, retry_on=(Exception,)),
-    ]
-    planner = create_agent(
-        model=llm,
-        tools=tools,
-        system_prompt="",
-        middleware=planner_mw,
-        context_schema=AgentContext,
-        name="planner",
+    # Planner is a tool-calling LLM (temperature=0, no thinking) for reliable
+    # structured classification — not a ReAct agent with tool access.
+    plan_llm = _build_llm(
+        model_name=model_name,
+        temperature=0,
+        enable_thinking=False,
     )
+    planner = plan_llm.bind(
+        tools=[PLAN_SCHEMA],
+        tool_choice={"type": "function", "function": {"name": "generate_plan"}},
+    )
+
+    tools = get_all_tools(include_mcp=False)
 
     executor_mw = [
         dynamic_prompt(_make_prompt_builder("executor")),
@@ -142,8 +186,8 @@ def create_wot_pipeline(
     return AgentPipeline(
         planner=planner,
         executor=executor,
-        observer=observer,
         responder=responder,
+        observer=observer,
     )
 
 

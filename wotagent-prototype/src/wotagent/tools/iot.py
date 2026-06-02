@@ -167,12 +167,12 @@ async def _mcp_list_devices(location: str | None = None) -> list[dict[str, Any]]
                                 if did in all_states:
                                     d["state"] = all_states[did]
                 except Exception:
-                    pass
+                    logger.debug("MCP state enrichment failed for device listing", exc_info=True)
                 for d in data:
                     d["_via"] = via
                 return data
     except Exception:
-        pass
+        logger.debug("MCP list_devices failed, using local fallback", exc_info=True)
     result = _list_devices(location)
     for d in result:
         d["_via"] = via
@@ -209,7 +209,7 @@ async def _mcp_control_device(
                 data={"device_id": device_id, "action": action, "via": "mcp", "result": data},
             ))
         except Exception:
-            pass
+            logger.debug("Failed to emit state_changed event", exc_info=True)
         return data
     return {"success": False, "error": f"MCP returned empty result for {device_id}",
             "_via": "mcp"}

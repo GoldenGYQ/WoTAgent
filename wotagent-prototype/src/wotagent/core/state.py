@@ -6,12 +6,15 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 
 # Question-ending patterns (Chinese + English)
 _QUESTION_SUFFIXES = ("?", "？", "吗", "么", "吧", "呢")
-_QUESTION_KW = ("哪个", "哪间", "几号", "什么", "啥", "who", "what", "which")
+_QUESTION_KW_ZH = ("哪个", "哪间", "几号", "什么", "啥", "谁", "怎么", "怎样",
+                   "为什么", "何时", "哪里", "多少", "如何")
+_QUESTION_KW_EN = ("who", "what", "which", "where", "when", "why", "how")
 
 
 def _is_question(text: str) -> bool:
@@ -25,8 +28,13 @@ def _is_question(text: str) -> bool:
         return True
     if text.endswith("呢"):
         return True
-    for w in _QUESTION_KW:
+    for w in _QUESTION_KW_ZH:
         if w in text:
+            return True
+    # English keywords need word boundary to avoid false positives (e.g. "what" in "somewhat")
+    lower = text.lower()
+    for w in _QUESTION_KW_EN:
+        if re.search(r'\b' + re.escape(w) + r'\b', lower):
             return True
     return False
 

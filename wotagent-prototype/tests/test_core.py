@@ -266,7 +266,7 @@ class TestMemory:
 
 
 class TestStreaming:
-    def test_chat_stream_emits_thinking_and_token(self, monkeypatch):
+    def test_chat_stream_emits_thinking_and_token(self):
         import asyncio
         from types import SimpleNamespace
 
@@ -274,15 +274,12 @@ class TestStreaming:
 
         from wotagent.core.handlers import invoke_agent_stream
 
-        class DummyLLM:
-            def bind(self, tools=None, tool_choice=None):
-                return self
-
+        class DummyPlanner:
             async def ainvoke(self, _messages):
                 return SimpleNamespace(
                     tool_calls=[{
-                        "name": "classify_intent",
-                        "args": {"intent": "chat", "rationale": "test"},
+                        "name": "generate_plan",
+                        "args": {"intent": "chat", "rationale": "test", "steps": []},
                     }],
                 )
 
@@ -305,11 +302,10 @@ class TestStreaming:
                 }
 
         class DummyPipeline:
+            planner = DummyPlanner()
             responder = DummyResponder()
             executor = None
             observer = None
-
-        monkeypatch.setattr("wotagent.core.handlers._build_llm", lambda **_: DummyLLM())
 
         async def run():
             chunks = []
@@ -329,7 +325,7 @@ class TestStreaming:
         assert "token" in types
         assert "done" in types
 
-    def test_event_bus_emits_streaming_events(self, monkeypatch):
+    def test_event_bus_emits_streaming_events(self):
         import asyncio
         from types import SimpleNamespace
 
@@ -338,15 +334,12 @@ class TestStreaming:
         from wotagent.core.handlers import invoke_agent_stream
         from wotagent.events import get_bus
 
-        class DummyLLM:
-            def bind(self, tools=None, tool_choice=None):
-                return self
-
+        class DummyPlanner:
             async def ainvoke(self, _messages):
                 return SimpleNamespace(
                     tool_calls=[{
-                        "name": "classify_intent",
-                        "args": {"intent": "chat", "rationale": "test"},
+                        "name": "generate_plan",
+                        "args": {"intent": "chat", "rationale": "test", "steps": []},
                     }],
                 )
 
@@ -369,11 +362,10 @@ class TestStreaming:
                 }
 
         class DummyPipeline:
+            planner = DummyPlanner()
             responder = DummyResponder()
             executor = None
             observer = None
-
-        monkeypatch.setattr("wotagent.core.handlers._build_llm", lambda **_: DummyLLM())
 
         async def run():
             bus = get_bus()
@@ -391,16 +383,25 @@ class TestStreaming:
         assert "wot.agent.token" in types
         assert "wot.agent.thought" in types
 
-    def test_save_and_load(self):
+    def test_save_and_load(self, tmp_path):
+        import json
+
         from wotagent.memory import ConversationMemory
 
-        mem = ConversationMemory("sess_test_save_load")
+        mem = ConversationMemory("sess_test_save_load", storage_dir=str(tmp_path))
         mem.add_user_message("你好")
         mem.add_ai_message("你好！有什么可以帮你的吗？")
-        mem.save()
+        # Write directly to disk since ConversationMemory.save() is deprecated
+        path = mem._data_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        messages = [
+            {"type": "human", "content": "你好"},
+            {"type": "ai", "content": "你好！有什么可以帮你的吗？"},
+        ]
+        path.write_text(json.dumps(messages, ensure_ascii=False, indent=2), encoding="utf-8")
 
         # Create a new instance and load from disk
-        mem2 = ConversationMemory("sess_test_save_load")
+        mem2 = ConversationMemory("sess_test_save_load", storage_dir=str(tmp_path))
         mem2.load()
         assert mem2.message_count == 2
         assert mem2.messages[0].content == "你好"
@@ -433,11 +434,6 @@ class TestStreaming:
         assert mem.messages[0].content == "q0"
         assert mem.messages[3].content == "a1"
 
-        # Cleanup
-        """Negative index truncates from end."""
-        import os
-        os.remove(mem._data_path())
-
     def test_truncate_negative_index(self):
         from wotagent.memory import ConversationMemory
 
@@ -447,9 +443,6 @@ class TestStreaming:
         mem.add_user_message("q1")
         mem.truncate(-1)  # keep all
         assert mem.message_count == 3
-
-        import os
-        os.remove(mem._data_path())
 
 
 # ======================================================================

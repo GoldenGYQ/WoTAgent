@@ -136,21 +136,6 @@ class MCPToolClient:
                 self._connected = False
                 logger.info("MCP client disconnected")
 
-    async def disconnect(self) -> None:
-        """Close the connection."""
-        if not self._connected:
-            return
-        async with self._lock:
-            if not self._connected:
-                return
-            try:
-                await self._client.__aexit__(None, None, None)
-            except Exception:
-                logger.exception("MCP client disconnect error")
-            finally:
-                self._connected = False
-                logger.info("MCP client disconnected")
-
     async def list_tools(self) -> list[dict[str, Any]]:
         if not self._connected:
             await self.connect()
@@ -180,6 +165,8 @@ class MCPToolClient:
 
         Raises ``asyncio.TimeoutError`` if the call takes longer than *timeout*.
         """
+        args_preview = str(arguments)[:200] if arguments else "{}"
+        logger.info("MCP call_tool: %s(%s)", tool_name, args_preview)
         if not self._connected:
             await self.connect()
         if self._client is None:

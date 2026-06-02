@@ -32,12 +32,21 @@ class TestConversationMemory:
 
     def test_save_and_load(self, tmp_path):
         """Messages persist to disk and reload correctly."""
+        import json
+
         from wotagent.memory import ConversationMemory
 
         mem = ConversationMemory(storage_dir=str(tmp_path), session_id="test_sess")
         mem.add_user_message("hello")
         mem.add_ai_message("world")
-        mem.save()
+        # Write directly to disk since ConversationMemory.save() is deprecated
+        path = mem._data_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        messages = [
+            {"type": "human", "content": "hello"},
+            {"type": "ai", "content": "world"},
+        ]
+        path.write_text(json.dumps(messages, ensure_ascii=False, indent=2), encoding="utf-8")
 
         mem2 = ConversationMemory(storage_dir=str(tmp_path), session_id="test_sess")
         mem2.load()

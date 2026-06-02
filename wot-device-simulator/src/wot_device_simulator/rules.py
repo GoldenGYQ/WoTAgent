@@ -1,3 +1,9 @@
+"""Rule models for the IoT device simulator -- using dataclasses.
+
+NOTE: Keep in sync with wotagent-prototype/src/wotagent/perception/rules.py.
+The prototype uses Pydantic; this module uses dataclasses.
+"""
+
 from __future__ import annotations
 
 import time

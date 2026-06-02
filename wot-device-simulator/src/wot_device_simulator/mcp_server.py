@@ -21,10 +21,13 @@ if __name__ == "__main__" and __package__ is None:
         sys.path.insert(0, str(_parent))
     __package__ = "wot_device_simulator"
 
+import logging
 from typing import Any
 
 from .simulator import DeviceStateStore, get_simulator
 from .td import find_devices, get_device_by_id, load_tds
+
+logger = logging.getLogger(__name__)
 
 
 def _build_server(sim=None):
@@ -42,6 +45,7 @@ def _build_server(sim=None):
 
     @mcp.tool()
     def list_devices(location: str | None = None) -> list[dict[str, Any]]:
+        logger.info("Sim MCP: list_devices(location=%s)", location)
         devices = find_devices(location=location) if location else find_devices()
         return [
             {
@@ -57,6 +61,7 @@ def _build_server(sim=None):
 
     @mcp.tool()
     def get_td(device_id: str) -> dict[str, Any]:
+        logger.info("Sim MCP: get_td(device_id=%s)", device_id)
         td = get_device_by_id(device_id)
         if td is None:
             return {"success": False, "error": f"TD '{device_id}' not found"}
@@ -64,27 +69,32 @@ def _build_server(sim=None):
 
     @mcp.tool()
     def download_all_td() -> list[dict[str, Any]]:
+        logger.info("Sim MCP: download_all_td()")
         return [td.raw for td in load_tds()]
 
     @mcp.tool()
     def query_state(device_id: str) -> dict[str, Any]:
+        logger.info("Sim MCP: query_state(device_id=%s)", device_id)
         DeviceStateStore.initialize()
         return {"device_id": device_id, "state": DeviceStateStore.get(device_id)}
 
     @mcp.tool()
     def query_all_states() -> dict[str, dict[str, Any]]:
         """Return current runtime state for ALL devices in one call."""
+        logger.info("Sim MCP: query_all_states()")
         DeviceStateStore.initialize()
         return DeviceStateStore.get_all()
 
     @mcp.tool()
     def drift() -> dict[str, Any]:
         """Trigger one drift cycle — simulates environmental changes."""
+        logger.info("Sim MCP: drift()")
         DeviceStateStore.drift()
         return {"success": True, "message": "Drift cycle completed"}
 
     @mcp.tool()
     async def control_device(device_id: str, action: str, parameters: dict[str, Any] | None = None) -> dict[str, Any]:
+        logger.info("Sim MCP: control_device(device_id=%s, action=%s, params=%s)", device_id, action, parameters)
         return await sim.control_device(device_id=device_id, action=action, parameters=parameters or {})
 
     @mcp.tool()

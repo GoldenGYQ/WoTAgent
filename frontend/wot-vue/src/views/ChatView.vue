@@ -40,6 +40,22 @@ function handleRuntimeEvent(event: any) {
       chatStore.currentSessionId = data.session_id;
     }
 
+  } else if (event_type === 'agent_phase') {
+    const roleLabels: Record<string, string> = {
+      planner: '📋 规划',
+      executor: '🔧 执行',
+      responder: '💬 回复',
+    };
+    const label = roleLabels[data.role] || `❓ ${data.role}`;
+    if (data.status === 'started') {
+      chatStore.addEventLog(label, '开始...');
+    } else if (data.plan) {
+      const planStr = `intent=${data.plan.intent}, ${data.plan.rationale || ''}`;
+      chatStore.addEventLog(label, planStr);
+    } else {
+      chatStore.addEventLog(label, '完成 ✓');
+    }
+
   } else if (event_type === 'thinking') {
     let lastMsg = getLastAssistant();
     if (!lastMsg) {

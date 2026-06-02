@@ -7,17 +7,22 @@ Exposes ``run_repl()`` for use by both ``repl.py`` (root wrapper) and
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from pathlib import Path
 
 from wotagent.core import create_wot_pipeline, get_session_manager, invoke_agent_stream
+from wotagent.events import get_bus
 from wotagent.logging import configure_logging, install_event_logger
 from wotagent.perception import get_perception_engine
 from wotagent.wot import load_tds
 
+# ANSI colour helpers
+GREEN = "\033[92m"
+RESET = "\033[0m"
+
 
 def _bool_env(key: str, default: bool = True) -> bool:
-    """Read a boolean from an env var, or fall back to *default*."""
     val = os.getenv(key)
     if val is None:
         return default
@@ -33,9 +38,9 @@ def print_header(thinking: bool, streaming: bool, perception: bool = False) -> N
     badges.append("THINK" if thinking else "DIRECT")
     badges.append("STREAM" if streaming else "BATCH")
     badges.append("PERCEP" if perception else "NOPERCEP")
-    badge_str = "  ·  ".join(badges)
+    badge_str = "  .  ".join(badges)
     print("  +--------------------------------------------+")
-    print("  |     WoTAgent  ·  LangChain 1.3+            |")
+    print("  |     WoTAgent  .  LangChain 1.3+            |")
     print("  |  Event-driven IoT Agent with WebSocket     |")
     print(f"  |  [{badge_str}]          |")
     print("  |                                            |")
@@ -53,11 +58,11 @@ def print_help(thinking: bool, streaming: bool, percept_running: bool = False) -
     /think on|off            Toggle thinking mode      (currently {'ON' if thinking else 'OFF'})
     /stream on|off           Toggle streaming output   (currently {'ON' if streaming else 'OFF'})
     /devices                 List all registered devices
-    /session list|new|switch Manage sessions (persist across restarts)
-    /history [n]             Show conversation history (last n, or all)
-    /rollback <index>        Discard messages after <index>, restart from there
+    /session list|new|switch Manage sessions
+    /history [n]             Show conversation history
+    /rollback <index>        Restart from message <index>
     /perception              Show perception status
-    /perception on|off       Toggle perception engine  (currently {'ON' if percept_running else 'OFF'})
+    /perception on|off       Toggle perception engine
     /perception rules        List perception rules
     /perception poll         Trigger one poll cycle now
     /new                     Clear conversation & start fresh
@@ -66,21 +71,16 @@ def print_help(thinking: bool, streaming: bool, percept_running: bool = False) -
 """)
 
 
+# Per-role labels
+_PHASE_LABELS = {"planner": "Planner", "executor": "Executor", "responder": "Responder"}
+_PHASE_ICONS = {"planner": "\U0001F4CB", "executor": "\U0001F527", "responder": "\U0001F4AC"}
+
+
 async def run_repl(
     log_mode: str = "file",
     enable_thinking: bool | None = None,
     enable_streaming: bool | None = None,
 ) -> None:
-    """Run the interactive REPL.
-
-    Args:
-        log_mode: ``"file"`` — log to wotagent.log (console stays clean);
-                  ``"console"`` — log to stderr.
-        enable_thinking: Override the env-var default.  ``None`` = read
-                         from ``ENABLE_THINKING`` env var.
-        enable_streaming: Override the env-var default.  ``None`` = read
-                          from ``ENABLE_STREAMING`` env var.
-    """
     configure_logging(mode=log_mode)
     install_event_logger()
     if enable_thinking is None:
@@ -93,18 +93,18 @@ async def run_repl(
     pipeline = create_wot_pipeline(enable_thinking=thinking, enable_streaming=streaming)
     mgr = get_session_manager(timeout_minutes=30)
 
-    # Start perception engine
     percept_enabled = _bool_env("ENABLE_PERCEPTION", default=True)
     percept_engine = get_perception_engine(
         polling_interval=int(os.getenv("PERCEPTION_INTERVAL", "60")),
-        auto_start=percept_enabled,
     )
+    if percept_enabled:
+        await percept_engine.start()
     percept_running = percept_engine.is_running
 
     clear_screen()
     print_header(thinking, streaming, percept_running)
     session = mgr.create(pipeline, user_role="operator", session_id="default")
-    session.memory.load()  # restore conversation history from disk
+    session.memory.load()
 
     while True:
         try:
@@ -133,7 +133,7 @@ async def run_repl(
                 for td in tds:
                     print(f"  {td.title} @ {td.location}  [{' '.join(td.capabilities)}]")
                     for a in td.actions:
-                        print(f"    → {a.name}")
+                        print(f"    -> {a.name}")
             print()
             continue
 
@@ -154,7 +154,7 @@ async def run_repl(
                 if entries:
                     print("  Available sessions:")
                     for s in entries:
-                        marker = "  ← current" if s == session.session_id else ""
+                        marker = "  <- current" if s == session.session_id else ""
                         print(f"    {s}{marker}")
                 else:
                     print("  (no saved sessions)")
@@ -244,7 +244,7 @@ async def run_repl(
                 print()
                 continue
             if idx == len(msgs) - 1:
-                print("  Already at the last message — nothing to rollback")
+                print("  Already at the last message - nothing to rollback")
                 print()
                 continue
             session.memory.truncate(idx)
@@ -277,7 +277,7 @@ async def run_repl(
             session = mgr.create(pipeline, user_role="operator")
             clear_screen()
             print_header(thinking, streaming, percept_running)
-            print(f"  Thinking mode → {'ON' if thinking else 'OFF'}  (pipeline recreated)")
+            print(f"  Thinking mode -> {'ON' if thinking else 'OFF'}  (pipeline recreated)")
             print()
             continue
 
@@ -298,11 +298,11 @@ async def run_repl(
             session = mgr.create(pipeline, user_role="operator", session_id=session.session_id)
             clear_screen()
             print_header(thinking, streaming)
-            print(f"  Streaming mode → {'ON' if streaming else 'OFF'}")
+            print(f"  Streaming mode -> {'ON' if streaming else 'OFF'}")
             print()
             continue
 
-        # ── Perception commands —──────────────────────────────────────
+        # ---- Perception commands ----
 
         if raw == "/perception":
             print(f"  Engine: {'RUNNING' if percept_running else 'STOPPED'}")
@@ -319,11 +319,11 @@ async def run_repl(
 
             if sub == "on":
                 if not percept_running:
-                    percept_engine.start()
+                    await percept_engine.start()
                     percept_running = True
                     clear_screen()
                     print_header(thinking, streaming, percept_running)
-                    print("  Perception engine → ON")
+                    print("  Perception engine -> ON")
                 else:
                     print("  Perception engine already ON")
                 print()
@@ -335,7 +335,7 @@ async def run_repl(
                     percept_running = False
                     clear_screen()
                     print_header(thinking, streaming, percept_running)
-                    print("  Perception engine → OFF")
+                    print("  Perception engine -> OFF")
                 else:
                     print("  Perception engine already OFF")
                 print()
@@ -353,31 +353,31 @@ async def run_repl(
                 continue
 
             if sub == "poll":
-                import time
                 triggered = await percept_engine.poll_once()
                 if triggered:
                     for p in triggered:
-                        print(f"  ⚡ Rule triggered: {p.get('rationale', '')}")
+                        print(f"  Rule triggered: {p.get('rationale', '')}")
                         for s in p.get("steps", []):
-                            print(f"     → {s.get('action', '')} on {s.get('target', '')}")
+                            print(f"     -> {s.get('action', '')} on {s.get('target', '')}")
                 else:
                     print("  No rules triggered")
                 print()
                 continue
 
-            print("  Usage: /perception        — show status")
-            print("         /perception on|off  — start/stop engine")
-            print("         /perception rules   — list rules")
-            print("         /perception poll    — poll now")
+            print("  Usage: /perception        - show status")
+            print("         /perception on|off  - start/stop engine")
+            print("         /perception rules   - list rules")
+            print("         /perception poll    - poll now")
             print()
             continue
 
-        # ── Chat turn —────────────────────────────────────────────────
-        last_content = ""   # track cumulative content from AIMessageChunk
+        # ---- Chat turn ----
+        last_content = ""
         tool_active = False
-        streamed = False    # streaming mode printed at least one token
-        thinking_printed = ""  # last full thinking text displayed
+        streamed = False
+        thinking_printed = ""
         thinking_streamed = False
+        in_green = False
         try:
             async for chunk in invoke_agent_stream(
                 session.agent,
@@ -389,22 +389,34 @@ async def run_repl(
             ):
                 ct = chunk["type"]
 
-                # Close thinking line when moving to non-thinking
+                # Close thinking line when switching to non-thinking
                 if thinking_streamed and ct != "thinking":
                     print()
                     thinking_streamed = False
 
-                if ct == "plan":
-                    plan = chunk["content"]
-                    intent = plan.get("intent", "?")
-                    steps = plan.get("steps", [])
-                    print(f"      📋 Plan: intent={intent}" + (f" ({len(steps)} steps)" if steps else ""))
-                    print()
+                # Reset ANSI colour before any non-token output to prevent colour bleed
+                if in_green and ct not in ("token",):
+                    print(RESET, end="", flush=True)
+                    in_green = False
+
+                if ct == "phase":
+                    role = chunk.get("role", "?")
+                    status = chunk.get("status", "")
+                    rl = _PHASE_LABELS.get(role, role)
+                    icon = _PHASE_ICONS.get(role, "")
+                    if status == "started":
+                        print(f"      {icon} [{rl}] start...")
+                    elif chunk.get("plan"):
+                        p = chunk["plan"]
+                        steps = p.get("steps", [])
+                        print(f"      {icon} [{rl}] intent={p.get('intent','?')}, {p.get('rationale','')}"
+                              + (f" ({len(steps)} steps)" if steps else ""))
+                    else:
+                        print(f"      {icon} [{rl}] done")
                     continue
 
                 if ct == "thinking":
                     content = chunk["content"]
-                    # Extract delta — reasoning_content may be cumulative
                     if content.startswith(thinking_printed):
                         delta = content[len(thinking_printed):]
                     else:
@@ -412,47 +424,55 @@ async def run_repl(
                     thinking_printed = content
                     if delta:
                         if not thinking_streamed:
-                            print(f" 🤔 {delta}", end="", flush=True)
+                            print(f" {delta}", end="", flush=True)
                             thinking_streamed = True
                         else:
                             print(delta, end="", flush=True)
-                    
+
                 elif ct == "wot.agent.action.started":
-                    inp = chunk["data"].get("input", "")
+                    tool_name = chunk["data"].get("_tool_name", "tool")
+                    inp = chunk["data"].get("input", {})
                     if isinstance(inp, dict):
-                        inp = str(inp)[:120]
-                    print(f"      🔧 {inp}")
+                        inp_str = json.dumps(inp, ensure_ascii=False)[:120]
+                    else:
+                        inp_str = str(inp)[:120]
+                    print(f"      tool call: {tool_name}({inp_str})")
                     tool_active = True
 
                 elif ct == "wot.agent.action.completed":
+                    tool_name = chunk["data"].get("_tool_name", "")
                     output = chunk["data"].get("output", {})
                     if isinstance(output, dict):
-                        if "message" in output:
-                            msg = output["message"]
-                        elif "error" in output:
-                            msg = f"Error: {output['error']}"
-                        elif output.get("success") and "device" in output:
+                        if output.get("error"):
+                            msg = output["error"]
+                        elif output.get("success") is False:
+                            msg = output.get("message", "failed")
+                        elif output.get("success") and output.get("device"):
                             msg = f"OK ({output['device']})"
+                        elif output.get("text"):
+                            msg = str(output["text"])[:120]
                         else:
-                            msg = str(output)[:120]
+                            msg = ""
                     elif isinstance(output, list):
                         msg = f"Found {len(output)} device(s)"
                     else:
                         msg = str(output)[:120]
                     if msg:
-                        print(f"      ✅ {msg}")
+                        print(f"      result: {tool_name} -> {msg}")
+                    else:
+                        print(f"      result: {tool_name} done")
                     tool_active = False
 
                 elif ct == "wot.agent.action.failed":
+                    tool_name = chunk["data"].get("_tool_name", "tool")
                     err = str(chunk["data"].get("error", "unknown"))[:120]
-                    print(f"      ❌ {err}")
+                    print(f"      failed: {tool_name} -> {err}")
                     tool_active = False
 
                 elif ct == "token":
                     content = chunk["content"]
                     if content == last_content:
                         continue
-                    # Extract delta — AIMessageChunk.content is cumulative
                     if len(content) > len(last_content) and content.startswith(last_content):
                         delta = content[len(last_content):]
                     elif not last_content:
@@ -460,15 +480,14 @@ async def run_repl(
                     else:
                         delta = content
                     last_content = content
-
                     if streaming:
                         if tool_active:
                             print()
                             tool_active = False
-                        # Print delta directly (no \r — content may contain newlines)
                         if not streamed:
-                            print(f"  {delta}", end="", flush=True)
+                            print(f"  {GREEN}{delta}", end="", flush=True)
                             streamed = True
+                            in_green = True
                         else:
                             print(delta, end="", flush=True)
 
@@ -478,10 +497,11 @@ async def run_repl(
                     streamed = True
 
                 elif ct == "done":
-                    if streaming and streamed:
-                        print()  # close streaming line
+                    if in_green:
+                        print(RESET)
+                        in_green = False
                     elif not streaming and last_content:
-                        print(f"  {last_content}")
+                        print(f"  {GREEN}{last_content}{RESET}")
                     elif not last_content and not streamed:
                         print("  (no response)")
                     print()

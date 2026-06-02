@@ -1,4 +1,8 @@
-﻿"""Rule models for the perception engine -- using Pydantic for validation."""
+﻿"""Rule models for the perception engine -- using Pydantic for validation.
+
+NOTE: Keep in sync with wot-device-simulator/src/wot_device_simulator/rules.py.
+The simulator uses dataclasses; this module uses Pydantic.
+"""
 
 from __future__ import annotations
 

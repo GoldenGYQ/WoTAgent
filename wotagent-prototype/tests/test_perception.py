@@ -214,7 +214,7 @@ class TestPerceptionEngine:
 
             engine = PerceptionEngine(polling_interval=60)
             assert not engine.is_running
-            engine.start()
+            await engine.start()
             assert engine.is_running
             await engine.stop()
             assert not engine.is_running

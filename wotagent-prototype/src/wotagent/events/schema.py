@@ -16,6 +16,7 @@ def _utcnow() -> datetime:
 EventType = Literal[
     "wot.session.started",
     "wot.session.ended",
+    "wot.agent.phase",
     "wot.agent.thought",
     "wot.agent.token",
     "wot.agent.plan",

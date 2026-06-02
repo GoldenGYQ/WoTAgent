@@ -128,7 +128,7 @@ class SessionManager:
 
     def cleanup_expired(self) -> int:
         """Remove expired sessions. Returns count of removed sessions."""
-        expired = [sid for sid, sess in self._sessions.items() if sess.is_expired(self._timeout_minutes)]
+        expired = [sid for sid, sess in self._sessions.items() if sess.is_expired]
         for sid in expired:
             self.delete(sid)
         return len(expired)

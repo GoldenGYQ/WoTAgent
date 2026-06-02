@@ -54,17 +54,13 @@ class PerceptionEngine:
     # Lifecycle
     # ------------------------------------------------------------------
 
-    def start(self) -> None:
+    async def start(self) -> None:
         """Start the background polling loop (idempotent)."""
         if self._running:
             return
         self._running = True
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        self._task = loop.create_task(self._run_loop())
+        self._task = asyncio.create_task(self._run_loop())
+        logger.info("Perception engine started | interval=%ds", self.polling_interval)
 
     async def stop(self) -> None:
         """Stop the background polling loop."""
@@ -96,6 +92,7 @@ class PerceptionEngine:
             from ..tools.mcp_client import get_mcp_client
 
             client = await get_mcp_client()
+            logger.info("Perception: fetching all device states via MCP query_all_states")
             result = await client.call_tool("query_all_states", {})
             text = result.get("text", "")
             if text:
@@ -103,6 +100,7 @@ class PerceptionEngine:
 
                 states = json.loads(text)
                 if isinstance(states, dict):
+                    logger.info("Perception: got %d device states", len(states))
                     self._cached_states = states
                     return states
         except Exception as exc:
@@ -115,6 +113,7 @@ class PerceptionEngine:
             from ..tools.mcp_client import get_mcp_client
 
             client = await get_mcp_client()
+            logger.info("Perception: triggering drift cycle via MCP")
             await client.call_tool("drift", {})
         except Exception as exc:
             logger.debug("MCP drift failed (will retry): %s", exc)
@@ -136,9 +135,12 @@ class PerceptionEngine:
         )
         try:
             while self._running:
+                logger.info("Perception: poll cycle #%d — drift then evaluate rules", self._stats["polls"] + 1)
                 await self._trigger_drift()
                 await self._evaluate_rules()
                 self._stats["polls"] += 1
+                logger.info("Perception: poll cycle #%d complete — %d triggers so far",
+                           self._stats["polls"], self._stats["triggers"])
                 await asyncio.sleep(self.polling_interval)
         except asyncio.CancelledError:
             pass
@@ -251,12 +253,9 @@ _engine: PerceptionEngine | None = None
 
 def get_perception_engine(
     polling_interval: int = 60,
-    auto_start: bool = True,
 ) -> PerceptionEngine:
-    """Return the global ``PerceptionEngine`` singleton."""
+    """Return the global ``PerceptionEngine`` singleton (caller must ``await engine.start()``)."""
     global _engine
     if _engine is None:
         _engine = PerceptionEngine(polling_interval=polling_interval)
-        if auto_start:
-            _engine.start()
     return _engine

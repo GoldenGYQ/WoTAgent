@@ -15,6 +15,9 @@ export class WoTAPI {
   private wsConnectWaiters: { resolve: () => void; reject: (err: Error) => void }[] = [];
   private connected = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 10;
+  private baseReconnectDelay = 1000;
 
   private constructor() {}
 
@@ -58,7 +61,11 @@ export class WoTAPI {
 
   connectWebSocket() {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) return;
-    if (this.ws && (this.ws.readyState === WebSocket.CONNECTING)) return;
+    if (this.ws && this.ws.readyState === WebSocket.CONNECTING) return;
+    // If currently closing, wait for it to fully close before reconnecting
+    if (this.ws && this.ws.readyState === WebSocket.CLOSING) {
+      this.disconnectWebSocket();
+    }
 
     // Close stale connection
     if (this.ws) {
@@ -74,6 +81,7 @@ export class WoTAPI {
 
     this.ws.onopen = () => {
       this.connected = true;
+      this.reconnectAttempts = 0; // Reset backoff on successful connection
       // Resolve any waiters
       const waiters = [...this.wsConnectWaiters];
       this.wsConnectWaiters = [];
@@ -117,8 +125,19 @@ export class WoTAPI {
         pending.reject(new Error('WebSocket connection closed'));
       });
       this.pendingCommands.clear();
-      // Auto-reconnect
-      this.reconnectTimer = setTimeout(() => this.connectWebSocket(), 3000);
+      // Auto-reconnect with exponential backoff + jitter
+      if (this.reconnectAttempts < this.maxReconnectAttempts) {
+        const delay = Math.min(
+          this.baseReconnectDelay * Math.pow(2, this.reconnectAttempts),
+          30000, // cap at 30 seconds
+        ) + Math.random() * 1000; // jitter
+        this.reconnectTimer = setTimeout(() => {
+          this.reconnectAttempts++;
+          this.connectWebSocket();
+        }, delay);
+      } else {
+        console.error('WebSocket: max reconnect attempts reached');
+      }
     };
 
     this.ws.onerror = () => {
@@ -131,6 +150,7 @@ export class WoTAPI {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    this.reconnectAttempts = 0;
     if (this.ws) {
       this.ws.onclose = null;
       this.ws.onerror = null;
@@ -249,6 +269,13 @@ export class WoTAPI {
     const timestamp = msg.timestamp || Date.now();
 
     switch (et) {
+      case 'wot.agent.phase':
+        return {
+          event_type: 'agent_phase',
+          data: { role: d.role, status: d.status, plan: d.plan },
+          timestamp,
+        };
+
       case 'wot.session.started':
         return {
           event_type: 'session_started',

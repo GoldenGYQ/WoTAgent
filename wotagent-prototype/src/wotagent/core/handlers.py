@@ -11,9 +11,9 @@ from langchain_core.messages import HumanMessage
 
 from ..events import Event, get_bus
 from ..memory import ConversationMemory, SessionTranscript
+from ..prompts import get_template
 from .models import AgentContext
 from .pipeline import AgentPipeline
-from .pipeline import _build_llm
 from .state import ConversationState
 
 logger = logging.getLogger(__name__)
@@ -47,6 +47,7 @@ async def _on_agent_event(
     *,
     session_id: str = "",
     tool_name: str = "",
+    agent_role: str = "",
 ) -> None:
     """Emit a CloudEvent for a LangChain agent lifecycle event."""
     bus = get_bus()
@@ -60,6 +61,8 @@ async def _on_agent_event(
     enriched = _sanitize(data)
     if tool_name:
         enriched["_tool_name"] = tool_name
+    if agent_role:
+        enriched["_agent_role"] = agent_role
     await bus.emit(Event(
         source=f"wotagent/agent/{event_name}",
         type=wot_type,
@@ -122,7 +125,7 @@ async def execute_plan_directly(
 
             if kind in ("on_tool_start", "on_tool_end", "on_tool_error"):
                 await _on_agent_event(kind, data, session_id=session_id,
-                                      tool_name=event.get("name", ""))
+                                      tool_name=event.get("name", ""), agent_role="executor")
 
             if kind == "on_chain_end":
                 output = data.get("output", {})
@@ -131,18 +134,22 @@ async def execute_plan_directly(
                     if msg_list and hasattr(msg_list[-1], "content"):
                         exec_final = msg_list[-1].content or ""
 
-        obs_context = AgentContext(
-            session_id=session_id,
-            user_role=user_role,
-            user_message=message,
-            plan_json=plan_json,
-            execution_results=exec_final or "(no output)",
-        )
-        obs_result = await pipeline.observer.ainvoke(
-            {"messages": [HumanMessage(content="Reply to the user.")]},
-            context=obs_context,
-        )
-        final_text = obs_result["messages"][-1].content or exec_final
+        # Use observer for formatting if available, otherwise use executor output directly
+        if pipeline.observer is not None:
+            obs_context = AgentContext(
+                session_id=session_id,
+                user_role=user_role,
+                user_message=message,
+                plan_json=plan_json,
+                execution_results=exec_final or "(no output)",
+            )
+            obs_result = await pipeline.observer.ainvoke(
+                {"messages": [HumanMessage(content="Reply to the user.")]},
+                context=obs_context,
+            )
+            final_text = obs_result["messages"][-1].content or exec_final
+        else:
+            final_text = exec_final
 
     except Exception as exc:
         logger.exception("Direct plan execution failed")
@@ -232,7 +239,7 @@ async def invoke_agent_stream(
     perception_ctx = ""
     try:
         from ..perception import get_perception_engine
-        engine = get_perception_engine(auto_start=False)
+        engine = get_perception_engine()
         if engine.is_running:
             perception_ctx = await engine.get_context()
     except Exception:
@@ -270,85 +277,74 @@ async def invoke_agent_stream(
     thinking_batch_emitted = False
 
     try:
-        # ---- Phase 1: Intent classification via tool-calling ----
-        intent_model = _build_llm(temperature=0, enable_thinking=False)
-        intent_schema = {
-            "type": "function",
-            "function": {
-                "name": "classify_intent",
-                "description": "Classify user message intent",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "intent": {
-                            "type": "string",
-                            "enum": ["chat", "query", "control"],
-                            "description": "chat=pure chat, query=ask about device/environment, control=operate device/environment",
-                        },
-                        "rationale": {
-                            "type": "string",
-                            "description": "Classification rationale (concise)",
-                        },
-                    },
-                    "required": ["intent", "rationale"],
-                },
-            },
-        }
-        intent_model_with_tool = intent_model.bind(
-            tools=[intent_schema],
-            tool_choice={"type": "function", "function": {"name": "classify_intent"}},
-        )
+        # ---- Phase 1: Planner — classify intent + generate structured plan ----
+        await bus.emit(Event(type="wot.agent.phase", source="wotagent/core/pipeline",
+            data={"role": "planner", "status": "started"}, session_id=session_id))
+        yield {"type": "phase", "role": "planner", "status": "started"}
 
-        intent_prompt = (
-            "Classify the user message intent. Output only the classification.\n\n"
-            "Rules:\n"
-            "- **control**: user wants to operate devices or complains about environment\n"
-            "- **query**: user asks about device or environment state\n"
-            "- **chat**: pure chat/greeting -- does not involve any device or environment\n\n"
-            "Note: any message containing device names (light, AC, fan, temperature, humidity) is NOT chat."
-        )
-
+        # Build planner prompt with conversation context from state
+        planner_prompt_text = ""
         if state is not None:
             ctx = state.get_context_str()
-            if ctx:
-                intent_prompt += "\n\n## Recent conversation context\n" + ctx
             hint = state.get_continuation_hint()
+            parts = []
+            if ctx:
+                parts.append("## Recent conversation context\n" + ctx)
             if hint:
-                intent_prompt += "\n\n## Intent continuation hint\n" + hint
+                parts.append("## Intent continuation hint\n" + hint)
+            if parts:
+                planner_prompt_text = "\n\n".join(parts)
 
-        intent_result = await intent_model_with_tool.ainvoke([
-            ("system", intent_prompt),
+        planner_system = get_template("planner").partial(
+            role=user_role,
+            session_id=session_id,
+            perception_context=perception_ctx,
+            tools_description="(no tools — classification only)",
+            extra_instructions=planner_prompt_text,
+        )
+        planner_system_str = planner_system.format_messages()[0].content
+
+        plan_result = await pipeline.planner.ainvoke([
+            ("system", planner_system_str),
             ("human", message),
         ])
 
-        intent_data: dict[str, Any] = {"intent": "chat", "rationale": "No tool call returned"}
-        tool_calls = getattr(intent_result, "tool_calls", None)
+        # Parse tool call from planner output
+        plan_data: dict[str, Any] = {"intent": "chat", "rationale": "No tool call returned", "steps": []}
+        tool_calls = getattr(plan_result, "tool_calls", None)
         if not tool_calls:
-            raw = intent_result.additional_kwargs.get("tool_calls", [])
+            raw = plan_result.additional_kwargs.get("tool_calls", [])
             if raw:
                 try:
-                    intent_data = json.loads(raw[0]["function"]["arguments"])
+                    plan_data = json.loads(raw[0]["function"]["arguments"])
                 except (KeyError, json.JSONDecodeError):
                     pass
         else:
             tc = tool_calls[0]
-            if tc.get("name") == "classify_intent":
-                intent_data = tc.get("args", tc.get("function", {}).get("arguments", {}))
+            if tc.get("name") in ("generate_plan", "classify_intent"):
+                plan_data = tc.get("args", tc.get("function", {}).get("arguments", {}))
 
-        intent = intent_data.get("intent", "chat")
-        rationale = intent_data.get("rationale", "")
-        plan_raw = json.dumps({"intent": intent, "rationale": rationale}, ensure_ascii=False)
+        intent = plan_data.get("intent", "chat")
+        rationale = plan_data.get("rationale", "")
+        plan_raw = json.dumps(plan_data, ensure_ascii=False)
+
+        await bus.emit(Event(type="wot.agent.phase", source="wotagent/core/pipeline",
+            data={"role": "planner", "status": "completed", "plan": plan_data}, session_id=session_id))
+        yield {"type": "phase", "role": "planner", "status": "completed", "plan": plan_data}
 
         yield {
             "type": "plan",
             "intent": intent,
             "rationale": rationale,
             "plan": plan_raw,
-            "content": {"intent": intent, "rationale": rationale, "steps": []},
+            "content": plan_data,
         }
 
         # ---- Route based on intent ----
         if intent == "chat":
+            await bus.emit(Event(type="wot.agent.phase", source="wotagent/core/pipeline",
+                data={"role": "responder", "status": "started"}, session_id=session_id))
+            yield {"type": "phase", "role": "responder", "status": "started"}
             responder_context = AgentContext(
                 session_id=session_id,
                 user_role=user_role,
@@ -365,7 +361,7 @@ async def invoke_agent_stream(
                 data = event.get("data", {})
 
                 if kind == "on_chat_model_start":
-                    await _on_agent_event(kind, data, session_id=session_id)
+                    await _on_agent_event(kind, data, session_id=session_id, agent_role="responder")
                     yield {"type": "thinking", "content": ""}
 
                 if kind in ("on_chain_stream", "on_chat_model_stream"):
@@ -411,6 +407,9 @@ async def invoke_agent_stream(
                                     yield {"type": "thinking", "content": rc}
                                     streamed_thinking = True
                                     thinking_buffer += rc
+            await bus.emit(Event(type="wot.agent.phase", source="wotagent/core/pipeline",
+                data={"role": "responder", "status": "completed"}, session_id=session_id))
+            yield {"type": "phase", "role": "responder", "status": "completed"}
             if final_text and not streamed_token_output:
                 await bus.emit(Event(
                     source="wotagent/core/pipeline",
@@ -428,7 +427,10 @@ async def invoke_agent_stream(
                 ))
                 thinking_batch_emitted = True
         else:
-            # Phase 2: Executor -- run tool calls
+            # Phase 2: Executor — execute tools + stream final response directly
+            await bus.emit(Event(type="wot.agent.phase", source="wotagent/core/pipeline",
+                data={"role": "executor", "status": "started"}, session_id=session_id))
+            yield {"type": "phase", "role": "executor", "status": "started"}
             exec_final = ""
             exec_context = AgentContext(
                 session_id=session_id,
@@ -445,11 +447,20 @@ async def invoke_agent_stream(
                 data = event.get("data", {})
 
                 if kind == "on_chat_model_start":
-                    await _on_agent_event(kind, data, session_id=session_id)
+                    await _on_agent_event(kind, data, session_id=session_id, agent_role="executor")
                     yield {"type": "thinking", "content": ""}
 
                 if kind in ("on_chain_stream", "on_chat_model_stream"):
                     delta = data.get("chunk", {})
+                    if hasattr(delta, "content") and delta.content:
+                        await bus.emit(Event(
+                            source="wotagent/core/pipeline",
+                            type="wot.agent.token",
+                            data={"content": delta.content},
+                            session_id=session_id,
+                        ))
+                        yield {"type": "token", "content": delta.content}
+                        streamed_token_output = True
                     if hasattr(delta, "additional_kwargs"):
                         rc = delta.additional_kwargs.get("reasoning_content", "")
                         if rc:
@@ -460,6 +471,7 @@ async def invoke_agent_stream(
                                 session_id=session_id,
                             ))
                             yield {"type": "thinking", "content": rc}
+                            streamed_thinking = True
                             thinking_buffer += rc
 
                 if kind in ("on_tool_start", "on_tool_end", "on_tool_error"):
@@ -468,7 +480,9 @@ async def invoke_agent_stream(
                         "on_tool_end": "wot.agent.action.completed",
                         "on_tool_error": "wot.agent.action.failed",
                     }[kind]
-                    yield {"type": wot_type, "data": dict(data)}
+                    enriched = dict(data)
+                    enriched["_tool_name"] = event.get("name", "")
+                    yield {"type": wot_type, "data": enriched}
 
                     if transcript is not None and kind == "on_tool_end":
                         tool_name = event.get("name", "")
@@ -504,19 +518,11 @@ async def invoke_agent_stream(
                                     streamed_thinking = True
                                     thinking_buffer += rc
 
-            # Phase 3: Observer
-            obs_context = AgentContext(
-                session_id=session_id,
-                user_role=user_role,
-                user_message=message,
-                plan_json=plan_raw,
-                execution_results=exec_final or "(no output from executor)",
-            )
-            obs_result = await pipeline.observer.ainvoke(
-                {"messages": [HumanMessage(content=f"User said: {message}\nReply to the user.")]},
-                context=obs_context,
-            )
-            final_text = obs_result["messages"][-1].content or exec_final
+            await bus.emit(Event(type="wot.agent.phase", source="wotagent/core/pipeline",
+                data={"role": "executor", "status": "completed"}, session_id=session_id))
+            yield {"type": "phase", "role": "executor", "status": "completed"}
+            # Executor directly produces the final response (no observer pass-through)
+            final_text = exec_final
             if final_text and not streamed_token_output:
                 await bus.emit(Event(
                     source="wotagent/core/pipeline",
@@ -548,7 +554,7 @@ async def invoke_agent_stream(
     if memory is not None:
         memory.add_user_message(message)
         memory.add_ai_message(final_text)
-        memory.save()
+        # Note: persistence handled by transcript.save() below
 
     if transcript is not None:
         transcript.record_assistant_response(final_text)

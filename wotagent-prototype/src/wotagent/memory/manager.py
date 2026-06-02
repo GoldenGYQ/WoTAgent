@@ -88,17 +88,14 @@ class ConversationMemory:
     # ------------------------------------------------------------------
 
     def save(self) -> None:
-        """Persist messages to ``data/memory/{session_id}.json``."""
-        path = self._data_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            messages = []
-            for m in self._messages:
-                t = "human" if isinstance(m, HumanMessage) else "ai" if isinstance(m, AIMessage) else "system"
-                messages.append({"type": t, "content": m.content})
-            path.write_text(json.dumps(messages, ensure_ascii=False, indent=2), encoding="utf-8")
-        except Exception:
-            logging.getLogger(__name__).exception("Failed to save memory for %s", self.session_id)
+        """Persist messages.
+
+        Deprecated: persistence is handled by SessionTranscript.
+        This method is a no-op for forward compatibility.
+        """
+        logging.getLogger(__name__).warning(
+            "ConversationMemory.save() is deprecated — use SessionTranscript instead"
+        )
 
     def load(self) -> None:
         """Load messages from ``data/memory/{session_id}.json`` (if exists)."""

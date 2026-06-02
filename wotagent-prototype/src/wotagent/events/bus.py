@@ -46,16 +46,22 @@ class EventBus:
             subscribers = list(self._subscribers.get(None, []))  # catch-all
             subscribers.extend(self._subscribers.get(event.type, []))
 
+        # Dispatch subscribers concurrently with error isolation
+        tasks: list[asyncio.Task[None]] = []
         for cb in subscribers:
-            try:
-                result = cb(event)
-                if result is not None:
-                    await result
-            except Exception:
-                logger.exception("EventBus subscriber error for %s", event.type)
+            async def _safe_dispatch(cb=cb, event=event) -> None:  # type: ignore[functional-parameters]
+                try:
+                    result = cb(event)
+                    if result is not None:
+                        await result
+                except Exception:
+                    logger.exception("EventBus subscriber error for %s", event.type)
 
-    # ------------------------------------------------------------------
-    # Subscribe
+            tasks.append(asyncio.create_task(_safe_dispatch()))
+
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
     # ------------------------------------------------------------------
 
     def subscribe(

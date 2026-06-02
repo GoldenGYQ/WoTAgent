@@ -68,8 +68,8 @@ _pipeline = create_wot_pipeline(
 )
 _session_manager = get_session_manager(timeout_minutes=30)
 
-# Start perception engine
-_perception_engine = get_perception_engine(polling_interval=60, auto_start=True)
+# Start perception engine (async — started on FastAPI startup event)
+_perception_engine = get_perception_engine(polling_interval=60)
 
 # ---- Perception auto-execute ----
 _ENABLE_AUTO_EXEC = os.getenv("ENABLE_PERCEPTION_AUTO_EXEC", "false").lower() in ("1", "true", "yes")
@@ -109,11 +109,24 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:8000"],
+    allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000").split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# FastAPI lifecycle — start/stop perception engine on the correct event loop
+@app.on_event("startup")
+async def _start_perception():
+    logger.info("Starting perception engine...")
+    await _perception_engine.start()
+
+
+@app.on_event("shutdown")
+async def _stop_perception():
+    if _perception_engine.is_running:
+        logger.info("Stopping perception engine...")
+        await _perception_engine.stop()
 
 
 # ---------------------------------------------------------------------------
@@ -386,7 +399,7 @@ async def chat(req: ChatRequest) -> ChatSubmitResponse:
     ``wot.agent.action.*``, ``wot.agent.response``, and ``wot.session.ended``
     events on its WebSocket connection when possible.
     """
-    session_id = req.session_id or "web_ui"
+    session_id = req.session_id or f"rest_{uuid.uuid4().hex[:12]}"
     session = _session_manager.get_or_create(
         _pipeline,
         session_id=session_id,
@@ -465,12 +478,13 @@ async def session_messages(session_id: str) -> SessionMessagesResponse:
 @app.get("/api/devices", response_model=DeviceListResponse)
 async def list_devices(location: str | None = None) -> DeviceListResponse:
     """List IoT devices, optionally filtered by location."""
+    logger.info("API /api/devices called (location=%s) — fetching via MCP", location)
     devices = find_devices(location=location) if location else find_devices()
     all_states: dict[str, dict[str, Any]] = {}
     try:
         all_states = await _perception_engine.get_all_states()
     except Exception:
-        pass
+        logger.debug("API /api/devices: get_all_states failed", exc_info=True)
     return DeviceListResponse(
         devices=[
             DeviceListEntry(
