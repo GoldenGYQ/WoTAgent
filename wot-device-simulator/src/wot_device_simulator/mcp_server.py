@@ -99,8 +99,8 @@ def _build_server(sim=None):
 
     @mcp.tool()
     async def poll_once() -> dict[str, Any]:
-        rules = await sim.poll_once()
-        return {"triggered": len(rules), "rules": rules}
+        await sim.poll_once()
+        return {"success": True, "message": "Drift cycle completed"}
 
     @mcp.tool()
     async def patch_state(device_id: str, property_name: str, value: Any) -> dict[str, Any]:

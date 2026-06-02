@@ -270,20 +270,11 @@ class TestSimulatorEngine:
 
     @pytest.mark.asyncio
     async def test_poll_once(self):
-        from wot_device_simulator.simulator import DeviceStateStore, SimulatorEngine
-
-        DeviceStateStore.reset()
-        DeviceStateStore.initialize()
-        DeviceStateStore.set_property("ac-001", "currentTemperature", 36.0)
+        from wot_device_simulator.simulator import SimulatorEngine
 
         engine = SimulatorEngine(polling_interval=9999)
-        for r in engine.rules:
-            if r.name == "high_temperature":
-                r.last_triggered = 0
-
-        triggered = await engine.poll_once()
-        names = [p.get("triggered_by") for p in triggered]
-        assert "high_temperature" in names
+        result = await engine.poll_once()
+        assert result is None  # poll_once now just drifts, no return value
 
     @pytest.mark.asyncio
     async def test_patch_state(self):

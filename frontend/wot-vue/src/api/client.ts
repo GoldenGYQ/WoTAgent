@@ -272,7 +272,13 @@ export class WoTAPI {
       case 'wot.agent.phase':
         return {
           event_type: 'agent_phase',
-          data: { role: d.role, status: d.status, plan: d.plan },
+          data: {
+            role: d.role,
+            status: d.status,
+            plan: d.plan,
+            steps_count: d.plan?.steps?.length || 0,
+            rationale: d.plan?.rationale || '',
+          },
           timestamp,
         };
 
@@ -287,7 +293,6 @@ export class WoTAPI {
         return { event_type: 'turn_complete', data: { session_id: msg.session_id }, timestamp };
 
       case 'wot.agent.plan':
-        // Backend format: {"plan": {"intent": "...", "rationale": "...", "steps": [{"step": "...", "tool": "..."}]}}
         const planObj = d.plan || {};
         const rawSteps = planObj.steps || [];
         const planSteps = rawSteps.map((s: any) => ({
@@ -304,7 +309,7 @@ export class WoTAPI {
       case 'wot.agent.thought':
         return {
           event_type: 'thinking',
-          data: { thinking: d.content || '' },
+          data: { thinking: d.content || '', batch: d.batch === true },
           timestamp,
         };
 
@@ -321,20 +326,26 @@ export class WoTAPI {
           data: {
             id: `${d._tool_name || d.action || 'tool'}-${Date.now()}`,
             name: d._tool_name || d.action || 'device_action',
-            arguments: { device: d.device || d.device_id, parameters: d.parameters },
+            arguments: d.input || d.arguments || { device: d.device || d.device_id, parameters: d.parameters },
             status: 'calling',
           },
           timestamp,
         };
 
       case 'wot.agent.action.completed':
+        const output = d.output || d.result || {};
+        const deviceName = output.device || output.device_id || d.device || d.device_id || '';
+        const summary = deviceName
+          ? `${deviceName} → ${output.status || output.message || '完成'}`
+          : output.text || d.result || '执行成功';
         return {
           event_type: 'tool_result',
           data: {
             id: `${d._tool_name || d.action || 'tool'}-${Date.now()}`,
             name: d._tool_name || d.action || 'device_action',
             status: 'done',
-            content: d.result || '执行成功',
+            content: output,
+            summary,
           },
           timestamp,
         };

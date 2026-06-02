@@ -155,8 +155,8 @@ async def state_by_device(request: Request) -> JSONResponse:
 
 @mcp.custom_route("/api/poll", methods=["POST"])
 async def poll_once(request: Request) -> JSONResponse:
-    rules = await _sim.poll_once()
-    return JSONResponse({"triggered": len(rules), "rules": rules})
+    await _sim.poll_once()
+    return JSONResponse({"success": True, "message": "Drift cycle completed"})
 
 
 @mcp.custom_route("/api/events", methods=["GET"])

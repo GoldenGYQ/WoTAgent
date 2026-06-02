@@ -48,12 +48,12 @@ function handleRuntimeEvent(event: any) {
     };
     const label = roleLabels[data.role] || `❓ ${data.role}`;
     if (data.status === 'started') {
-      chatStore.addEventLog(label, '开始...');
+      chatStore.logInfo(label, '开始...');
     } else if (data.plan) {
       const planStr = `intent=${data.plan.intent}, ${data.plan.rationale || ''}`;
       chatStore.addEventLog(label, planStr);
     } else {
-      chatStore.addEventLog(label, '完成 ✓');
+      chatStore.logInfo(label, '完成 ✓');
     }
 
   } else if (event_type === 'thinking') {
@@ -66,7 +66,7 @@ function handleRuntimeEvent(event: any) {
       _currentThinking += data.thinking || '';
       lastMsg.thinking = _currentThinking;
     }
-    chatStore.addEventLog('🤔 思考', (data.thinking || '').slice(0, 100));
+    chatStore.logDebug('🤔 思考', (data.thinking || '').slice(0, 100));
 
   } else if (event_type === 'assistant_stream') {
     let lastMsg = getLastAssistant();
@@ -134,10 +134,10 @@ function handleRuntimeEvent(event: any) {
       }
       lastMsg.status = 'done';
     }
-    chatStore.addEventLog('✅ 回复', (data.content || '').slice(0, 150));
+    chatStore.logInfo('✅ 回复', (data.content || '').slice(0, 150));
 
   } else if (event_type === 'status') {
-    chatStore.addEventLog('📡 状态', data.message || '');
+    chatStore.logInfo('📡 状态', data.message || '');
 
   } else if (event_type === 'turn_complete') {
     _activeRun = false;
@@ -156,7 +156,7 @@ function handleRuntimeEvent(event: any) {
     });
     chatStore.isTyping = false;
     _activeRun = false;
-    chatStore.addEventLog('❌ 错误', data.error || '');
+    chatStore.logError('❌ 错误', data.error || '');
 
   } else if (event_type === 'session_update') {
     chatStore.fetchSessions();
@@ -248,7 +248,7 @@ async function sendMessage() {
     }
     chatStore.isTyping = false;
     _activeRun = false;
-    chatStore.addEventLog('❌ 提交失败', err.message);
+    chatStore.logError('❌ 提交失败', err.message);
   }
 }
 

@@ -9,7 +9,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .rules import EnvironmentRule, default_rules
+# NOTE: Rule evaluation is done by wotagent-prototype PerceptionEngine.
+# The simulator only stores state and simulates drift.
 from .td import find_devices, get_device_by_id, load_tds
 
 logger = logging.getLogger(__name__)
@@ -275,14 +276,12 @@ class DeviceStateStore:
 class SimulatorEngine:
     def __init__(
         self,
-        rules: list[EnvironmentRule] | None = None,
         polling_interval: int = 60,
     ) -> None:
-        self.rules = rules or default_rules()
         self.polling_interval = polling_interval
         self._task: asyncio.Task[None] | None = None
         self._running = False
-        self._stats: dict[str, int] = {"polls": 0, "triggers": 0, "controls": 0}
+        self._stats: dict[str, int] = {"drifts": 0, "controls": 0}
         self._subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
         self._event_history: list[dict[str, Any]] = []
 
@@ -344,50 +343,14 @@ class SimulatorEngine:
         try:
             while self._running:
                 DeviceStateStore.drift()
-                await self._evaluate_rules()
-                self._stats["polls"] += 1
+                self._stats["drifts"] += 1
                 await asyncio.sleep(self.polling_interval)
         except asyncio.CancelledError:
             pass
 
-    async def poll_once(self) -> list[dict[str, Any]]:
+    async def poll_once(self) -> None:
         DeviceStateStore.drift()
-        self._stats["polls"] += 1
-        return await self._evaluate_rules()
-
-    async def _evaluate_rules(self) -> list[dict[str, Any]]:
-        triggered: list[dict[str, Any]] = []
-        for rule in self.rules:
-            if not rule.enabled:
-                continue
-            prop_val = DeviceStateStore.get_property(rule.condition.device_id, rule.condition.property_name)
-            if prop_val is None:
-                continue
-            if rule.condition.evaluate(prop_val) and rule.is_ready():
-                rule.mark_triggered()
-                plan = {
-                    "intent": rule.action.intent,
-                    "rationale": rule.description,
-                    "steps": rule.action.steps,
-                    "triggered_by": rule.name,
-                }
-                triggered.append(plan)
-                self._stats["triggers"] += 1
-                await self._publish(
-                    {
-                        "type": "wot.sim.rule_triggered",
-                        "data": {
-                            "rule": rule.name,
-                            "description": rule.description,
-                            "device_id": rule.condition.device_id,
-                            "property": rule.condition.property_name,
-                            "value": prop_val,
-                            "threshold": rule.condition.value,
-                            "plan": plan,
-                        },
-                    }
-                )
-        return triggered
+        self._stats["drifts"] += 1
 
     async def control_device(
         self,

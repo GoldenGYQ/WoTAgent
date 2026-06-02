@@ -1,6 +1,8 @@
 import { reactive } from 'vue';
 import type { Session } from '../types/api';
 import { api } from '../api/client';
+import { logger } from '../utils/logger';
+import type { LogLevel } from '../utils/logger';
 
 export interface ToolCall {
   id?: string;
@@ -132,5 +134,28 @@ export const chatStore = reactive({
     if (this.eventLogs.length > 200) {
       this.eventLogs.shift();
     }
+    logger.info(label, text);
+  },
+
+  log(level: LogLevel, label: string, text: string) {
+    this.eventLogs.push({
+      time: new Date().toLocaleTimeString(),
+      label,
+      text: String(text).slice(0, 300),
+    });
+    if (this.eventLogs.length > 200) {
+      this.eventLogs.shift();
+    }
+    logger[level](label, text);
+  },
+
+  logInfo(label: string, text: string) { this.log('info', label, text); },
+  logWarn(label: string, text: string) { this.log('warn', label, text); },
+  logError(label: string, text: string) { this.log('error', label, text); },
+  logDebug(label: string, text: string) { this.log('debug', label, text); },
+
+  clearLogs() {
+    this.eventLogs = [];
+    logger.clear();
   },
 });
