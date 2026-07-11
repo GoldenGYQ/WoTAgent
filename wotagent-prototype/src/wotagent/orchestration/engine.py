@@ -23,8 +23,20 @@ class TaskOrchestrator:
         self.gateway = gateway
         self.policy = policy or PolicyEngine()
 
-    async def execute(self, plan: TaskPlan, *, role: str) -> TaskTrace:
-        trace = TaskTrace(plan=plan, role=role, status=TaskStatus.EXECUTING)
+    async def execute(
+        self,
+        plan: TaskPlan,
+        *,
+        role: str,
+        confirmed: bool = False,
+        task_id: str | None = None,
+    ) -> TaskTrace:
+        trace = TaskTrace(
+            **({"task_id": task_id} if task_id else {}),
+            plan=plan,
+            role=role,
+            status=TaskStatus.EXECUTING,
+        )
         completed: dict[str, StepTrace] = {}
 
         for step in self._topological_steps(plan):
@@ -40,7 +52,7 @@ class TaskOrchestrator:
                 )
                 completed[step.id] = step_trace
                 continue
-            if decision.effect == "confirm":
+            if decision.effect == "confirm" and not confirmed:
                 trace.finish(TaskStatus.WAITING_CONFIRMATION)
                 return trace
             if any(not completed[dep].succeeded for dep in step.depends_on):

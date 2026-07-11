@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from typing import Any
 
 from ..domain import TaskPlan
 from ..wot import load_tds
+from ..telemetry import InMemoryTraceStore
 
 
 def capability_context() -> list[dict[str, Any]]:
@@ -29,6 +31,7 @@ class LangChainTaskPlanner:
     """Convert one forced Function Calling result into a validated TaskPlan."""
 
     runnable: Any
+    trace_store: InMemoryTraceStore | None = None
 
     async def __call__(self, state: dict[str, Any]) -> TaskPlan:
         devices = state.get("context", {}).get("devices") or capability_context()
@@ -38,12 +41,51 @@ class LangChainTaskPlanner:
             "Use intent=clarify when the target is ambiguous. Do not decide permissions.\n"
             f"Available devices: {json.dumps(devices, ensure_ascii=False)}"
         )
+        task_id = state.get("task_id", "")
+        if self.trace_store is not None and task_id:
+            await self.trace_store.record(
+                task_id=task_id,
+                type="model.request.started",
+                node="planner",
+                data={
+                    "purpose": "task_planning",
+                    "prompt_version": "planner-v2.0",
+                    "device_count": len(devices),
+                    "message_length": len(state.get("message", "")),
+                },
+            )
+        started = time.perf_counter()
         result = await self.runnable.ainvoke([
             ("system", system),
             ("human", state.get("message", "")),
         ])
         arguments = _extract_tool_arguments(result)
-        return TaskPlan.model_validate(arguments)
+        plan = TaskPlan.model_validate(arguments)
+        if self.trace_store is not None and task_id:
+            usage = _extract_usage(result)
+            await self.trace_store.record(
+                task_id=task_id,
+                type="model.request.completed",
+                node="planner",
+                duration_ms=(time.perf_counter() - started) * 1000,
+                data={
+                    "purpose": "task_planning",
+                    "prompt_version": "planner-v2.0",
+                    "model": _extract_model_name(result),
+                    **usage,
+                },
+            )
+            await self.trace_store.record(
+                task_id=task_id,
+                type="model.reasoning.summary",
+                node="planner",
+                data={
+                    "summary": plan.summary,
+                    "intent": plan.intent,
+                    "step_count": len(plan.steps),
+                },
+            )
+        return plan
 
 
 def _extract_tool_arguments(result: Any) -> dict[str, Any]:
@@ -67,3 +109,27 @@ def _extract_tool_arguments(result: Any) -> dict[str, Any]:
         raise ValueError(f"unexpected planner tool: {function.get('name')}")
     arguments = function.get("arguments", {})
     return json.loads(arguments) if isinstance(arguments, str) else arguments
+
+
+def _extract_usage(result: Any) -> dict[str, int]:
+    usage = getattr(result, "usage_metadata", None) or {}
+    response = getattr(result, "response_metadata", None) or {}
+    raw = response.get("token_usage") or response.get("usage") or {}
+    input_tokens = int(usage.get("input_tokens", raw.get("prompt_tokens", 0)) or 0)
+    output_tokens = int(usage.get("output_tokens", raw.get("completion_tokens", 0)) or 0)
+    total_tokens = int(usage.get("total_tokens", raw.get("total_tokens", input_tokens + output_tokens)) or 0)
+    output_details = usage.get("output_token_details") or {}
+    reasoning_tokens = int(
+        output_details.get("reasoning", raw.get("reasoning_tokens", 0)) or 0
+    )
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "reasoning_tokens": reasoning_tokens,
+        "total_tokens": total_tokens,
+    }
+
+
+def _extract_model_name(result: Any) -> str:
+    metadata = getattr(result, "response_metadata", None) or {}
+    return str(metadata.get("model_name") or metadata.get("model") or "unknown")

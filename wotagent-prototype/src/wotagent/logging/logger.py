@@ -61,6 +61,12 @@ class EventBusHandler(logging.Handler):
         import asyncio
 
         try:
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                # Logging is also used from synchronous startup and tests. Do
+                # not create a coroutine bound to a dormant default loop.
+                return
             data: dict[str, Any] = {
                 "logger": record.name,
                 "level": record.levelname,
@@ -74,7 +80,7 @@ class EventBusHandler(logging.Handler):
                 type="wot.system.log",
                 data=data,
             )
-            asyncio.ensure_future(self._bus.emit(event))
+            loop.create_task(self._bus.emit(event))
         except Exception:
             pass  # don't let logging itself crash
 

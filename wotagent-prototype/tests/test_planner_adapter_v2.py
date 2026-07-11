@@ -9,6 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from wotagent.agent_graph import LangChainTaskPlanner, capability_context
+from wotagent.telemetry import InMemoryTraceStore
 
 
 class FakeRunnable:
@@ -18,7 +19,16 @@ class FakeRunnable:
 
     async def ainvoke(self, messages):
         self.messages = messages
-        return SimpleNamespace(tool_calls=[{"name": "generate_plan", "args": self.arguments}])
+        return SimpleNamespace(
+            tool_calls=[{"name": "generate_plan", "args": self.arguments}],
+            usage_metadata={
+                "input_tokens": 100,
+                "output_tokens": 20,
+                "total_tokens": 120,
+                "output_token_details": {"reasoning": 8},
+            },
+            response_metadata={"model_name": "fake-planner"},
+        )
 
 
 def test_parses_valid_function_call_into_typed_plan() -> None:
@@ -74,3 +84,34 @@ def test_capability_context_exposes_registered_devices_without_full_td_noise() -
     assert "turnOn" in light["actions"]
     assert "on" in light["properties"]
     assert "forms" not in light
+
+
+def test_planner_records_usage_and_safe_reasoning_summary() -> None:
+    async def run():
+        store = InMemoryTraceStore()
+        await store.create(task_id="task-planner", session_id="sess", request_id="req")
+        runnable = FakeRunnable({
+            "intent": "control",
+            "summary": "打开客厅灯",
+            "steps": [{
+                "id": "s1",
+                "kind": "action",
+                "device_id": "light-001",
+                "action": "turnOn",
+            }],
+        })
+        await LangChainTaskPlanner(runnable, trace_store=store)({
+            "task_id": "task-planner",
+            "message": "打开客厅灯",
+        })
+        return await store.get("task-planner"), await store.events("task-planner")
+
+    record, events = asyncio.run(run())
+
+    assert record.usage.model_calls == 1
+    assert record.usage.total_tokens == 120
+    completed = next(event for event in events if event.type == "model.request.completed")
+    assert completed.data["reasoning_tokens"] == 8
+    summary = next(event for event in events if event.type == "model.reasoning.summary")
+    assert summary.data == {"summary": "打开客厅灯", "intent": "control", "step_count": 1}
+    assert all("reasoning_content" not in event.data for event in events)

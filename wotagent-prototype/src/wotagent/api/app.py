@@ -9,16 +9,20 @@ import asyncio
 import json
 import os
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 import logging
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import BackgroundTasks, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.types import Command
 
 logger = logging.getLogger("wotagent.api")
 
@@ -58,6 +62,7 @@ from ..agent_graph import AgentGraphDependencies, LangChainTaskPlanner, build_ag
 from ..gateway import MCPDeviceGateway
 from ..orchestration import TaskOrchestrator
 from ..policy import PolicyEngine
+from ..telemetry import InMemoryTraceStore
 
 # ---------------------------------------------------------------------------
 # Bootstrap
@@ -72,11 +77,13 @@ _pipeline = create_wot_pipeline(
 )
 _v2_policy = PolicyEngine()
 _v2_gateway = MCPDeviceGateway()
+_v2_trace_store = InMemoryTraceStore()
 _v2_graph = build_agent_graph(AgentGraphDependencies(
-    planner=LangChainTaskPlanner(_pipeline.planner),
+    planner=LangChainTaskPlanner(_pipeline.planner, trace_store=_v2_trace_store),
     policy=_v2_policy,
     orchestrator=TaskOrchestrator(_v2_gateway, _v2_policy),
-))
+    trace_store=_v2_trace_store,
+), checkpointer=InMemorySaver())
 _session_manager = get_session_manager(timeout_minutes=30)
 
 # Start perception engine (async — started on FastAPI startup event)
@@ -112,10 +119,23 @@ else:
 # FastAPI app
 # ---------------------------------------------------------------------------
 
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    logger.info("Starting perception engine...")
+    await _perception_engine.start()
+    try:
+        yield
+    finally:
+        if _perception_engine.is_running:
+            logger.info("Stopping perception engine...")
+            await _perception_engine.stop()
+
 app = FastAPI(
     title="WoTAgent",
     description="Web of Things Agent -- LangChain-powered IoT control with event streaming",
     version="0.3.0",
+    lifespan=_lifespan,
 )
 
 app.add_middleware(
@@ -125,20 +145,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# FastAPI lifecycle — start/stop perception engine on the correct event loop
-@app.on_event("startup")
-async def _start_perception():
-    logger.info("Starting perception engine...")
-    await _perception_engine.start()
-
-
-@app.on_event("shutdown")
-async def _stop_perception():
-    if _perception_engine.is_running:
-        logger.info("Stopping perception engine...")
-        await _perception_engine.stop()
-
 
 # ---------------------------------------------------------------------------
 # Request / Response models
@@ -242,6 +248,17 @@ class TaskCreateV2Response(BaseModel):
     response: str
     plan: dict[str, Any] | None = None
     trace: dict[str, Any] | None = None
+    confirmation: dict[str, Any] | None = None
+
+
+class TaskConfirmV2Request(BaseModel):
+    approved: bool
+
+
+class TraceEventsV2Response(BaseModel):
+    task_id: str
+    events: list[dict[str, Any]]
+    next_cursor: int
 
 
 # ---------------------------------------------------------------------------
@@ -249,8 +266,11 @@ class TaskCreateV2Response(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-@app.post("/api/v2/tasks", response_model=TaskCreateV2Response)
-async def create_task_v2(req: TaskCreateV2Request) -> TaskCreateV2Response:
+@app.post("/api/v2/tasks", response_model=TaskCreateV2Response, status_code=202)
+async def create_task_v2(
+    req: TaskCreateV2Request,
+    background_tasks: BackgroundTasks,
+) -> TaskCreateV2Response:
     """Run one request through the typed LangGraph 2.0 path.
 
     This endpoint intentionally coexists with ``/api/chat`` until the v2 event
@@ -258,23 +278,210 @@ async def create_task_v2(req: TaskCreateV2Request) -> TaskCreateV2Response:
     """
     session_id = req.session_id or f"sess_{uuid.uuid4().hex[:12]}"
     request_id = f"req_{uuid.uuid4().hex[:12]}"
-    result = await _v2_graph.ainvoke({
-        "request_id": request_id,
-        "session_id": session_id,
-        "user_id": req.user_id,
-        "role": req.role,
-        "message": req.message,
-    })
+    task_id = f"task_{uuid.uuid4().hex[:12]}"
+    await _v2_trace_store.create(
+        task_id=task_id,
+        session_id=session_id,
+        request_id=request_id,
+    )
+    background_tasks.add_task(
+        _run_v2_task,
+        task_id=task_id,
+        request_id=request_id,
+        session_id=session_id,
+        user_id=req.user_id,
+        role=req.role,
+        message=req.message,
+    )
+    return TaskCreateV2Response(
+        task_id=task_id,
+        session_id=session_id,
+        status="accepted",
+        response="",
+    )
+
+
+@app.post("/api/v2/tasks/{task_id}/confirm", response_model=TaskCreateV2Response)
+async def confirm_task_v2(
+    task_id: str,
+    req: TaskConfirmV2Request,
+) -> TaskCreateV2Response:
+    """Resume the checkpointed task associated with this session/thread."""
+    record = await _v2_trace_store.get(task_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="task not found")
+    session_id = record.session_id
+    snapshot = await _v2_graph.aget_state({"configurable": {"thread_id": session_id}})
+    if not snapshot.values or not snapshot.interrupts:
+        raise HTTPException(status_code=409, detail="session has no task waiting for confirmation")
+    result = await _v2_graph.ainvoke(
+        Command(resume={"approved": req.approved}),
+        config={"configurable": {"thread_id": session_id}},
+    )
+    response = _task_v2_response(result, session_id)
+    await _finish_v2_trace(response)
+    return response
+
+
+async def _run_v2_task(
+    *,
+    task_id: str,
+    request_id: str,
+    session_id: str,
+    user_id: str,
+    role: str,
+    message: str,
+) -> None:
+    await _v2_trace_store.set_status(task_id, "running")
+    await _v2_trace_store.record(task_id=task_id, type="task.started", node="api")
+    try:
+        result = await _v2_graph.ainvoke({
+            "request_id": request_id,
+            "task_id": task_id,
+            "session_id": session_id,
+            "user_id": user_id,
+            "role": role,
+            "message": message,
+        }, config={"configurable": {"thread_id": session_id}})
+        response = _task_v2_response(result, session_id)
+        if response.status == "waiting_confirmation":
+            await _v2_trace_store.record(
+                task_id=task_id,
+                type="task.waiting_confirmation",
+                node="confirmation",
+                data={"confirmation": response.confirmation or {}},
+            )
+            await _v2_trace_store.set_status(task_id, "waiting_confirmation")
+        else:
+            await _finish_v2_trace(response)
+    except Exception as exc:
+        await _v2_trace_store.record(
+            task_id=task_id,
+            type="task.failed",
+            node="api",
+            data={"error": str(exc)},
+        )
+        await _v2_trace_store.finish(task_id, status="failed", result={"error": str(exc)})
+
+
+@app.get("/api/v2/tasks/{task_id}")
+async def get_task_v2(task_id: str) -> dict[str, Any]:
+    record = await _v2_trace_store.get(task_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="task not found")
+    return record.model_dump(mode="json")
+
+
+@app.get("/api/v2/traces/{trace_id}")
+async def get_trace_v2(trace_id: str) -> dict[str, Any]:
+    return await get_task_v2(trace_id)
+
+
+@app.get("/api/v2/tasks/{task_id}/events", response_model=TraceEventsV2Response)
+async def get_task_events_v2(task_id: str, after: int = 0) -> TraceEventsV2Response:
+    if await _v2_trace_store.get(task_id) is None:
+        raise HTTPException(status_code=404, detail="task not found")
+    events = await _v2_trace_store.events(task_id, after=max(after, 0))
+    next_cursor = events[-1].sequence if events else max(after, 0)
+    return TraceEventsV2Response(
+        task_id=task_id,
+        events=[event.model_dump(mode="json") for event in events],
+        next_cursor=next_cursor,
+    )
+
+
+@app.get("/api/v2/tasks/{task_id}/events/stream")
+async def stream_task_events_v2(task_id: str, after: int = 0) -> StreamingResponse:
+    if await _v2_trace_store.get(task_id) is None:
+        raise HTTPException(status_code=404, detail="task not found")
+
+    async def generate():
+        cursor = max(after, 0)
+        while True:
+            events = await _v2_trace_store.wait_for_events(task_id, after=cursor)
+            for event in events:
+                cursor = event.sequence
+                payload = event.model_dump_json()
+                yield f"id: {cursor}\nevent: {event.type}\ndata: {payload}\n\n"
+            record = await _v2_trace_store.get(task_id)
+            if record is None or record.status not in {"received", "running", "waiting_confirmation"}:
+                break
+            if not events:
+                yield ": keep-alive\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+@app.websocket("/ws/v2")
+async def trace_websocket_v2(websocket: WebSocket) -> None:
+    """Subscribe to an ordered task trace using ``{task_id, after}``."""
+    await websocket.accept()
+    try:
+        request = await websocket.receive_json()
+        task_id = str(request.get("task_id", ""))
+        cursor = max(int(request.get("after", 0)), 0)
+        if not task_id or await _v2_trace_store.get(task_id) is None:
+            await websocket.send_json({"type": "error", "error": "task not found"})
+            await websocket.close(code=4404)
+            return
+
+        while True:
+            events = await _v2_trace_store.wait_for_events(task_id, after=cursor)
+            for event in events:
+                cursor = event.sequence
+                await websocket.send_json(event.model_dump(mode="json"))
+            record = await _v2_trace_store.get(task_id)
+            if record is None or record.status not in {"received", "running", "waiting_confirmation"}:
+                await websocket.send_json({
+                    "type": "stream.completed",
+                    "task_id": task_id,
+                    "cursor": cursor,
+                    "status": record.status if record else "not_found",
+                })
+                return
+    except WebSocketDisconnect:
+        return
+    except (TypeError, ValueError) as exc:
+        await websocket.send_json({"type": "error", "error": str(exc)})
+        await websocket.close(code=4400)
+
+
+def _task_v2_response(result: dict[str, Any], session_id: str) -> TaskCreateV2Response:
     plan = result.get("plan")
     trace = result.get("trace")
-    status = trace.status.value if trace is not None else result.get("phase", "unknown")
+    interrupts = result.get("__interrupt__", [])
+    confirmation = interrupts[0].value if interrupts else None
+    status = (
+        trace.status.value
+        if trace is not None
+        else "waiting_confirmation" if confirmation else result.get("phase", "unknown")
+    )
     return TaskCreateV2Response(
-        task_id=trace.task_id if trace is not None else None,
+        task_id=trace.task_id if trace is not None else result.get("task_id"),
         session_id=session_id,
         status=status,
-        response=result.get("response", ""),
+        response=result.get("response", "") or (
+            "该操作需要确认后才能执行。" if confirmation else ""
+        ),
         plan=plan.model_dump(mode="json") if plan is not None else None,
         trace=trace.model_dump(mode="json") if trace is not None else None,
+        confirmation=confirmation,
+    )
+
+
+async def _finish_v2_trace(response: TaskCreateV2Response) -> None:
+    if response.task_id is None:
+        return
+    await _v2_trace_store.record(
+        task_id=response.task_id,
+        type=f"task.{response.status}",
+        node="api",
+        data={"response": response.response},
+    )
+    await _v2_trace_store.finish(
+        response.task_id,
+        status=response.status,
+        result=response.model_dump(mode="json"),
     )
 
 

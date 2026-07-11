@@ -123,3 +123,13 @@ LLM 指标必须固定数据集、模型、temperature、Prompt 版本并至少�
 - 已知缺口：v2 WebSocket 事件流、确认恢复和持久化 TaskTrace 尚未接入。
 - 技术债：FastAPI `on_event` 已弃用；EventBus 日志适配器存在未 await coroutine 的运行时告警，后续单独修复并加告警零容忍测试。
 - 结论：API 旁路入口通过，可以继续建设 v2 事件流。
+
+功能单元：确认、恢复与实时 Trace
+
+- 确认测试：首次执行产生 checkpoint interrupt，未确认设备调用为 0；批准后恰好执行一次；拒绝后调用为 0。
+- Recovery 测试：验证失败可触发一次 Replanner 后成功；持续失败时严格遵守最大恢复次数。
+- TraceStore 测试：事件 sequence 单调递增，支持 cursor 回放和异步等待；模型、工具、循环、恢复和 Token 指标可聚合。
+- API 测试：`POST /api/v2/tasks` 返回 `202 Accepted` 和 task_id；后台执行后可由任务查询、SSE、WebSocket 获得同一事件流。
+- 隐私边界：记录规划摘要与 Token 元数据，不保存或返回模型原始 Chain-of-Thought。
+- 已知缺口：当前 TraceStore 与 LangGraph checkpointer 是内存实现，进程重启后丢失；生产部署需要 PostgreSQL/Redis 持久化。
+- 结论：本地单进程监控闭环通过，可进入前端接入和持久化阶段。
