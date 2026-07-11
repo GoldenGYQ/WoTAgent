@@ -2,11 +2,13 @@
 
 from .graph import AgentGraphDependencies, AgentState, build_agent_graph
 from .planner import LangChainTaskPlanner, capability_context
+from .responder import LangChainResponseComposer
 
 __all__ = [
     "AgentGraphDependencies",
     "AgentState",
     "LangChainTaskPlanner",
+    "LangChainResponseComposer",
     "build_agent_graph",
     "capability_context",
 ]

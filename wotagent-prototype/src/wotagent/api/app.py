@@ -58,7 +58,12 @@ from ..memory import ConversationMemory, SessionTranscript
 from ..perception import get_perception_engine
 from ..models import DeviceActionResponse, DeviceListEntry, DeviceListResponse
 from ..wot import find_devices, load_tds
-from ..agent_graph import AgentGraphDependencies, LangChainTaskPlanner, build_agent_graph
+from ..agent_graph import (
+    AgentGraphDependencies,
+    LangChainResponseComposer,
+    LangChainTaskPlanner,
+    build_agent_graph,
+)
 from ..gateway import MCPDeviceGateway
 from ..orchestration import TaskOrchestrator
 from ..policy import PolicyEngine
@@ -82,6 +87,7 @@ _v2_graph = build_agent_graph(AgentGraphDependencies(
     planner=LangChainTaskPlanner(_pipeline.planner, trace_store=_v2_trace_store),
     policy=_v2_policy,
     orchestrator=TaskOrchestrator(_v2_gateway, _v2_policy),
+    responder=LangChainResponseComposer(_pipeline.responder, trace_store=_v2_trace_store),
     trace_store=_v2_trace_store,
 ), checkpointer=InMemorySaver())
 _session_manager = get_session_manager(timeout_minutes=30)

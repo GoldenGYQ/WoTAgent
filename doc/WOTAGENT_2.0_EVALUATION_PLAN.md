@@ -133,3 +133,12 @@ LLM 指标必须固定数据集、模型、temperature、Prompt 版本并至少�
 - 隐私边界：记录规划摘要与 Token 元数据，不保存或返回模型原始 Chain-of-Thought。
 - 已知缺口：当前 TraceStore 与 LangGraph checkpointer 是内存实现，进程重启后丢失；生产部署需要 PostgreSQL/Redis 持久化。
 - 结论：本地单进程监控闭环通过，可进入前端接入和持久化阶段。
+
+功能单元：执行后 Response Agent（方案 C）
+
+- 输入边界：仅接收用户请求、已校验计划、策略判定、工具结果、VerificationResult 和最终 TaskStatus。
+- 真实性：Prompt 禁止改变任务状态；只有 `succeeded` 才允许声称全部完成，部分成功和失败必须按事实表达。
+- 可用性：Response 模型不可用或返回空内容时回退到确定性模板，已完成的 TaskTrace 不受影响。
+- 成本：Planner 与 Responder 分别记录模型调用、延迟和 Token，并聚合到同一 task usage。
+- 隐私：不记录模型原始 Chain-of-Thought。
+- 结论：方案 C 功能闭环通过，后续真实模型端到端测试需要评价回复事实一致率。

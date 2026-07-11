@@ -143,11 +143,26 @@ def build_agent_graph(deps: AgentGraphDependencies, *, checkpointer: Any = None)
         }
 
     async def respond_node(state: AgentState) -> dict[str, Any]:
+        await _record(deps, state, "agent.node.started", "responder")
         if deps.responder is not None:
-            value = deps.responder(state)
-            response = await value if hasattr(value, "__await__") else value
-            return {"response": str(response), "phase": "responded"}
-        return {"response": _default_response(state), "phase": "responded"}
+            try:
+                value = deps.responder(state)
+                response = await value if hasattr(value, "__await__") else value
+                await _record(deps, state, "agent.node.completed", "responder", {
+                    "response": str(response), "fallback": False,
+                })
+                return {"response": str(response), "phase": "responded"}
+            except Exception as exc:
+                fallback = _default_response(state)
+                await _record(deps, state, "agent.node.failed", "responder", {
+                    "error": str(exc), "fallback": fallback,
+                })
+                return {"response": fallback, "phase": "responded"}
+        fallback = _default_response(state)
+        await _record(deps, state, "agent.node.completed", "responder", {
+            "response": fallback, "fallback": True,
+        })
+        return {"response": fallback, "phase": "responded"}
 
     def after_plan(state: AgentState) -> Literal["policy", "respond"]:
         if state.get("error") or state["plan"].intent in {"chat", "clarify"}:

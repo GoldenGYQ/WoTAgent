@@ -240,3 +240,34 @@ def test_recovery_loop_never_exceeds_configured_bound() -> None:
     assert result["trace"].status == TaskStatus.FAILED
     assert result["recovery_attempts"] == 1
     assert gateway.control_calls == 2
+
+
+def test_response_agent_failure_falls_back_without_changing_trace_truth() -> None:
+    gateway = FakeGateway()
+    plan = TaskPlan(intent="control", steps=[PlanStep(
+        id="s1",
+        kind="action",
+        device_id="light-001",
+        action="turnOn",
+        postconditions=[Condition(property="on", value=True)],
+    )])
+
+    async def planner(_state):
+        return plan
+
+    async def broken_responder(_state):
+        raise RuntimeError("model unavailable")
+
+    policy = PolicyEngine()
+    graph = build_agent_graph(AgentGraphDependencies(
+        planner=planner,
+        policy=policy,
+        orchestrator=TaskOrchestrator(gateway, policy),
+        responder=broken_responder,
+    ))
+
+    result = asyncio.run(graph.ainvoke({"message": "开灯", "role": "operator"}))
+
+    assert result["trace"].status == TaskStatus.SUCCEEDED
+    assert result["response"] == "任务已执行并通过设备状态验证。"
+    assert gateway.control_calls == 1
