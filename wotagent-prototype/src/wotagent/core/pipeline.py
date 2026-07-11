@@ -16,6 +16,7 @@ from langchain.agents.middleware import (
 from langchain_core.runnables import Runnable
 from langchain_openai import ChatOpenAI
 
+from ..domain import TaskPlan
 from ..tools import get_all_tools
 from .models import AgentContext
 from .prompt import _make_prompt_builder
@@ -32,33 +33,7 @@ PLAN_SCHEMA: dict[str, Any] = {
     "function": {
         "name": "generate_plan",
         "description": "Classify user intent and output a structured plan",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "intent": {
-                    "type": "string",
-                    "enum": ["chat", "query", "control"],
-                    "description": "chat=pure chat, query=ask about device/environment, control=operate device/environment",
-                },
-                "rationale": {
-                    "type": "string",
-                    "description": "Brief explanation of the classification",
-                },
-                "steps": {
-                    "type": "array",
-                    "description": "Planned execution steps (empty for chat intent)",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "action": {"type": "string", "description": "Tool or action name"},
-                            "target": {"type": "string", "description": "Target device or subject"},
-                            "params": {"type": "object", "description": "Action parameters"},
-                        },
-                    },
-                },
-            },
-            "required": ["intent", "rationale", "steps"],
-        },
+        "parameters": TaskPlan.model_json_schema(),
     },
 }
 
