@@ -114,3 +114,12 @@ LLM 指标必须固定数据集、模型、temperature、Prompt 版本并至少�
 - 结论：适配器通过；真实模型质量必须在 API 切换前后单独评价。
 
 阶段回归：当前后端测试集 83/83 通过，新增模块未破坏 1.0 基线。
+
+功能单元：`POST /api/v2/tasks`
+
+- 测试结果：API 单点测试 1/1 通过；第二次全量后端回归 88/88 通过。
+- 正确性：HTTP 返回的 plan、status 和 response 均来自 LangGraph state，不使用前端占位回复。
+- 隔离性：v2 与旧 `/api/chat`、WebSocket 路径并存，尚未直接替换稳定入口。
+- 已知缺口：v2 WebSocket 事件流、确认恢复和持久化 TaskTrace 尚未接入。
+- 技术债：FastAPI `on_event` 已弃用；EventBus 日志适配器存在未 await coroutine 的运行时告警，后续单独修复并加告警零容忍测试。
+- 结论：API 旁路入口通过，可以继续建设 v2 事件流。

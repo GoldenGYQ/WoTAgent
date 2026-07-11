@@ -54,6 +54,10 @@ from ..memory import ConversationMemory, SessionTranscript
 from ..perception import get_perception_engine
 from ..models import DeviceActionResponse, DeviceListEntry, DeviceListResponse
 from ..wot import find_devices, load_tds
+from ..agent_graph import AgentGraphDependencies, LangChainTaskPlanner, build_agent_graph
+from ..gateway import MCPDeviceGateway
+from ..orchestration import TaskOrchestrator
+from ..policy import PolicyEngine
 
 # ---------------------------------------------------------------------------
 # Bootstrap
@@ -66,6 +70,13 @@ install_event_bus_handler()
 _pipeline = create_wot_pipeline(
     enable_streaming=_bool_env("ENABLE_STREAMING", default=True),
 )
+_v2_policy = PolicyEngine()
+_v2_gateway = MCPDeviceGateway()
+_v2_graph = build_agent_graph(AgentGraphDependencies(
+    planner=LangChainTaskPlanner(_pipeline.planner),
+    policy=_v2_policy,
+    orchestrator=TaskOrchestrator(_v2_gateway, _v2_policy),
+))
 _session_manager = get_session_manager(timeout_minutes=30)
 
 # Start perception engine (async — started on FastAPI startup event)
@@ -217,9 +228,54 @@ class PerceptionPollResponse(BaseModel):
     rules: list[str]
 
 
+class TaskCreateV2Request(BaseModel):
+    message: str
+    session_id: str | None = None
+    role: str = "operator"
+    user_id: str = "local-user"
+
+
+class TaskCreateV2Response(BaseModel):
+    task_id: str | None = None
+    session_id: str
+    status: str
+    response: str
+    plan: dict[str, Any] | None = None
+    trace: dict[str, Any] | None = None
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+
+@app.post("/api/v2/tasks", response_model=TaskCreateV2Response)
+async def create_task_v2(req: TaskCreateV2Request) -> TaskCreateV2Response:
+    """Run one request through the typed LangGraph 2.0 path.
+
+    This endpoint intentionally coexists with ``/api/chat`` until the v2 event
+    stream and confirmation resume flow have completed their own acceptance.
+    """
+    session_id = req.session_id or f"sess_{uuid.uuid4().hex[:12]}"
+    request_id = f"req_{uuid.uuid4().hex[:12]}"
+    result = await _v2_graph.ainvoke({
+        "request_id": request_id,
+        "session_id": session_id,
+        "user_id": req.user_id,
+        "role": req.role,
+        "message": req.message,
+    })
+    plan = result.get("plan")
+    trace = result.get("trace")
+    status = trace.status.value if trace is not None else result.get("phase", "unknown")
+    return TaskCreateV2Response(
+        task_id=trace.task_id if trace is not None else None,
+        session_id=session_id,
+        status=status,
+        response=result.get("response", ""),
+        plan=plan.model_dump(mode="json") if plan is not None else None,
+        trace=trace.model_dump(mode="json") if trace is not None else None,
+    )
 
 
 @app.get("/", response_class=HTMLResponse)
