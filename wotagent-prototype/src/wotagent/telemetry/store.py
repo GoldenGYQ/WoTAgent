@@ -36,6 +36,9 @@ class UsageSummary(BaseModel):
     total_tokens: int = 0
     estimated_cost: float = 0.0
     currency: str = "CNY"
+    model_latency_ms: float = 0.0
+    ttft_ms_total: float = 0.0
+    ttft_measurements: int = 0
 
 
 class TraceRecord(BaseModel):
@@ -112,6 +115,10 @@ class InMemoryTraceStore:
                 for key in ("input_tokens", "output_tokens", "reasoning_tokens", "total_tokens"):
                     setattr(record.usage, key, getattr(record.usage, key) + int(event.data.get(key, 0)))
                 record.usage.estimated_cost += float(event.data.get("estimated_cost", 0.0))
+                record.usage.model_latency_ms += float(duration_ms or 0.0)
+                if event.data.get("ttft_ms") is not None:
+                    record.usage.ttft_ms_total += float(event.data["ttft_ms"])
+                    record.usage.ttft_measurements += 1
             elif type == "agent.tool.completed":
                 record.usage.tool_calls += 1
             elif type == "agent.loop.completed":

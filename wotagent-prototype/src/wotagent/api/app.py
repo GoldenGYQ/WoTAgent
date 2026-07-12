@@ -87,7 +87,7 @@ _v2_graph = build_agent_graph(AgentGraphDependencies(
     planner=LangChainTaskPlanner(_pipeline.planner, trace_store=_v2_trace_store),
     policy=_v2_policy,
     orchestrator=TaskOrchestrator(_v2_gateway, _v2_policy),
-    responder=LangChainResponseComposer(_pipeline.responder, trace_store=_v2_trace_store),
+    responder=LangChainResponseComposer(_pipeline.response_model, trace_store=_v2_trace_store),
     trace_store=_v2_trace_store,
 ), checkpointer=InMemorySaver())
 _session_manager = get_session_manager(timeout_minutes=30)

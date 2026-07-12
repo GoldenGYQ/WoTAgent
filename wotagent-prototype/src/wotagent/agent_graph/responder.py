@@ -7,9 +7,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from langchain_core.messages import HumanMessage
-
-from ..core.models import AgentContext
+from langchain_core.messages import HumanMessage, SystemMessage, message_chunk_to_message
 from ..telemetry import InMemoryTraceStore
 
 
@@ -20,7 +18,7 @@ class LangChainResponseComposer:
 
     async def __call__(self, state: dict[str, Any]) -> str:
         facts = _response_facts(state)
-        prompt = (
+        system = (
             "你是 WoTAgent 的最终 Response Agent。请根据下面经过验证的事实，"
             "使用与用户相同的语言给出简洁自然的最终回复。\n"
             "严格规则：\n"
@@ -28,9 +26,9 @@ class LangChainResponseComposer:
             "2. 只有 status=succeeded 时才能声称全部完成。\n"
             "3. partial_success 必须分别说明成功和失败步骤。\n"
             "4. failed/denied 时不得使用‘已完成’等成功措辞。\n"
-            "5. 只使用提供的事实，不推测设备状态。\n\n"
-            f"执行事实：{json.dumps(facts, ensure_ascii=False)}"
+            "5. 只使用提供的事实，不推测设备状态。"
         )
+        prompt = f"执行事实：{json.dumps(facts, ensure_ascii=False)}"
         task_id = state.get("task_id", "")
         if self.trace_store is not None and task_id:
             await self.trace_store.record(
@@ -40,18 +38,20 @@ class LangChainResponseComposer:
                 data={"purpose": "final_response", "prompt_version": "responder-v2.0"},
             )
         started = time.perf_counter()
-        context = AgentContext(
-            session_id=state.get("session_id", ""),
-            user_role=state.get("role", "operator"),
-            user_message=state.get("message", ""),
-            plan_json=json.dumps(facts.get("plan", {}), ensure_ascii=False),
-            execution_results=json.dumps(facts, ensure_ascii=False),
-        )
-        result = await self.runnable.ainvoke(
-            {"messages": [HumanMessage(content=prompt)]},
-            context=context,
-        )
-        message = _last_message(result)
+        messages = [SystemMessage(content=system), HumanMessage(content=prompt)]
+        ttft_ms: float | None = None
+        if hasattr(self.runnable, "astream"):
+            aggregate = None
+            async for chunk in self.runnable.astream(messages):
+                if ttft_ms is None and getattr(chunk, "content", ""):
+                    ttft_ms = (time.perf_counter() - started) * 1000
+                aggregate = chunk if aggregate is None else aggregate + chunk
+            if aggregate is None:
+                raise ValueError("response agent returned no stream chunks")
+            message = message_chunk_to_message(aggregate)
+        else:
+            result = await self.runnable.ainvoke(messages)
+            message = _last_message(result)
         response = str(getattr(message, "content", "") or "").strip()
         if not response:
             raise ValueError("response agent returned empty content")
@@ -66,6 +66,8 @@ class LangChainResponseComposer:
                     "purpose": "final_response",
                     "prompt_version": "responder-v2.0",
                     "model": _model_name(message),
+                    "ttft_ms": ttft_ms,
+                    "ttft_available": ttft_ms is not None,
                     **usage,
                 },
             )

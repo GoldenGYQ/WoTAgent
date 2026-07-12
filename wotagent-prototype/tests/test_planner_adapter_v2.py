@@ -81,9 +81,22 @@ def test_capability_context_exposes_registered_devices_without_full_td_noise() -
     devices = capability_context()
 
     light = next(item for item in devices if item["device_id"] == "light-001")
-    assert "turnOn" in light["actions"]
+    assert "turnOn" in {action["name"] for action in light["actions"]}
+    brightness = next(action for action in light["actions"] if action["name"] == "setBrightness")
+    assert brightness["input_schema"]["required"] == ["brightness"]
     assert "on" in light["properties"]
+    assert "living room" in light["location_aliases"]
     assert "forms" not in light
+
+
+def test_capability_context_selects_only_relevant_room_and_device_type() -> None:
+    devices = capability_context("把客厅灯打开")
+
+    assert [item["device_id"] for item in devices] == ["light-001"]
+
+
+def test_capability_context_falls_back_to_all_devices_for_generic_request() -> None:
+    assert len(capability_context("查询所有设备状态")) == len(capability_context())
 
 
 def test_planner_records_usage_and_safe_reasoning_summary() -> None:

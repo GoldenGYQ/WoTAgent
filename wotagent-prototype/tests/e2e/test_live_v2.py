@@ -42,7 +42,7 @@ def test_chinese_two_step_control_reaches_verified_device_state() -> None:
                 planner=LangChainTaskPlanner(pipeline.planner, trace_store=store),
                 policy=policy,
                 orchestrator=TaskOrchestrator(gateway, policy),
-                responder=LangChainResponseComposer(pipeline.responder, trace_store=store),
+                responder=LangChainResponseComposer(pipeline.response_model, trace_store=store),
                 trace_store=store,
             ),
             checkpointer=InMemorySaver(),

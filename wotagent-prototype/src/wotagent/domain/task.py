@@ -66,7 +66,7 @@ class PlanStep(BaseModel):
     @model_validator(mode="after")
     def infer_standard_postconditions(self) -> "PlanStep":
         """Make verification mandatory for known state-changing WoT actions."""
-        if self.kind != "action" or self.postconditions:
+        if self.kind != "action":
             return self
         inferred: dict[str, Any] | None = None
         if self.action == "turnOn":
@@ -86,6 +86,8 @@ class PlanStep(BaseModel):
         elif self.action == "setMistLevel" and "level" in self.input:
             inferred = {"property": "mistLevel", "value": self.input["level"]}
         if inferred is not None:
+            # Standard action semantics are authoritative. The LLM cannot
+            # redefine turnOn as on=false or verify a different parameter.
             self.postconditions = [Condition(**inferred)]
         return self
 

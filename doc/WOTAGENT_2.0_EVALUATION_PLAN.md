@@ -166,3 +166,5 @@ LLM 指标必须固定数据集、模型、temperature、Prompt 版本并至少�
 - 发现：真实 Planner 某次生成正确动作但省略 postconditions，旧判定会把工具 accepted 当成任务成功。
 - 修复：领域层为标准状态修改动作确定性补全 postconditions；任何 action 缺少 VerificationResult 都不能判定成功。
 - 复验：相关单元测试 20/20，真实 live E2E 1/1 通过。
+
+上下文工程与外部基准阶段结果见 `doc/WOTAGENT_2.0_CONTEXT_AND_EVALUATION_REPORT.md`。核心结果：HomeBench-adapted Planner 严格 100 条 Exact Match 99%，相关设备召回相较全量上下文减少约 65.7% Token；真实 5 条完整链路 Goal-State Success 100%，平均 Response TTFT 795ms。

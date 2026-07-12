@@ -58,6 +58,8 @@ def _build_llm(
         kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
     else:
         kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+    if enable_streaming:
+        kwargs["stream_usage"] = True
     return ChatOpenAI(**kwargs)
 
 
@@ -82,6 +84,7 @@ class AgentPipeline:
     executor: Runnable
     responder: Runnable
     observer: Runnable | None = None
+    response_model: Runnable | None = None
 
 
 def create_wot_pipeline(
@@ -111,6 +114,12 @@ def create_wot_pipeline(
         model_name=model_name,
         temperature=0,
         enable_thinking=False,
+    )
+    response_llm = _build_llm(
+        model_name=model_name,
+        temperature=temperature,
+        enable_thinking=False,
+        enable_streaming=enable_streaming,
     )
     planner = plan_llm.bind(
         tools=[PLAN_SCHEMA],
@@ -163,6 +172,7 @@ def create_wot_pipeline(
         executor=executor,
         responder=responder,
         observer=observer,
+        response_model=response_llm,
     )
 
 

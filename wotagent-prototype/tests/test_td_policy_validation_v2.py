@@ -71,3 +71,15 @@ def test_known_actions_receive_deterministic_postconditions_when_planner_omits_t
     assert brightness.postconditions[0].model_dump() == {
         "property": "brightness", "operator": "eq", "value": 60,
     }
+
+
+def test_llm_cannot_override_standard_action_semantics_with_conflicting_postcondition() -> None:
+    step = PlanStep(
+        id="s1",
+        kind="action",
+        device_id="light-001",
+        action="turnOn",
+        postconditions=[{"property": "on", "value": False}],
+    )
+
+    assert step.postconditions[0].value is True

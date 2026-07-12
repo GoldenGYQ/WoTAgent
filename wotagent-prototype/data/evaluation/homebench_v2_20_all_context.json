@@ -1,0 +1,1600 @@
+{
+  "benchmark": "HomeBench-adapted Planner-only",
+  "context_mode": "all",
+  "available_aligned_cases": 658,
+  "evaluated_cases": 20,
+  "metrics": {
+    "intent_accuracy": 1.0,
+    "exact_match": 0.8,
+    "precision": 0.9,
+    "recall": 1.0,
+    "f1": 0.9333333333333333,
+    "executable_plan_rate": 1,
+    "total_input_tokens": 73410,
+    "total_output_tokens": 3014,
+    "tokens_per_case": 3821.2,
+    "mean_time_to_plan_ms": 1772.3268749999988
+  },
+  "rows": [
+    {
+      "case": {
+        "case_id": "home56_one_130",
+        "source": "HomeBench-adapted",
+        "category": "normal",
+        "instruction": "Set the brightness of the light to 10 in the living room.",
+        "expected_intent": "control",
+        "expected_actions": [
+          {
+            "device_id": "light-001",
+            "action": "setBrightness",
+            "input": {
+              "brightness": 10
+            }
+          }
+        ]
+      },
+      "plan": {
+        "plan_id": "plan-001",
+        "intent": "control",
+        "summary": "Set the living room light brightness to 10.",
+        "assumptions": [],
+        "steps": [
+          {
+            "id": "step-1",
+            "kind": "action",
+            "device_id": "light-001",
+            "action": "setBrightness",
+            "input": {
+              "brightness": 10
+            },
+            "depends_on": [],
+            "timeout_ms": 5000,
+            "retry_policy": {
+              "max_attempts": 1,
+              "delay_ms": 0
+            },
+            "postconditions": [
+              {
+                "property": "brightness",
+                "operator": "eq",
+                "value": 10
+              }
+            ]
+          }
+        ]
+      },
+      "score": {
+        "intent_correct": true,
+        "exact_match": true,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "expected_count": 1,
+        "predicted_count": 1
+      },
+      "executable": true,
+      "error": null,
+      "usage": {
+        "model_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 3671,
+        "output_tokens": 139,
+        "reasoning_tokens": 0,
+        "total_tokens": 3810,
+        "estimated_cost": 0.0,
+        "currency": "CNY",
+        "model_latency_ms": 2494.46600000374,
+        "ttft_ms_total": 0.0,
+        "ttft_measurements": 0
+      },
+      "time_to_plan_ms": 2494.46600000374,
+      "planner_ttft_ms": null,
+      "planner_ttft_reason": "forced function call currently uses non-streaming completion"
+    },
+    {
+      "case": {
+        "case_id": "home79_one_2",
+        "source": "HomeBench-adapted",
+        "category": "normal",
+        "instruction": "Turn on the air conditioner in the master bedroom.",
+        "expected_intent": "control",
+        "expected_actions": [
+          {
+            "device_id": "ac-002",
+            "action": "turnOn",
+            "input": {}
+          }
+        ]
+      },
+      "plan": {
+        "plan_id": "plan-001",
+        "intent": "control",
+        "summary": "Turn on the air conditioner in the master bedroom.",
+        "assumptions": [],
+        "steps": [
+          {
+            "id": "step-1",
+            "kind": "action",
+            "device_id": "ac-002",
+            "action": "turnOn",
+            "input": {},
+            "depends_on": [],
+            "timeout_ms": 5000,
+            "retry_policy": {
+              "max_attempts": 1,
+              "delay_ms": 0
+            },
+            "postconditions": [
+              {
+                "property": "on",
+                "operator": "eq",
+                "value": true
+              }
+            ]
+          }
+        ]
+      },
+      "score": {
+        "intent_correct": true,
+        "exact_match": true,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "expected_count": 1,
+        "predicted_count": 1
+      },
+      "executable": true,
+      "error": null,
+      "usage": {
+        "model_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 3667,
+        "output_tokens": 133,
+        "reasoning_tokens": 0,
+        "total_tokens": 3800,
+        "estimated_cost": 0.0,
+        "currency": "CNY",
+        "model_latency_ms": 1677.990600001067,
+        "ttft_ms_total": 0.0,
+        "ttft_measurements": 0
+      },
+      "time_to_plan_ms": 1677.990600001067,
+      "planner_ttft_ms": null,
+      "planner_ttft_reason": "forced function call currently uses non-streaming completion"
+    },
+    {
+      "case": {
+        "case_id": "home72_one_430",
+        "source": "HomeBench-adapted",
+        "category": "normal",
+        "instruction": "Set the brightness of the light to 60 in the kitchen.",
+        "expected_intent": "control",
+        "expected_actions": [
+          {
+            "device_id": "light-005",
+            "action": "setBrightness",
+            "input": {
+              "brightness": 60
+            }
+          }
+        ]
+      },
+      "plan": {
+        "plan_id": "plan-001",
+        "intent": "control",
+        "summary": "Set kitchen light brightness to 60",
+        "assumptions": [],
+        "steps": [
+          {
+            "id": "step-1",
+            "kind": "action",
+            "device_id": "light-005",
+            "action": "setBrightness",
+            "input": {
+              "brightness": 60
+            },
+            "depends_on": [],
+            "timeout_ms": 5000,
+            "retry_policy": {
+              "max_attempts": 1,
+              "delay_ms": 0
+            },
+            "postconditions": [
+              {
+                "property": "brightness",
+                "operator": "eq",
+                "value": 60
+              }
+            ]
+          }
+        ]
+      },
+      "score": {
+        "intent_correct": true,
+        "exact_match": true,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "expected_count": 1,
+        "predicted_count": 1
+      },
+      "executable": true,
+      "error": null,
+      "usage": {
+        "model_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 3670,
+        "output_tokens": 137,
+        "reasoning_tokens": 0,
+        "total_tokens": 3807,
+        "estimated_cost": 0.0,
+        "currency": "CNY",
+        "model_latency_ms": 1471.3546999992104,
+        "ttft_ms_total": 0.0,
+        "ttft_measurements": 0
+      },
+      "time_to_plan_ms": 1471.3546999992104,
+      "planner_ttft_ms": null,
+      "planner_ttft_reason": "forced function call currently uses non-streaming completion"
+    },
+    {
+      "case": {
+        "case_id": "home25_one_167",
+        "source": "HomeBench-adapted",
+        "category": "normal",
+        "instruction": "Set the air conditioner temperature in the living room to 20 degrees.",
+        "expected_intent": "control",
+        "expected_actions": [
+          {
+            "device_id": "ac-001",
+            "action": "setTemperature",
+            "input": {
+              "temperature": 20
+            }
+          }
+        ]
+      },
+      "plan": {
+        "plan_id": "plan-001",
+        "intent": "control",
+        "summary": "Set living room AC temperature to 20 degrees",
+        "assumptions": [],
+        "steps": [
+          {
+            "id": "step-1",
+            "kind": "action",
+            "device_id": "ac-001",
+            "action": "setTemperature",
+            "input": {
+              "temperature": 20
+            },
+            "depends_on": [],
+            "timeout_ms": 5000,
+            "retry_policy": {
+              "max_attempts": 1,
+              "delay_ms": 0
+            },
+            "postconditions": [
+              {
+                "property": "targetTemp",
+                "operator": "eq",
+                "value": 20
+              }
+            ]
+          }
+        ]
+      },
+      "score": {
+        "intent_correct": true,
+        "exact_match": true,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "expected_count": 1,
+        "predicted_count": 1
+      },
+      "executable": true,
+      "error": null,
+      "usage": {
+        "model_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 3671,
+        "output_tokens": 143,
+        "reasoning_tokens": 0,
+        "total_tokens": 3814,
+        "estimated_cost": 0.0,
+        "currency": "CNY",
+        "model_latency_ms": 1889.9221000028774,
+        "ttft_ms_total": 0.0,
+        "ttft_measurements": 0
+      },
+      "time_to_plan_ms": 1889.9221000028774,
+      "planner_ttft_ms": null,
+      "planner_ttft_reason": "forced function call currently uses non-streaming completion"
+    },
+    {
+      "case": {
+        "case_id": "home48_one_113",
+        "source": "HomeBench-adapted",
+        "category": "normal",
+        "instruction": "Set the brightness of the light to 100 in the guest bedroom.",
+        "expected_intent": "control",
+        "expected_actions": [
+          {
+            "device_id": "light-003",
+            "action": "setBrightness",
+            "input": {
+              "brightness": 100
+            }
+          }
+        ]
+      },
+      "plan": {
+        "plan_id": "plan-001",
+        "intent": "control",
+        "summary": "Set the brightness of the guest bedroom light to 100.",
+        "assumptions": [],
+        "steps": [
+          {
+            "id": "step-1",
+            "kind": "action",
+            "device_id": "light-003",
+            "action": "setBrightness",
+            "input": {
+              "brightness": 100
+            },
+            "depends_on": [],
+            "timeout_ms": 5000,
+            "retry_policy": {
+              "max_attempts": 1,
+              "delay_ms": 0
+            },
+            "postconditions": [
+              {
+                "property": "brightness",
+                "operator": "eq",
+                "value": 100
+              }
+            ]
+          }
+        ]
+      },
+      "score": {
+        "intent_correct": true,
+        "exact_match": true,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "expected_count": 1,
+        "predicted_count": 1
+      },
+      "executable": true,
+      "error": null,
+      "usage": {
+        "model_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 3671,
+        "output_tokens": 141,
+        "reasoning_tokens": 0,
+        "total_tokens": 3812,
+        "estimated_cost": 0.0,
+        "currency": "CNY",
+        "model_latency_ms": 1600.2967999957036,
+        "ttft_ms_total": 0.0,
+        "ttft_measurements": 0
+      },
+      "time_to_plan_ms": 1600.2967999957036,
+      "planner_ttft_ms": null,
+      "planner_ttft_reason": "forced function call currently uses non-streaming completion"
+    },
+    {
+      "case": {
+        "case_id": "home89_one_90",
+        "source": "HomeBench-adapted",
+        "category": "normal",
+        "instruction": "Set the air conditioner temperature in the guest bedroom to 20 degrees.",
+        "expected_intent": "control",
+        "expected_actions": [
+          {
+            "device_id": "ac-003",
+            "action": "setTemperature",
+            "input": {
+              "temperature": 20
+            }
+          }
+        ]
+      },
+      "plan": {
+        "plan_id": "plan-001",
+        "intent": "control",
+        "summary": "Set the air conditioner in the guest bedroom (bedroom2) to 20 degrees.",
+        "assumptions": [],
+        "steps": [
+          {
+            "id": "step-1",
+            "kind": "action",
+            "device_id": "ac-003",
+            "action": "turnOn",
+            "input": {},
+            "depends_on": [],
+            "timeout_ms": 5000,
+            "retry_policy": {
+              "max_attempts": 1,
+              "delay_ms": 0
+            },
+            "postconditions": [
+              {
+                "property": "on",
+                "operator": "eq",
+                "value": true
+              }
+            ]
+          },
+          {
+            "id": "step-2",
+            "kind": "action",
+            "device_id": "ac-003",
+            "action": "setTemperature",
+            "input": {
+              "temperature": 20
+            },
+            "depends_on": [
+              "step-1"
+            ],
+            "timeout_ms": 5000,
+            "retry_policy": {
+              "max_attempts": 1,
+              "delay_ms": 0
+            },
+            "postconditions": [
+              {
+                "property": "targetTemp",
+                "operator": "eq",
+                "value": 20
+              }
+            ]
+          }
+        ]
+      },
+      "score": {
+        "intent_correct": true,
+        "exact_match": false,
+        "precision": 0.5,
+        "recall": 1.0,
+        "f1": 0.6666666666666666,
+        "expected_count": 1,
+        "predicted_count": 2
+      },
+      "executable": true,
+      "error": null,
+      "usage": {
+        "model_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 3671,
+        "output_tokens": 196,
+        "reasoning_tokens": 0,
+        "total_tokens": 3867,
+        "estimated_cost": 0.0,
+        "currency": "CNY",
+        "model_latency_ms": 1829.1408000077354,
+        "ttft_ms_total": 0.0,
+        "ttft_measurements": 0
+      },
+      "time_to_plan_ms": 1829.1408000077354,
+      "planner_ttft_ms": null,
+      "planner_ttft_reason": "forced function call currently uses non-streaming completion"
+    },
+    {
+      "case": {
+        "case_id": "home19_one_102",
+        "source": "HomeBench-adapted",
+        "category": "normal",
+        "instruction": "Set the air conditioner temperature in the guest bedroom to 19 degrees.",
+        "expected_intent": "control",
+        "expected_actions": [
+          {
+            "device_id": "ac-003",
+            "action": "setTemperature",
+            "input": {
+              "temperature": 19
+            }
+          }
+        ]
+      },
+      "plan": {
+        "plan_id": "plan-001",
+        "intent": "control",
+        "summary": "Set the air conditioner in the guest bedroom (bedroom2) to 19 degrees.",
+        "assumptions": [],
+        "steps": [
+          {
+            "id": "step-1",
+            "kind": "action",
+            "device_id": "ac-003",
+            "action": "turnOn",
+            "input": {},
+            "depends_on": [],
+            "timeout_ms": 5000,
+            "retry_policy": {
+              "max_attempts": 1,
+              "delay_ms": 0
+            },
+            "postconditions": [
+              {
+                "property": "on",
+                "operator": "eq",
+                "value": true
+              }
+            ]
+          },
+          {
+            "id": "step-2",
+            "kind": "action",
+            "device_id": "ac-003",
+            "action": "setTemperature",
+            "input": {
+              "temperature": 19
+            },
+            "depends_on": [
+              "step-1"
+            ],
+            "timeout_ms": 5000,
+            "retry_policy": {
+              "max_attempts": 1,
+              "delay_ms": 0
+            },
+            "postconditions": [
+              {
+                "property": "targetTemp",
+                "operator": "eq",
+                "value": 19
+              }
+            ]
+          }
+        ]
+      },
+      "score": {
+        "intent_correct": true,
+        "exact_match": false,
+        "precision": 0.5,
+        "recall": 1.0,
+        "f1": 0.6666666666666666,
+        "expected_count": 1,
+        "predicted_count": 2
+      },
+      "executable": true,
+      "error": null,
+      "usage": {
+        "model_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 3671,
+        "output_tokens": 190,
+        "reasoning_tokens": 0,
+        "total_tokens": 3861,
+        "estimated_cost": 0.0,
+        "currency": "CNY",
+        "model_latency_ms": 2047.5126999954227,
+        "ttft_ms_total": 0.0,
+        "ttft_measurements": 0
+      },
+      "time_to_plan_ms": 2047.5126999954227,
+      "planner_ttft_ms": null,
+      "planner_ttft_reason": "forced function call currently uses non-streaming completion"
+    },
+    {
+      "case": {
+        "case_id": "home79_one_14",
+        "source": "HomeBench-adapted",
+        "category": "normal",
+        "instruction": "Set the air conditioner temperature in the master bedroom to 21 degrees.",
+        "expected_intent": "control",
+        "expected_actions": [
+          {
+            "device_id": "ac-002",
+            "action": "setTemperature",
+            "input": {
+              "temperature": 21
+            }
+          }
+        ]
+      },
+      "plan": {
+        "plan_id": "plan-001",
+        "intent": "control",
+        "summary": "Set the master bedroom air conditioner temperature to 21 degrees.",
+        "assumptions": [],
+        "steps": [
+          {
+            "id": "step-1",
+            "kind": "action",
+            "device_id": "ac-002",
+            "action": "setTemperature",
+            "input": {
+              "temperature": 21
+            },
+            "depends_on": [],
+            "timeout_ms": 5000,
+            "retry_policy": {
+              "max_attempts": 1,
+              "delay_ms": 0
+            },
+            "postconditions": [
+              {
+                "property": "targetTemp",
+                "operator": "eq",
+                "value": 21
+              }
+            ]
+          }
+        ]
+      },
+      "score": {
+        "intent_correct": true,
+        "exact_match": true,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "expected_count": 1,
+        "predicted_count": 1
+      },
+      "executable": true,
+      "error": null,
+      "usage": {
+        "model_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 3671,
+        "output_tokens": 139,
+        "reasoning_tokens": 0,
+        "total_tokens": 3810,
+        "estimated_cost": 0.0,
+        "currency": "CNY",
+        "model_latency_ms": 1839.3441000080202,
+        "ttft_ms_total": 0.0,
+        "ttft_measurements": 0
+      },
+      "time_to_plan_ms": 1839.3441000080202,
+      "planner_ttft_ms": null,
+      "planner_ttft_reason": "forced function call currently uses non-streaming completion"
+    },
+    {
+      "case": {
+        "case_id": "home64_one_171",
+        "source": "HomeBench-adapted",
+        "category": "normal",
+        "instruction": "Turn on the air conditioner in the guest bedroom.",
+        "expected_intent": "control",
+        "expected_actions": [
+          {
+            "device_id": "ac-003",
+            "action": "turnOn",
+            "input": {}
+          }
+        ]
+      },
+      "plan": {
+        "plan_id": "plan-001",
+        "intent": "control",
+        "summary": "Turn on the air conditioner in the guest bedroom (bedroom2).",
+        "assumptions": [],
+        "steps": [
+          {
+            "id": "step-1",
+            "kind": "action",
+            "device_id": "ac-003",
+            "action": "turnOn",
+            "input": {},
+            "depends_on": [],
+            "timeout_ms": 5000,
+            "retry_policy": {
+              "max_attempts": 1,
+              "delay_ms": 0
+            },
+            "postconditions": [
+              {
+                "property": "on",
+                "operator": "eq",
+                "value": true
+              }
+            ]
+          }
+        ]
+      },
+      "score": {
+        "intent_correct": true,
+        "exact_match": true,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "expected_count": 1,
+        "predicted_count": 1
+      },
+      "executable": true,
+      "error": null,
+      "usage": {
+        "model_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 3667,
+        "output_tokens": 138,
+        "reasoning_tokens": 0,
+        "total_tokens": 3805,
+        "estimated_cost": 0.0,
+        "currency": "CNY",
+        "model_latency_ms": 1683.4713999996893,
+        "ttft_ms_total": 0.0,
+        "ttft_measurements": 0
+      },
+      "time_to_plan_ms": 1683.4713999996893,
+      "planner_ttft_ms": null,
+      "planner_ttft_reason": "forced function call currently uses non-streaming completion"
+    },
+    {
+      "case": {
+        "case_id": "home50_one_195",
+        "source": "HomeBench-adapted",
+        "category": "normal",
+        "instruction": "Set the brightness of the light to 80 in the living room.",
+        "expected_intent": "control",
+        "expected_actions": [
+          {
+            "device_id": "light-001",
+            "action": "setBrightness",
+            "input": {
+              "brightness": 80
+            }
+          }
+        ]
+      },
+      "plan": {
+        "plan_id": "plan-001",
+        "intent": "control",
+        "summary": "Set living room light brightness to 80",
+        "assumptions": [],
+        "steps": [
+          {
+            "id": "step-1",
+            "kind": "action",
+            "device_id": "light-001",
+            "action": "setBrightness",
+            "input": {
+              "brightness": 80
+            },
+            "depends_on": [],
+            "timeout_ms": 5000,
+            "retry_policy": {
+              "max_attempts": 1,
+              "delay_ms": 0
+            },
+            "postconditions": [
+              {
+                "property": "brightness",
+                "operator": "eq",
+                "value": 80
+              }
+            ]
+          }
+        ]
+      },
+      "score": {
+        "intent_correct": true,
+        "exact_match": true,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "expected_count": 1,
+        "predicted_count": 1
+      },
+      "executable": true,
+      "error": null,
+      "usage": {
+        "model_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 3671,
+        "output_tokens": 138,
+        "reasoning_tokens": 0,
+        "total_tokens": 3809,
+        "estimated_cost": 0.0,
+        "currency": "CNY",
+        "model_latency_ms": 1722.110699993209,
+        "ttft_ms_total": 0.0,
+        "ttft_measurements": 0
+      },
+      "time_to_plan_ms": 1722.110699993209,
+      "planner_ttft_ms": null,
+      "planner_ttft_reason": "forced function call currently uses non-streaming completion"
+    },
+    {
+      "case": {
+        "case_id": "home50_one_185",
+        "source": "HomeBench-adapted",
+        "category": "normal",
+        "instruction": "Set the brightness of the light in the living room to 30.",
+        "expected_intent": "control",
+        "expected_actions": [
+          {
+            "device_id": "light-001",
+            "action": "setBrightness",
+            "input": {
+              "brightness": 30
+            }
+          }
+        ]
+      },
+      "plan": {
+        "plan_id": "plan-001",
+        "intent": "control",
+        "summary": "Set living room light brightness to 30",
+        "assumptions": [],
+        "steps": [
+          {
+            "id": "step-1",
+            "kind": "action",
+            "device_id": "light-001",
+            "action": "setBrightness",
+            "input": {
+              "brightness": 30
+            },
+            "depends_on": [],
+            "timeout_ms": 5000,
+            "retry_policy": {
+              "max_attempts": 1,
+              "delay_ms": 0
+            },
+            "postconditions": [
+              {
+                "property": "brightness",
+                "operator": "eq",
+                "value": 30
+              }
+            ]
+          }
+        ]
+      },
+      "score": {
+        "intent_correct": true,
+        "exact_match": true,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "expected_count": 1,
+        "predicted_count": 1
+      },
+      "executable": true,
+      "error": null,
+      "usage": {
+        "model_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 3671,
+        "output_tokens": 138,
+        "reasoning_tokens": 0,
+        "total_tokens": 3809,
+        "estimated_cost": 0.0,
+        "currency": "CNY",
+        "model_latency_ms": 1804.7466999996686,
+        "ttft_ms_total": 0.0,
+        "ttft_measurements": 0
+      },
+      "time_to_plan_ms": 1804.7466999996686,
+      "planner_ttft_ms": null,
+      "planner_ttft_reason": "forced function call currently uses non-streaming completion"
+    },
+    {
+      "case": {
+        "case_id": "home28_one_168",
+        "source": "HomeBench-adapted",
+        "category": "normal",
+        "instruction": "Set the air conditioner temperature to 18 degrees in the guest bedroom.",
+        "expected_intent": "control",
+        "expected_actions": [
+          {
+            "device_id": "ac-003",
+            "action": "setTemperature",
+            "input": {
+              "temperature": 18
+            }
+          }
+        ]
+      },
+      "plan": {
+        "plan_id": "plan-001",
+        "intent": "control",
+        "summary": "Set the air conditioner in the guest bedroom (bedroom2) to 18 degrees.",
+        "assumptions": [],
+        "steps": [
+          {
+            "id": "step1",
+            "kind": "action",
+            "device_id": "ac-003",
+            "action": "turnOn",
+            "input": {},
+            "depends_on": [],
+            "timeout_ms": 5000,
+            "retry_policy": {
+              "max_attempts": 1,
+              "delay_ms": 0
+            },
+            "postconditions": [
+              {
+                "property": "on",
+                "operator": "eq",
+                "value": true
+              }
+            ]
+          },
+          {
+            "id": "step2",
+            "kind": "action",
+            "device_id": "ac-003",
+            "action": "setTemperature",
+            "input": {
+              "temperature": 18
+            },
+            "depends_on": [
+              "step1"
+            ],
+            "timeout_ms": 5000,
+            "retry_policy": {
+              "max_attempts": 1,
+              "delay_ms": 0
+            },
+            "postconditions": [
+              {
+                "property": "targetTemp",
+                "operator": "eq",
+                "value": 18
+              }
+            ]
+          }
+        ]
+      },
+      "score": {
+        "intent_correct": true,
+        "exact_match": false,
+        "precision": 0.5,
+        "recall": 1.0,
+        "f1": 0.6666666666666666,
+        "expected_count": 1,
+        "predicted_count": 2
+      },
+      "executable": true,
+      "error": null,
+      "usage": {
+        "model_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 3671,
+        "output_tokens": 187,
+        "reasoning_tokens": 0,
+        "total_tokens": 3858,
+        "estimated_cost": 0.0,
+        "currency": "CNY",
+        "model_latency_ms": 1841.6614000016125,
+        "ttft_ms_total": 0.0,
+        "ttft_measurements": 0
+      },
+      "time_to_plan_ms": 1841.6614000016125,
+      "planner_ttft_ms": null,
+      "planner_ttft_reason": "forced function call currently uses non-streaming completion"
+    },
+    {
+      "case": {
+        "case_id": "home67_one_181",
+        "source": "HomeBench-adapted",
+        "category": "normal",
+        "instruction": "Set the brightness of the light to 40 in the living room.",
+        "expected_intent": "control",
+        "expected_actions": [
+          {
+            "device_id": "light-001",
+            "action": "setBrightness",
+            "input": {
+              "brightness": 40
+            }
+          }
+        ]
+      },
+      "plan": {
+        "plan_id": "plan-001",
+        "intent": "control",
+        "summary": "Set living room light brightness to 40",
+        "assumptions": [],
+        "steps": [
+          {
+            "id": "step-1",
+            "kind": "action",
+            "device_id": "light-001",
+            "action": "setBrightness",
+            "input": {
+              "brightness": 40
+            },
+            "depends_on": [],
+            "timeout_ms": 5000,
+            "retry_policy": {
+              "max_attempts": 1,
+              "delay_ms": 0
+            },
+            "postconditions": [
+              {
+                "property": "brightness",
+                "operator": "eq",
+                "value": 40
+              }
+            ]
+          }
+        ]
+      },
+      "score": {
+        "intent_correct": true,
+        "exact_match": true,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "expected_count": 1,
+        "predicted_count": 1
+      },
+      "executable": true,
+      "error": null,
+      "usage": {
+        "model_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 3671,
+        "output_tokens": 138,
+        "reasoning_tokens": 0,
+        "total_tokens": 3809,
+        "estimated_cost": 0.0,
+        "currency": "CNY",
+        "model_latency_ms": 1652.3273999919184,
+        "ttft_ms_total": 0.0,
+        "ttft_measurements": 0
+      },
+      "time_to_plan_ms": 1652.3273999919184,
+      "planner_ttft_ms": null,
+      "planner_ttft_reason": "forced function call currently uses non-streaming completion"
+    },
+    {
+      "case": {
+        "case_id": "home23_one_250",
+        "source": "HomeBench-adapted",
+        "category": "normal",
+        "instruction": "Set the air conditioner temperature in the living room to 27 degrees.",
+        "expected_intent": "control",
+        "expected_actions": [
+          {
+            "device_id": "ac-001",
+            "action": "setTemperature",
+            "input": {
+              "temperature": 27
+            }
+          }
+        ]
+      },
+      "plan": {
+        "plan_id": "plan-001",
+        "intent": "control",
+        "summary": "Set the living room air conditioner temperature to 27 degrees.",
+        "assumptions": [],
+        "steps": [
+          {
+            "id": "step-1",
+            "kind": "action",
+            "device_id": "ac-001",
+            "action": "turnOn",
+            "input": {},
+            "depends_on": [],
+            "timeout_ms": 5000,
+            "retry_policy": {
+              "max_attempts": 1,
+              "delay_ms": 0
+            },
+            "postconditions": [
+              {
+                "property": "on",
+                "operator": "eq",
+                "value": true
+              }
+            ]
+          },
+          {
+            "id": "step-2",
+            "kind": "action",
+            "device_id": "ac-001",
+            "action": "setTemperature",
+            "input": {
+              "temperature": 27
+            },
+            "depends_on": [
+              "step-1"
+            ],
+            "timeout_ms": 5000,
+            "retry_policy": {
+              "max_attempts": 1,
+              "delay_ms": 0
+            },
+            "postconditions": [
+              {
+                "property": "targetTemp",
+                "operator": "eq",
+                "value": 27
+              }
+            ]
+          }
+        ]
+      },
+      "score": {
+        "intent_correct": true,
+        "exact_match": false,
+        "precision": 0.5,
+        "recall": 1.0,
+        "f1": 0.6666666666666666,
+        "expected_count": 1,
+        "predicted_count": 2
+      },
+      "executable": true,
+      "error": null,
+      "usage": {
+        "model_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 3671,
+        "output_tokens": 190,
+        "reasoning_tokens": 0,
+        "total_tokens": 3861,
+        "estimated_cost": 0.0,
+        "currency": "CNY",
+        "model_latency_ms": 1985.3090000106022,
+        "ttft_ms_total": 0.0,
+        "ttft_measurements": 0
+      },
+      "time_to_plan_ms": 1985.3090000106022,
+      "planner_ttft_ms": null,
+      "planner_ttft_reason": "forced function call currently uses non-streaming completion"
+    },
+    {
+      "case": {
+        "case_id": "home69_one_76",
+        "source": "HomeBench-adapted",
+        "category": "normal",
+        "instruction": "Set the air conditioner temperature to 25 degrees in the guest bedroom.",
+        "expected_intent": "control",
+        "expected_actions": [
+          {
+            "device_id": "ac-003",
+            "action": "setTemperature",
+            "input": {
+              "temperature": 25
+            }
+          }
+        ]
+      },
+      "plan": {
+        "plan_id": "plan-001",
+        "intent": "control",
+        "summary": "Set the guest bedroom (bedroom2) air conditioner temperature to 25 degrees.",
+        "assumptions": [],
+        "steps": [
+          {
+            "id": "step-1",
+            "kind": "action",
+            "device_id": "ac-003",
+            "action": "setTemperature",
+            "input": {
+              "temperature": 25
+            },
+            "depends_on": [],
+            "timeout_ms": 5000,
+            "retry_policy": {
+              "max_attempts": 1,
+              "delay_ms": 0
+            },
+            "postconditions": [
+              {
+                "property": "targetTemp",
+                "operator": "eq",
+                "value": 25
+              }
+            ]
+          }
+        ]
+      },
+      "score": {
+        "intent_correct": true,
+        "exact_match": true,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "expected_count": 1,
+        "predicted_count": 1
+      },
+      "executable": true,
+      "error": null,
+      "usage": {
+        "model_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 3671,
+        "output_tokens": 144,
+        "reasoning_tokens": 0,
+        "total_tokens": 3815,
+        "estimated_cost": 0.0,
+        "currency": "CNY",
+        "model_latency_ms": 1674.5647999923676,
+        "ttft_ms_total": 0.0,
+        "ttft_measurements": 0
+      },
+      "time_to_plan_ms": 1674.5647999923676,
+      "planner_ttft_ms": null,
+      "planner_ttft_reason": "forced function call currently uses non-streaming completion"
+    },
+    {
+      "case": {
+        "case_id": "home59_one_164",
+        "source": "HomeBench-adapted",
+        "category": "normal",
+        "instruction": "Set the air conditioner temperature in the guest bedroom to 27 degrees.",
+        "expected_intent": "control",
+        "expected_actions": [
+          {
+            "device_id": "ac-003",
+            "action": "setTemperature",
+            "input": {
+              "temperature": 27
+            }
+          }
+        ]
+      },
+      "plan": {
+        "plan_id": "plan-001",
+        "intent": "control",
+        "summary": "Set the air conditioner in the guest bedroom (bedroom2) to 27 degrees.",
+        "assumptions": [],
+        "steps": [
+          {
+            "id": "step1",
+            "kind": "action",
+            "device_id": "ac-003",
+            "action": "setTemperature",
+            "input": {
+              "temperature": 27
+            },
+            "depends_on": [],
+            "timeout_ms": 5000,
+            "retry_policy": {
+              "max_attempts": 1,
+              "delay_ms": 0
+            },
+            "postconditions": [
+              {
+                "property": "targetTemp",
+                "operator": "eq",
+                "value": 27
+              }
+            ]
+          }
+        ]
+      },
+      "score": {
+        "intent_correct": true,
+        "exact_match": true,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "expected_count": 1,
+        "predicted_count": 1
+      },
+      "executable": true,
+      "error": null,
+      "usage": {
+        "model_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 3671,
+        "output_tokens": 144,
+        "reasoning_tokens": 0,
+        "total_tokens": 3815,
+        "estimated_cost": 0.0,
+        "currency": "CNY",
+        "model_latency_ms": 1673.6629999941215,
+        "ttft_ms_total": 0.0,
+        "ttft_measurements": 0
+      },
+      "time_to_plan_ms": 1673.6629999941215,
+      "planner_ttft_ms": null,
+      "planner_ttft_reason": "forced function call currently uses non-streaming completion"
+    },
+    {
+      "case": {
+        "case_id": "home72_one_10",
+        "source": "HomeBench-adapted",
+        "category": "normal",
+        "instruction": "Set the brightness of the light to 40 in the master bedroom.",
+        "expected_intent": "control",
+        "expected_actions": [
+          {
+            "device_id": "light-002",
+            "action": "setBrightness",
+            "input": {
+              "brightness": 40
+            }
+          }
+        ]
+      },
+      "plan": {
+        "plan_id": "plan-001",
+        "intent": "control",
+        "summary": "Set the brightness of the master bedroom light to 40.",
+        "assumptions": [],
+        "steps": [
+          {
+            "id": "step-1",
+            "kind": "action",
+            "device_id": "light-002",
+            "action": "setBrightness",
+            "input": {
+              "brightness": 40
+            },
+            "depends_on": [],
+            "timeout_ms": 5000,
+            "retry_policy": {
+              "max_attempts": 1,
+              "delay_ms": 0
+            },
+            "postconditions": [
+              {
+                "property": "brightness",
+                "operator": "eq",
+                "value": 40
+              }
+            ]
+          }
+        ]
+      },
+      "score": {
+        "intent_correct": true,
+        "exact_match": true,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "expected_count": 1,
+        "predicted_count": 1
+      },
+      "executable": true,
+      "error": null,
+      "usage": {
+        "model_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 3671,
+        "output_tokens": 141,
+        "reasoning_tokens": 0,
+        "total_tokens": 3812,
+        "estimated_cost": 0.0,
+        "currency": "CNY",
+        "model_latency_ms": 1667.4426999961725,
+        "ttft_ms_total": 0.0,
+        "ttft_measurements": 0
+      },
+      "time_to_plan_ms": 1667.4426999961725,
+      "planner_ttft_ms": null,
+      "planner_ttft_reason": "forced function call currently uses non-streaming completion"
+    },
+    {
+      "case": {
+        "case_id": "home2_one_99",
+        "source": "HomeBench-adapted",
+        "category": "normal",
+        "instruction": "Adjust the brightness of the light to 10 in the guest bedroom.",
+        "expected_intent": "control",
+        "expected_actions": [
+          {
+            "device_id": "light-003",
+            "action": "setBrightness",
+            "input": {
+              "brightness": 10
+            }
+          }
+        ]
+      },
+      "plan": {
+        "plan_id": "plan-001",
+        "intent": "control",
+        "summary": "Set guest bedroom light brightness to 10",
+        "assumptions": [],
+        "steps": [
+          {
+            "id": "step-1",
+            "kind": "action",
+            "device_id": "light-003",
+            "action": "setBrightness",
+            "input": {
+              "brightness": 10
+            },
+            "depends_on": [],
+            "timeout_ms": 5000,
+            "retry_policy": {
+              "max_attempts": 1,
+              "delay_ms": 0
+            },
+            "postconditions": [
+              {
+                "property": "brightness",
+                "operator": "eq",
+                "value": 10
+              }
+            ]
+          }
+        ]
+      },
+      "score": {
+        "intent_correct": true,
+        "exact_match": true,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "expected_count": 1,
+        "predicted_count": 1
+      },
+      "executable": true,
+      "error": null,
+      "usage": {
+        "model_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 3671,
+        "output_tokens": 144,
+        "reasoning_tokens": 0,
+        "total_tokens": 3815,
+        "estimated_cost": 0.0,
+        "currency": "CNY",
+        "model_latency_ms": 1757.6031000062358,
+        "ttft_ms_total": 0.0,
+        "ttft_measurements": 0
+      },
+      "time_to_plan_ms": 1757.6031000062358,
+      "planner_ttft_ms": null,
+      "planner_ttft_reason": "forced function call currently uses non-streaming completion"
+    },
+    {
+      "case": {
+        "case_id": "home39_one_102",
+        "source": "HomeBench-adapted",
+        "category": "normal",
+        "instruction": "Set the air conditioner temperature in the guest bedroom to 23 degrees.",
+        "expected_intent": "control",
+        "expected_actions": [
+          {
+            "device_id": "ac-003",
+            "action": "setTemperature",
+            "input": {
+              "temperature": 23
+            }
+          }
+        ]
+      },
+      "plan": {
+        "plan_id": "plan-001",
+        "intent": "control",
+        "summary": "Set the air conditioner in the guest bedroom (bedroom2) to 23 degrees.",
+        "assumptions": [],
+        "steps": [
+          {
+            "id": "step-1",
+            "kind": "action",
+            "device_id": "ac-003",
+            "action": "setTemperature",
+            "input": {
+              "temperature": 23
+            },
+            "depends_on": [],
+            "timeout_ms": 5000,
+            "retry_policy": {
+              "max_attempts": 1,
+              "delay_ms": 0
+            },
+            "postconditions": [
+              {
+                "property": "targetTemp",
+                "operator": "eq",
+                "value": 23
+              }
+            ]
+          }
+        ]
+      },
+      "score": {
+        "intent_correct": true,
+        "exact_match": true,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "expected_count": 1,
+        "predicted_count": 1
+      },
+      "executable": true,
+      "error": null,
+      "usage": {
+        "model_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 3671,
+        "output_tokens": 145,
+        "reasoning_tokens": 0,
+        "total_tokens": 3816,
+        "estimated_cost": 0.0,
+        "currency": "CNY",
+        "model_latency_ms": 1573.1307999958517,
+        "ttft_ms_total": 0.0,
+        "ttft_measurements": 0
+      },
+      "time_to_plan_ms": 1573.1307999958517,
+      "planner_ttft_ms": null,
+      "planner_ttft_reason": "forced function call currently uses non-streaming completion"
+    },
+    {
+      "case": {
+        "case_id": "home64_one_204",
+        "source": "HomeBench-adapted",
+        "category": "normal",
+        "instruction": "Set the air conditioner in the guest bedroom to fan only mode.",
+        "expected_intent": "control",
+        "expected_actions": [
+          {
+            "device_id": "ac-003",
+            "action": "setMode",
+            "input": {
+              "mode": "fan"
+            }
+          }
+        ]
+      },
+      "plan": {
+        "plan_id": "plan-001",
+        "intent": "control",
+        "summary": "Set the guest bedroom (bedroom2) air conditioner to fan only mode.",
+        "assumptions": [],
+        "steps": [
+          {
+            "id": "step-1",
+            "kind": "action",
+            "device_id": "ac-003",
+            "action": "setMode",
+            "input": {
+              "mode": "fan"
+            },
+            "depends_on": [],
+            "timeout_ms": 5000,
+            "retry_policy": {
+              "max_attempts": 1,
+              "delay_ms": 0
+            },
+            "postconditions": [
+              {
+                "property": "mode",
+                "operator": "eq",
+                "value": "fan"
+              }
+            ]
+          }
+        ]
+      },
+      "score": {
+        "intent_correct": true,
+        "exact_match": true,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "expected_count": 1,
+        "predicted_count": 1
+      },
+      "executable": true,
+      "error": null,
+      "usage": {
+        "model_calls": 1,
+        "tool_calls": 0,
+        "input_tokens": 3670,
+        "output_tokens": 149,
+        "reasoning_tokens": 0,
+        "total_tokens": 3819,
+        "estimated_cost": 0.0,
+        "currency": "CNY",
+        "model_latency_ms": 1560.4787000047509,
+        "ttft_ms_total": 0.0,
+        "ttft_measurements": 0
+      },
+      "time_to_plan_ms": 1560.4787000047509,
+      "planner_ttft_ms": null,
+      "planner_ttft_reason": "forced function call currently uses non-streaming completion"
+    }
+  ]
+}

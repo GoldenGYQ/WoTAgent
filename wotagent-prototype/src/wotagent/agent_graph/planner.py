@@ -12,18 +12,66 @@ from ..wot import load_tds
 from ..telemetry import InMemoryTraceStore
 
 
-def capability_context() -> list[dict[str, Any]]:
+_LOCATION_TERMS: dict[str, tuple[str, ...]] = {
+    "living_room": ("客厅", "起居室", "living room", "parlor"),
+    "bedroom1": ("主卧", "卧室1", "bedroom1", "master bedroom"),
+    "bedroom2": ("次卧", "卧室2", "bedroom2", "guest bedroom"),
+    "kitchen": ("厨房", "kitchen"),
+    "study": ("书房", "study"),
+    "bathroom1": ("主卫", "卫生间1", "bathroom1"),
+    "bathroom2": ("客卫", "卫生间2", "bathroom2"),
+}
+
+_DEVICE_TERMS: dict[str, tuple[str, ...]] = {
+    "light": ("灯", "照明", "light"),
+    "ac": ("空调", "ac", "air conditioner"),
+    "fan": ("风扇", "fan"),
+    "exhaust": ("排风", "换气", "exhaust"),
+    "humidifier": ("加湿器", "humidifier"),
+    "purifier": ("净化器", "purifier"),
+    "tv": ("电视", "tv"),
+    "gas_sensor": ("燃气", "gas"),
+}
+
+
+def capability_context(message: str = "", max_devices: int = 8) -> list[dict[str, Any]]:
     """Return a compact, model-safe capability view instead of complete TDs."""
-    return [
+    all_devices = [
         {
             "device_id": td.device_id,
             "title": td.title,
             "location": td.location,
-            "actions": [action.name for action in td.actions],
+            "location_aliases": list(_LOCATION_TERMS.get(td.location, ())),
+            "actions": [
+                {"name": action.name, "input_schema": action.input_schema}
+                for action in td.actions
+            ],
             "properties": [prop.name for prop in td.properties],
         }
         for td in load_tds()
     ]
+    text = message.lower().strip()
+    if not text:
+        return all_devices
+    locations = {
+        location for location, terms in _LOCATION_TERMS.items()
+        if any(term in text for term in terms)
+    }
+    device_types = {
+        device_type for device_type, terms in _DEVICE_TERMS.items()
+        if any(term in text for term in terms)
+    }
+    if not locations and not device_types:
+        return all_devices
+
+    def matches(device: dict[str, Any]) -> bool:
+        title = device["title"].lower()
+        location_match = not locations or device["location"] in locations
+        type_match = not device_types or any(device_type in title for device_type in device_types)
+        return location_match and type_match
+
+    selected = [device for device in all_devices if matches(device)]
+    return selected[:max_devices] if selected else all_devices
 
 
 @dataclass
@@ -34,10 +82,12 @@ class LangChainTaskPlanner:
     trace_store: InMemoryTraceStore | None = None
 
     async def __call__(self, state: dict[str, Any]) -> TaskPlan:
-        devices = state.get("context", {}).get("devices") or capability_context()
+        message = state.get("message", "")
+        devices = state.get("context", {}).get("devices") or capability_context(message)
         system = (
             "You are the WoTAgent planner. Return only the generate_plan tool call. "
-            "Use only device_id, actions, and properties listed below. "
+            "Use only device_id, action names, and exact input_schema parameter names listed below. "
+            "Location aliases identify the same canonical room. "
             "Use intent=clarify when the target is ambiguous. Do not decide permissions.\n"
             f"Available devices: {json.dumps(devices, ensure_ascii=False)}"
         )
@@ -51,6 +101,7 @@ class LangChainTaskPlanner:
                     "purpose": "task_planning",
                     "prompt_version": "planner-v2.0",
                     "device_count": len(devices),
+                    "all_device_count": len(load_tds()),
                     "message_length": len(state.get("message", "")),
                 },
             )

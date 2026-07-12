@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, AIMessageChunk
 
 from wotagent.agent_graph import LangChainResponseComposer
 from wotagent.domain import (
@@ -27,9 +27,9 @@ class FakeResponder:
         self.context = None
         self.prompt = ""
 
-    async def ainvoke(self, inputs, context=None):
-        self.context = context
-        self.prompt = inputs["messages"][0].content
+    async def ainvoke(self, inputs):
+        self.context = inputs
+        self.prompt = "\n".join(message.content for message in inputs)
         return {"messages": [AIMessage(
             content=self.content,
             usage_metadata={"input_tokens": 80, "output_tokens": 12, "total_tokens": 92},
@@ -76,7 +76,7 @@ def test_response_agent_receives_verified_execution_facts_and_records_usage() ->
     assert response == "客厅灯已打开，并完成状态验证。"
     assert '"passed": true' in runnable.prompt
     assert '"status": "succeeded"' in runnable.prompt
-    assert runnable.context.execution_results
+    assert len(runnable.context) == 2
     assert record.usage.model_calls == 1
     assert record.usage.total_tokens == 92
 
@@ -89,3 +89,30 @@ def test_empty_response_is_rejected_for_graph_fallback() -> None:
             assert "empty content" in str(exc)
         else:
             raise AssertionError("empty response should fail")
+
+
+def test_streaming_response_records_real_ttft_measurement() -> None:
+    class StreamingResponder:
+        async def astream(self, messages):
+            yield AIMessageChunk(content="客厅灯")
+            yield AIMessageChunk(
+                content="已打开。",
+                usage_metadata={"input_tokens": 70, "output_tokens": 8, "total_tokens": 78},
+                response_metadata={"model_name": "fake-streaming-responder"},
+            )
+
+    async def run():
+        store = InMemoryTraceStore()
+        await store.create(task_id="task-response", session_id="sess", request_id="req")
+        response = await LangChainResponseComposer(
+            StreamingResponder(), trace_store=store,
+        )(success_state())
+        return response, await store.get("task-response"), await store.events("task-response")
+
+    response, record, events = asyncio.run(run())
+
+    assert response == "客厅灯已打开。"
+    assert record.usage.ttft_measurements == 1
+    completed = next(event for event in events if event.type == "model.request.completed")
+    assert completed.data["ttft_available"] is True
+    assert completed.data["ttft_ms"] >= 0
