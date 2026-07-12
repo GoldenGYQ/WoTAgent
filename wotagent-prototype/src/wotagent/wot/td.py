@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 class TDAction(BaseModel):
     name: str
     input_type: str | None = None
+    input_schema: dict[str, Any] = Field(default_factory=dict)
     description: str = ""
 
 
@@ -64,7 +65,11 @@ def _parse_td(raw: dict[str, Any]) -> ThingDescription:
     actions = []
     for name, spec in (raw.get("actions") or {}).items():
         inp = spec.get("input", {}) if isinstance(spec, dict) else {}
-        actions.append(TDAction(name=name, input_type=inp.get("type")))
+        actions.append(TDAction(
+            name=name,
+            input_type=inp.get("type"),
+            input_schema=_normalize_action_input(name, inp),
+        ))
 
     properties = []
     for name, spec in (raw.get("properties") or {}).items():
@@ -81,6 +86,36 @@ def _parse_td(raw: dict[str, Any]) -> ThingDescription:
         properties=properties,
         raw=raw,
     )
+
+
+_ACTION_PARAMETERS: dict[str, tuple[str, dict[str, Any]]] = {
+    "setBrightness": ("brightness", {"type": "number", "minimum": 0, "maximum": 100}),
+    "setTemperature": ("temperature", {"type": "number", "minimum": 16, "maximum": 30}),
+    "setMode": ("mode", {"type": "string", "enum": ["cool", "heat", "fan", "auto", "dry"]}),
+    "setSpeed": ("speed", {"type": "number", "minimum": 0}),
+    "setVolume": ("volume", {"type": "number", "minimum": 0, "maximum": 100}),
+    "setMistLevel": ("level", {"type": "number", "minimum": 0}),
+}
+
+
+def _normalize_action_input(name: str, input_schema: dict[str, Any]) -> dict[str, Any]:
+    """Normalize legacy scalar TD inputs to the gateway's parameter object."""
+    if input_schema.get("type") == "object":
+        schema = dict(input_schema)
+        schema.setdefault("additionalProperties", False)
+        return schema
+    if name in {"turnOn", "turnOff"}:
+        return {"type": "object", "properties": {}, "additionalProperties": False}
+    parameter = _ACTION_PARAMETERS.get(name)
+    if parameter is None:
+        return {"type": "object", "additionalProperties": True}
+    key, constraints = parameter
+    return {
+        "type": "object",
+        "properties": {key: constraints},
+        "required": [key],
+        "additionalProperties": False,
+    }
 
 
 def load_tds() -> list[ThingDescription]:

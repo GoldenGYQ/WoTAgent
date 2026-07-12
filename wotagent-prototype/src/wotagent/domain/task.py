@@ -63,6 +63,32 @@ class PlanStep(BaseModel):
     retry_policy: RetryPolicy = Field(default_factory=RetryPolicy)
     postconditions: list[Condition] = Field(default_factory=list)
 
+    @model_validator(mode="after")
+    def infer_standard_postconditions(self) -> "PlanStep":
+        """Make verification mandatory for known state-changing WoT actions."""
+        if self.kind != "action" or self.postconditions:
+            return self
+        inferred: dict[str, Any] | None = None
+        if self.action == "turnOn":
+            inferred = {"property": "on", "value": True}
+        elif self.action == "turnOff":
+            inferred = {"property": "on", "value": False}
+        elif self.action == "setBrightness" and "brightness" in self.input:
+            inferred = {"property": "brightness", "value": self.input["brightness"]}
+        elif self.action == "setTemperature" and "temperature" in self.input:
+            inferred = {"property": "targetTemp", "value": self.input["temperature"]}
+        elif self.action == "setMode" and "mode" in self.input:
+            inferred = {"property": "mode", "value": self.input["mode"]}
+        elif self.action == "setSpeed" and "speed" in self.input:
+            inferred = {"property": "speed", "value": self.input["speed"]}
+        elif self.action == "setVolume" and "volume" in self.input:
+            inferred = {"property": "volume", "value": self.input["volume"]}
+        elif self.action == "setMistLevel" and "level" in self.input:
+            inferred = {"property": "mistLevel", "value": self.input["level"]}
+        if inferred is not None:
+            self.postconditions = [Condition(**inferred)]
+        return self
+
 
 class TaskPlan(BaseModel):
     plan_id: str = Field(default_factory=lambda: f"plan_{uuid4().hex[:12]}")
@@ -137,6 +163,8 @@ class StepTrace(BaseModel):
     def succeeded(self) -> bool:
         if self.execution is None or self.execution.status != "accepted":
             return False
+        if self.step.kind == "action":
+            return self.verification is not None and self.verification.passed
         return self.verification is None or self.verification.passed
 
 

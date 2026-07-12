@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from jsonschema import ValidationError, validate
+
 from ..auth import get_access_control
 from ..domain import PlanStep, PolicyDecision
 from ..wot import get_device_by_id
@@ -38,12 +40,24 @@ class PolicyEngine:
                 reason=f"device '{step.device_id}' is not registered",
             )
 
-        if step.kind == "action" and step.action not in {item.name for item in td.actions}:
-            return PolicyDecision(
-                effect="deny",
-                reason_code="ACTION_NOT_DECLARED",
-                reason=f"action '{step.action}' is not declared by {step.device_id}",
-            )
+        if step.kind == "action":
+            declared = next((item for item in td.actions if item.name == step.action), None)
+            if declared is None:
+                return PolicyDecision(
+                    effect="deny",
+                    reason_code="ACTION_NOT_DECLARED",
+                    reason=f"action '{step.action}' is not declared by {step.device_id}",
+                )
+            try:
+                validate(instance=step.input, schema=declared.input_schema)
+            except ValidationError as exc:
+                location = ".".join(str(item) for item in exc.absolute_path)
+                detail = f" at '{location}'" if location else ""
+                return PolicyDecision(
+                    effect="deny",
+                    reason_code="PARAMETER_INVALID",
+                    reason=f"invalid parameters for '{step.action}'{detail}: {exc.message}",
+                )
 
         if step.action in self._high_risk_actions:
             return PolicyDecision(

@@ -142,3 +142,27 @@ LLM 指标必须固定数据集、模型、temperature、Prompt 版本并至少�
 - 成本：Planner 与 Responder 分别记录模型调用、延迟和 Token，并聚合到同一 task usage。
 - 隐私：不记录模型原始 Chain-of-Thought。
 - 结论：方案 C 功能闭环通过，后续真实模型端到端测试需要评价回复事实一致率。
+
+功能单元：TD 参数约束
+
+- 契约修复：将旧 TD 的标量 action input 规范化为 MCP 网关实际使用的参数对象 Schema。
+- 校验覆盖：required、类型、minimum、maximum、enum 和 additionalProperties。
+- 安全结果：亮度 120、缺参、错误参数名和无参动作携带多余参数均在 MCP 调用前拒绝。
+- 结论：实验设备动作的参数边界通过。
+
+真实端到端实验（2026-07-12）
+
+- 输入：`把客厅灯打开并把亮度调到60%`。
+- Planner：生成 `turnOn -> setBrightness(60)` 两步依赖计划及 postconditions。
+- 执行：MCP 工具调用 2 次，两步均 accepted。
+- 验证：`on=true`、`brightness=60`，两步 VerificationResult 均 passed。
+- Response：`好的，已经帮你把客厅灯打开，并将亮度调到了60%。`
+- Trace：模型调用 2 次、工具调用 2 次、事件 15 条。
+- Usage：input 3064、output 238、total 3302 tokens；费用未配置，不做估算。
+- 结论：真实 DeepSeek + LangGraph + Policy + MCP + Simulator + Verifier + Response Agent 闭环通过。
+
+端到端回归发现与修复：
+
+- 发现：真实 Planner 某次生成正确动作但省略 postconditions，旧判定会把工具 accepted 当成任务成功。
+- 修复：领域层为标准状态修改动作确定性补全 postconditions；任何 action 缺少 VerificationResult 都不能判定成功。
+- 复验：相关单元测试 20/20，真实 live E2E 1/1 通过。
