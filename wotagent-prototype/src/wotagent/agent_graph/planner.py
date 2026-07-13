@@ -101,8 +101,13 @@ class LangChainTaskPlanner:
     runnable: Any
     trace_store: InMemoryTraceStore | None = None
     capability_provider: Callable[[], Awaitable[list[dict[str, Any]]]] | None = None
+    thinking_runnable: Any | None = None
 
     async def __call__(self, state: dict[str, Any]) -> TaskPlan:
+        thinking = bool(state.get("thinking", False))
+        if thinking and self.thinking_runnable is None:
+            raise ValueError("thinking mode is not available on this server")
+        runnable = self.thinking_runnable if thinking else self.runnable
         message = state.get("message", "")
         provided = state.get("context", {}).get("devices")
         if provided:
@@ -167,6 +172,7 @@ class LangChainTaskPlanner:
                     "all_device_count": len(all_devices),
                     "message_length": len(state.get("message", "")),
                     "attempt": 1,
+                    "thinking": thinking,
                 },
             )
         started = time.perf_counter()
@@ -178,7 +184,7 @@ class LangChainTaskPlanner:
             elif item.get("role") == "user":
                 messages.append(("human", content))
         messages.append(("human", state.get("message", "")))
-        result = await self.runnable.ainvoke(messages)
+        result = await runnable.ainvoke(messages)
         await self._record_model_completion(state, result, started, attempt=1)
         arguments = _extract_tool_arguments(result)
         plan = TaskPlan.model_validate(arguments)
@@ -199,6 +205,7 @@ class LangChainTaskPlanner:
                         "purpose": "task_planning_repair",
                         "prompt_version": "planner-v2.1",
                         "attempt": 2,
+                        "thinking": thinking,
                     },
                 )
             repair_prompt = (
@@ -216,7 +223,7 @@ class LangChainTaskPlanner:
                 ("human", f"{state.get('message', '')}\n\nPlanner correction: {repair_prompt}"),
             ]
             repair_started = time.perf_counter()
-            result = await self.runnable.ainvoke(repair_messages)
+            result = await runnable.ainvoke(repair_messages)
             await self._record_model_completion(state, result, repair_started, attempt=2)
             arguments = _extract_tool_arguments(result)
             plan = TaskPlan.model_validate(arguments)
@@ -260,6 +267,7 @@ class LangChainTaskPlanner:
                 "prompt_version": "planner-v2.1",
                 "attempt": attempt,
                 "model": _extract_model_name(result),
+                "thinking": bool(state.get("thinking", False)),
                 **extract_usage_with_cost(result),
             },
         )

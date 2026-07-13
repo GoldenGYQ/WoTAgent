@@ -39,6 +39,7 @@ class AgentState(TypedDict, total=False):
     confirmation_approved: bool
     recovery_attempts: int
     task_id: str
+    thinking: bool
 
 
 @dataclass(frozen=True)

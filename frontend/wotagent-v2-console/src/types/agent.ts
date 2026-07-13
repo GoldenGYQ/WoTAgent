@@ -41,6 +41,17 @@ export interface TaskCreateResponse {
   plan: TaskPlan | null
   trace: Record<string, unknown> | null
   confirmation: ConfirmationRequest | null
+  thinking: boolean
+}
+
+export interface ApiCapabilities {
+  thinking: {
+    supported: boolean
+    default: boolean
+    reasoning_effort: string
+    private_reasoning_exposed: boolean
+  }
+  streaming: boolean
 }
 
 export interface TaskRecord {
@@ -97,6 +108,7 @@ export interface RuntimeTask {
   sessionId: string
   message: string
   role: AgentRole
+  thinking: boolean
   status: string
   response: string
   plan: TaskPlan | null

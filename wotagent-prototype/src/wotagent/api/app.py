@@ -80,6 +80,8 @@ install_event_bus_handler()
 
 # Create the agent once at startup
 _pipeline = create_wot_pipeline(
+    enable_thinking=_bool_env("ENABLE_THINKING", default=True),
+    reasoning_effort=os.getenv("REASONING_EFFORT", "high"),
     enable_streaming=_bool_env("ENABLE_STREAMING", default=True),
 )
 _v2_policy = PolicyEngine()
@@ -94,10 +96,15 @@ def _build_v2_graph(checkpointer: Any):
             _pipeline.planner,
             trace_store=_v2_trace_store,
             capability_provider=_v2_gateway.capabilities,
+            thinking_runnable=_pipeline.thinking_planner,
         ),
         policy=_v2_policy,
         orchestrator=TaskOrchestrator(_v2_gateway, _v2_policy),
-        responder=LangChainResponseComposer(_pipeline.response_model, trace_store=_v2_trace_store),
+        responder=LangChainResponseComposer(
+            _pipeline.response_model,
+            trace_store=_v2_trace_store,
+            thinking_runnable=_pipeline.thinking_response_model,
+        ),
         trace_store=_v2_trace_store,
     ), checkpointer=checkpointer)
 
@@ -276,6 +283,7 @@ class TaskCreateV2Request(BaseModel):
     session_id: str | None = None
     role: str = "operator"
     user_id: str = "local-user"
+    thinking: bool = False
 
 
 class TaskCreateV2Response(BaseModel):
@@ -289,6 +297,7 @@ class TaskCreateV2Response(BaseModel):
     trace: dict[str, Any] | None = None
     confirmation: dict[str, Any] | None = None
     policy_decisions: list[dict[str, Any]] = Field(default_factory=list)
+    thinking: bool = False
 
 
 class TaskConfirmV2Request(BaseModel):
@@ -329,6 +338,19 @@ class ConversationTurnsV2Response(BaseModel):
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+
+@app.get("/api/v2/capabilities")
+async def get_v2_capabilities() -> dict[str, Any]:
+    return {
+        "thinking": {
+            "supported": _pipeline.thinking_planner is not None,
+            "default": False,
+            "reasoning_effort": os.getenv("REASONING_EFFORT", "high"),
+            "private_reasoning_exposed": False,
+        },
+        "streaming": _bool_env("ENABLE_STREAMING", default=True),
+    }
 
 
 @app.post("/api/v2/conversations", response_model=ConversationV2Response, status_code=201)
@@ -383,6 +405,8 @@ async def create_task_v2(
     This endpoint intentionally coexists with ``/api/chat`` until the v2 event
     stream and confirmation resume flow have completed their own acceptance.
     """
+    if req.thinking and _pipeline.thinking_planner is None:
+        raise HTTPException(status_code=409, detail="thinking mode is not available on this server")
     conversation_id = req.conversation_id or req.session_id
     if conversation_id is None:
         conversation = _v2_conversation_store.create(user_id=req.user_id, role=req.role)
@@ -414,6 +438,7 @@ async def create_task_v2(
         user_id=req.user_id,
         role=req.role,
         message=req.message,
+        thinking=req.thinking,
     )
     return TaskCreateV2Response(
         task_id=task_id,
@@ -422,6 +447,7 @@ async def create_task_v2(
         session_id=conversation_id,
         status="accepted",
         response="",
+        thinking=req.thinking,
     )
 
 
@@ -467,6 +493,7 @@ async def _run_v2_task(
     user_id: str,
     role: str,
     message: str,
+    thinking: bool,
 ) -> None:
     await _v2_trace_store.set_status(task_id, "running")
     await _v2_trace_store.record(task_id=task_id, type="task.started", node="api")
@@ -490,6 +517,7 @@ async def _run_v2_task(
                 "history_characters": sum(len(item["content"]) for item in history),
                 "current_role": role,
                 "has_pending_goal": runtime_context["pending_goal"] is not None,
+                "thinking": thinking,
             },
         )
         result = await _v2_graph.ainvoke({
@@ -499,6 +527,7 @@ async def _run_v2_task(
             "user_id": user_id,
             "role": role,
             "message": message,
+            "thinking": thinking,
             "conversation_history": history,
             "context": {"runtime": runtime_context},
         }, config={"configurable": {"thread_id": task_id}})
@@ -650,6 +679,7 @@ def _task_v2_response(result: dict[str, Any], session_id: str) -> TaskCreateV2Re
         trace=trace.model_dump(mode="json") if trace is not None else None,
         confirmation=confirmation,
         policy_decisions=[item.model_dump(mode="json") for item in decisions],
+        thinking=bool(result.get("thinking", False)),
     )
 
 

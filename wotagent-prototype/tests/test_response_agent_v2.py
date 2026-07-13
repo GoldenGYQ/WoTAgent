@@ -92,6 +92,21 @@ def test_empty_response_is_rejected_for_graph_fallback() -> None:
             raise AssertionError("empty response should fail")
 
 
+def test_thinking_request_uses_dedicated_response_model() -> None:
+    direct = FakeResponder("direct")
+    deep = FakeResponder("deep")
+    state = {**success_state(), "thinking": True}
+
+    response = asyncio.run(LangChainResponseComposer(
+        direct,
+        thinking_runnable=deep,
+    )(state))
+
+    assert response == "deep"
+    assert direct.context is None
+    assert deep.context is not None
+
+
 def test_streaming_response_records_real_ttft_measurement() -> None:
     class StreamingResponder:
         async def astream(self, messages):

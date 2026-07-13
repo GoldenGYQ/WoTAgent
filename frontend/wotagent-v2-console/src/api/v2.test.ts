@@ -4,6 +4,22 @@ import { agentV2Api } from './v2'
 afterEach(() => vi.unstubAllGlobals())
 
 describe('agentV2Api', () => {
+  it('loads server thinking capabilities', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        thinking: { supported: true, default: false, reasoning_effort: 'high', private_reasoning_exposed: false },
+        streaming: true,
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await agentV2Api.capabilities()
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v2/capabilities')
+    expect(result.thinking.supported).toBe(true)
+  })
+
   it('submits only to the Agent 2.0 task endpoint', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -17,11 +33,12 @@ describe('agentV2Api', () => {
         plan: null,
         trace: null,
         confirmation: null,
+        thinking: true,
       }),
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    await agentV2Api.createTask('打开客厅灯', 'conv-1', 'operator')
+    await agentV2Api.createTask('打开客厅灯', 'conv-1', 'operator', true)
 
     expect(fetchMock).toHaveBeenCalledOnce()
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v2/tasks')
@@ -29,6 +46,7 @@ describe('agentV2Api', () => {
       message: '打开客厅灯',
       conversation_id: 'conv-1',
       role: 'operator',
+      thinking: true,
     })
   })
 

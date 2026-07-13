@@ -15,8 +15,13 @@ from ..telemetry import InMemoryTraceStore, extract_usage_with_cost
 class LangChainResponseComposer:
     runnable: Any
     trace_store: InMemoryTraceStore | None = None
+    thinking_runnable: Any | None = None
 
     async def __call__(self, state: dict[str, Any]) -> str:
+        thinking = bool(state.get("thinking", False))
+        if thinking and self.thinking_runnable is None:
+            raise ValueError("thinking mode is not available on this server")
+        runnable = self.thinking_runnable if thinking else self.runnable
         facts = _response_facts(state)
         system = (
             "你是 WoTAgent 的最终 Response Agent。请根据下面经过验证的事实，"
@@ -37,7 +42,11 @@ class LangChainResponseComposer:
                 task_id=task_id,
                 type="model.request.started",
                 node="responder",
-                data={"purpose": "final_response", "prompt_version": "responder-v2.0"},
+                data={
+                    "purpose": "final_response",
+                    "prompt_version": "responder-v2.0",
+                    "thinking": thinking,
+                },
             )
         started = time.perf_counter()
         messages = [SystemMessage(content=system)]
@@ -49,9 +58,9 @@ class LangChainResponseComposer:
                 messages.append(HumanMessage(content=content))
         messages.append(HumanMessage(content=prompt))
         ttft_ms: float | None = None
-        if hasattr(self.runnable, "astream"):
+        if hasattr(runnable, "astream"):
             aggregate = None
-            async for chunk in self.runnable.astream(messages):
+            async for chunk in runnable.astream(messages):
                 if ttft_ms is None and getattr(chunk, "content", ""):
                     ttft_ms = (time.perf_counter() - started) * 1000
                 aggregate = chunk if aggregate is None else aggregate + chunk
@@ -59,7 +68,7 @@ class LangChainResponseComposer:
                 raise ValueError("response agent returned no stream chunks")
             message = message_chunk_to_message(aggregate)
         else:
-            result = await self.runnable.ainvoke(messages)
+            result = await runnable.ainvoke(messages)
             message = _last_message(result)
         response = str(getattr(message, "content", "") or "").strip()
         if not response:
@@ -77,6 +86,7 @@ class LangChainResponseComposer:
                     "model": _model_name(message),
                     "ttft_ms": ttft_ms,
                     "ttft_available": ttft_ms is not None,
+                    "thinking": thinking,
                     **usage,
                 },
             )

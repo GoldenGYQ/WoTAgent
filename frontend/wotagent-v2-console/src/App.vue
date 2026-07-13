@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, ref } from 'vue'
 import {
   Activity,
+  BrainCircuit,
   PanelLeft,
   RefreshCw,
   SendHorizontal,
@@ -21,6 +22,8 @@ const {
   activeTaskId,
   activeTask,
   role,
+  thinking,
+  thinkingSupported,
   backendState,
   submit,
   confirm,
@@ -153,6 +156,20 @@ onMounted(async () => {
                   {{ item }}
                 </button>
               </div>
+              <button
+                class="thinking-toggle"
+                type="button"
+                role="switch"
+                :aria-checked="thinking"
+                :class="{ active: thinking }"
+                :disabled="!thinkingSupported"
+                :title="thinkingSupported ? '切换深度思考' : '后端未启用深度思考能力'"
+                @click="thinking = !thinking"
+              >
+                <BrainCircuit :size="15" />
+                <span>深度思考</span>
+                <i aria-hidden="true" />
+              </button>
               <button class="send-button" type="button" title="发送任务" :disabled="!draft.trim() || submitting || backendState === 'offline'" @click="send">
                 <Activity v-if="submitting" :size="17" class="spin" />
                 <SendHorizontal v-else :size="17" />

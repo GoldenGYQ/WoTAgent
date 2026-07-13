@@ -85,6 +85,8 @@ class AgentPipeline:
     responder: Runnable
     observer: Runnable | None = None
     response_model: Runnable | None = None
+    thinking_planner: Runnable | None = None
+    thinking_response_model: Runnable | None = None
 
 
 def create_wot_pipeline(
@@ -125,6 +127,26 @@ def create_wot_pipeline(
         tools=[PLAN_SCHEMA],
         tool_choice={"type": "function", "function": {"name": "generate_plan"}},
     )
+    thinking_planner = None
+    thinking_response_llm = None
+    if enable_thinking:
+        thinking_plan_llm = _build_llm(
+            model_name=model_name,
+            temperature=0,
+            reasoning_effort=reasoning_effort,
+            enable_thinking=True,
+        )
+        thinking_planner = thinking_plan_llm.bind(
+            tools=[PLAN_SCHEMA],
+            tool_choice={"type": "function", "function": {"name": "generate_plan"}},
+        )
+        thinking_response_llm = _build_llm(
+            model_name=model_name,
+            temperature=temperature,
+            reasoning_effort=reasoning_effort,
+            enable_thinking=True,
+            enable_streaming=enable_streaming,
+        )
 
     tools = get_all_tools(include_mcp=False)
 
@@ -173,6 +195,8 @@ def create_wot_pipeline(
         responder=responder,
         observer=observer,
         response_model=response_llm,
+        thinking_planner=thinking_planner,
+        thinking_response_model=thinking_response_llm,
     )
 
 

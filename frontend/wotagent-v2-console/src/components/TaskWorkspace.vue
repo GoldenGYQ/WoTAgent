@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   Bot,
+  BrainCircuit,
   Check,
   CircleAlert,
   Cpu,
@@ -47,6 +48,7 @@ function currentNode(task: RuntimeTask): string {
         <div class="task-identity">
           <strong class="conversation-title">{{ conversation.title }}</strong>
           <StatusBadge v-if="activeTask" :status="activeTask.status" />
+          <span v-if="activeTask?.thinking" class="thinking-mode"><BrainCircuit :size="13" />深度思考</span>
         </div>
         <span class="session-id">{{ conversation.conversation_id }}</span>
       </header>

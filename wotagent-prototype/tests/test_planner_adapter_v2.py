@@ -52,6 +52,36 @@ def test_parses_valid_function_call_into_typed_plan() -> None:
     assert "Available devices" in runnable.messages[0][1]
 
 
+def test_thinking_request_uses_dedicated_planner_and_marks_trace() -> None:
+    async def run():
+        store = InMemoryTraceStore()
+        await store.create(task_id="task-thinking", session_id="sess", request_id="req")
+        direct = FakeRunnable({"intent": "chat", "summary": "direct", "steps": []})
+        deep = FakeRunnable({"intent": "chat", "summary": "deep", "steps": []})
+        plan = await LangChainTaskPlanner(
+            direct,
+            trace_store=store,
+            thinking_runnable=deep,
+        )({"task_id": "task-thinking", "message": "分析一下", "thinking": True})
+        return plan, direct, deep, await store.events("task-thinking")
+
+    plan, direct, deep, events = asyncio.run(run())
+
+    assert plan.summary == "deep"
+    assert direct.messages is None
+    assert deep.messages is not None
+    completed = next(event for event in events if event.type == "model.request.completed")
+    assert completed.data["thinking"] is True
+
+
+def test_thinking_request_fails_when_server_capability_is_disabled() -> None:
+    with pytest.raises(ValueError, match="thinking mode is not available"):
+        asyncio.run(LangChainTaskPlanner(FakeRunnable({}))({
+            "message": "分析一下",
+            "thinking": True,
+        }))
+
+
 def test_invalid_dependency_is_rejected_before_graph_execution() -> None:
     runnable = FakeRunnable({
         "intent": "control",

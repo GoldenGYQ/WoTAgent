@@ -1,5 +1,6 @@
 import type {
   AgentRole,
+  ApiCapabilities,
   ConversationRecord,
   ConversationTurn,
   TaskCreateResponse,
@@ -33,6 +34,10 @@ export const agentV2Api = {
     return request('/api/health')
   },
 
+  capabilities(): Promise<ApiCapabilities> {
+    return request('/api/v2/capabilities')
+  },
+
   createConversation(role: AgentRole): Promise<ConversationRecord> {
     return request('/api/v2/conversations', {
       method: 'POST',
@@ -52,10 +57,10 @@ export const agentV2Api = {
     return request(`/api/v2/conversations/${encodeURIComponent(conversationId)}`, { method: 'DELETE' })
   },
 
-  createTask(message: string, conversationId: string, role: AgentRole): Promise<TaskCreateResponse> {
+  createTask(message: string, conversationId: string, role: AgentRole, thinking: boolean): Promise<TaskCreateResponse> {
     return request('/api/v2/tasks', {
       method: 'POST',
-      body: JSON.stringify({ message, conversation_id: conversationId, role, user_id: 'local-user' }),
+      body: JSON.stringify({ message, conversation_id: conversationId, role, thinking, user_id: 'local-user' }),
     })
   },
 

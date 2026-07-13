@@ -508,6 +508,16 @@ class TestAgent:
         assert hasattr(pipeline.executor, "ainvoke")
         assert hasattr(pipeline.observer, "ainvoke")
         assert hasattr(pipeline.responder, "ainvoke")
+        assert pipeline.thinking_planner is None
+        assert pipeline.thinking_response_model is None
+
+    def test_create_pipeline_exposes_dedicated_thinking_models(self):
+        from wotagent.core import create_wot_pipeline
+
+        pipeline = create_wot_pipeline(enable_thinking=True, temperature=0)
+
+        assert pipeline.thinking_planner is not None
+        assert pipeline.thinking_response_model is not None
 
 
 # ======================================================================

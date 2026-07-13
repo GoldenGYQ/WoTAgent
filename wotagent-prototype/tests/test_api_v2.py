@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -45,6 +46,7 @@ def test_v2_task_endpoint_returns_real_graph_result(monkeypatch) -> None:
         "message": "你好",
         "session_id": "sess-api-test",
         "role": "viewer",
+        "thinking": True,
     })
 
     assert response.status_code == 202
@@ -55,10 +57,12 @@ def test_v2_task_endpoint_returns_real_graph_result(monkeypatch) -> None:
     assert body["plan"] is None
     assert body["trace"] is None
     assert body["confirmation"] is None
+    assert body["thinking"] is True
     task_id = body["task_id"]
     task = client.get(f"/api/v2/tasks/{task_id}")
     assert task.status_code == 200
     assert task.json()["status"] == "responded"
+    assert task.json()["result"]["thinking"] is True
 
     events = client.get(f"/api/v2/tasks/{task_id}/events")
     assert events.status_code == 200
@@ -80,6 +84,27 @@ def test_v2_task_endpoint_returns_real_graph_result(monkeypatch) -> None:
                 break
     assert messages[-1]["status"] == "responded"
     assert all(item.get("sequence", 2) > 1 for item in messages[:-1])
+
+
+def test_v2_capabilities_reports_thinking_without_exposing_private_reasoning(monkeypatch) -> None:
+    monkeypatch.setattr(app_module, "_pipeline", SimpleNamespace(thinking_planner=object()))
+    response = TestClient(app_module.app).get("/api/v2/capabilities")
+
+    assert response.status_code == 200
+    assert response.json()["thinking"]["supported"] is True
+    assert response.json()["thinking"]["default"] is False
+    assert response.json()["thinking"]["private_reasoning_exposed"] is False
+
+
+def test_v2_task_rejects_thinking_when_server_capability_is_disabled(monkeypatch) -> None:
+    monkeypatch.setattr(app_module, "_pipeline", SimpleNamespace(thinking_planner=None))
+    response = TestClient(app_module.app).post("/api/v2/tasks", json={
+        "message": "分析一下",
+        "thinking": True,
+    })
+
+    assert response.status_code == 409
+    assert "not available" in response.json()["detail"]
 
 
 def test_policy_denial_has_semantic_status_and_persists_pending_goal(monkeypatch) -> None:

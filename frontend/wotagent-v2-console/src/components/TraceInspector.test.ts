@@ -10,6 +10,7 @@ const task: RuntimeTask = {
   sessionId: 'session-1',
   message: '打开客厅灯',
   role: 'operator',
+  thinking: true,
   status: 'running',
   response: '',
   plan: {

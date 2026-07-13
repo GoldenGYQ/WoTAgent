@@ -209,6 +209,14 @@ button:focus-visible, textarea:focus-visible {
 .role-control { display: grid; grid-template-columns: repeat(3, auto); padding: 2px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface-subtle); }
 .role-control button { height: 25px; padding: 0 7px; border: 0; border-radius: 3px; color: var(--text-muted); background: transparent; font-size: 9px; }
 .role-control button.active { color: var(--text); background: #fff; box-shadow: 0 1px 3px rgba(25, 40, 55, 0.12); }
+.thinking-toggle { height: 30px; display: inline-flex; align-items: center; gap: 6px; padding: 0 7px; border: 1px solid var(--line); border-radius: 5px; color: var(--text-muted); background: var(--surface-subtle); font-size: 10px; }
+.thinking-toggle i { position: relative; width: 25px; height: 14px; border-radius: 7px; background: #a8b2b8; transition: background 150ms ease; }
+.thinking-toggle i::after { content: ''; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: #fff; transition: transform 150ms ease; }
+.thinking-toggle.active { color: var(--teal); border-color: var(--teal); background: #eef8f6; }
+.thinking-toggle.active i { background: var(--teal); }
+.thinking-toggle.active i::after { transform: translateX(11px); }
+.thinking-toggle:disabled { cursor: not-allowed; opacity: 0.45; }
+.thinking-mode { display: inline-flex; align-items: center; gap: 4px; color: var(--teal); font-size: 10px; font-weight: 600; }
 .send-button { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--teal); border-radius: 5px; color: #fff; background: var(--teal); }
 .send-button:hover:not(:disabled) { background: #076d63; }
 .send-button:disabled { cursor: not-allowed; opacity: 0.45; }

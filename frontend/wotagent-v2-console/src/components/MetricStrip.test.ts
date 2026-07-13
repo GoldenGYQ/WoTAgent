@@ -11,6 +11,7 @@ function task(cost: number, pricingAvailable: boolean): RuntimeTask {
     sessionId: 'session-cost',
     message: '查询客厅灯',
     role: 'operator',
+    thinking: false,
     status: 'succeeded',
     response: 'ok',
     plan: null,

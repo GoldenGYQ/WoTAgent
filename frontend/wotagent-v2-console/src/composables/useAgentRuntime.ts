@@ -16,6 +16,8 @@ const conversations = reactive<RuntimeConversation[]>([])
 const activeConversationId = ref<string | null>(null)
 const activeTaskId = ref<string | null>(null)
 const role = ref<AgentRole>('operator')
+const thinking = ref(localStorage.getItem('wotagent-v2-console.thinking') === 'true')
+const thinkingSupported = ref(false)
 const backendState = ref<'checking' | 'online' | 'offline'>('checking')
 const subscriptions = new Map<string, TraceSubscription>()
 const pollers = new Map<string, ReturnType<typeof setInterval>>()
@@ -30,6 +32,7 @@ interface StoredTask {
   sessionId: string
   message: string
   role: AgentRole
+  thinking?: boolean
   createdAt: string
 }
 
@@ -58,6 +61,7 @@ function persistState(): void {
     sessionId: task.sessionId,
     message: task.message,
     role: task.role,
+    thinking: task.thinking,
     createdAt: task.createdAt,
   }))
   localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot))
@@ -96,6 +100,7 @@ function applyResponse(task: RuntimeTask, response: TaskCreateResponse): void {
   task.plan = response.plan ?? task.plan
   task.confirmation = response.confirmation
   task.turnId = response.turn_id || task.turnId
+  task.thinking = response.thinking ?? task.thinking
   task.updatedAt = new Date().toISOString()
   syncTurn(task)
 }
@@ -232,6 +237,7 @@ async function restoreTask(stored: StoredTask): Promise<void> {
     sessionId: stored.sessionId,
     message: stored.message,
     role: stored.role,
+    thinking: stored.thinking ?? false,
     status: 'received',
     response: '',
     plan: null,
@@ -288,7 +294,12 @@ async function ensureConversation(): Promise<RuntimeConversation> {
 
 async function submit(message: string): Promise<RuntimeTask> {
   const conversation = await ensureConversation()
-  const response = await agentV2Api.createTask(message, conversation.conversation_id, role.value)
+  const response = await agentV2Api.createTask(
+    message,
+    conversation.conversation_id,
+    role.value,
+    thinking.value && thinkingSupported.value,
+  )
   if (!response.task_id) throw new Error('后端未返回 task_id')
   const now = new Date().toISOString()
   const task: RuntimeTask = {
@@ -298,6 +309,7 @@ async function submit(message: string): Promise<RuntimeTask> {
     sessionId: response.session_id,
     message,
     role: role.value,
+    thinking: response.thinking,
     status: response.status,
     response: response.response,
     plan: response.plan,
@@ -375,6 +387,9 @@ async function checkBackend(): Promise<void> {
   backendState.value = 'checking'
   try {
     await agentV2Api.health()
+    const capabilities = await agentV2Api.capabilities()
+    thinkingSupported.value = capabilities.thinking.supported
+    if (!thinkingSupported.value) thinking.value = false
     backendState.value = 'online'
   } catch {
     backendState.value = 'offline'
@@ -386,6 +401,7 @@ export function useAgentRuntime() {
   const activeTask = computed(() => taskById(activeTaskId.value ?? '') ?? null)
 
   watch([tasks, activeConversationId], persistState, { deep: true })
+  watch(thinking, (value) => localStorage.setItem('wotagent-v2-console.thinking', String(value)))
 
   onBeforeUnmount(() => {
     subscriptions.forEach((subscription) => subscription.close())
@@ -400,6 +416,8 @@ export function useAgentRuntime() {
     activeTaskId,
     activeTask,
     role,
+    thinking,
+    thinkingSupported,
     backendState,
     submit,
     confirm,
