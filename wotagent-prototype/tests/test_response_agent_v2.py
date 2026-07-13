@@ -76,6 +76,7 @@ def test_response_agent_receives_verified_execution_facts_and_records_usage() ->
     assert response == "客厅灯已打开，并完成状态验证。"
     assert '"passed": true' in runnable.prompt
     assert '"status": "succeeded"' in runnable.prompt
+    assert '"current_role": "operator"' in runnable.prompt
     assert len(runnable.context) == 2
     assert record.usage.model_calls == 1
     assert record.usage.total_tokens == 92

@@ -26,7 +26,9 @@ class LangChainResponseComposer:
             "2. 只有 status=succeeded 时才能声称全部完成。\n"
             "3. partial_success 必须分别说明成功和失败步骤。\n"
             "4. failed/denied 时不得使用‘已完成’等成功措辞。\n"
-            "5. 只使用提供的事实，不推测设备状态。"
+            "5. 只使用提供的事实，不推测设备状态或当前角色。\n"
+            "6. ACTION_NOT_DECLARED 只表示当前 TD 未声明该动作，不能说物理设备本身不支持。\n"
+            "7. 结构化执行事实优先于历史对话中的旧状态。"
         )
         prompt = f"执行事实：{json.dumps(facts, ensure_ascii=False)}"
         task_id = state.get("task_id", "")
@@ -87,6 +89,8 @@ def _response_facts(state: dict[str, Any]) -> dict[str, Any]:
     decisions = state.get("policy_decisions", [])
     return {
         "user_message": state.get("message", ""),
+        "current_role": state.get("role", "viewer"),
+        "runtime_context": state.get("context", {}).get("runtime", {}),
         "plan": plan.model_dump(mode="json") if plan is not None else None,
         "policy_decisions": [item.model_dump(mode="json") for item in decisions],
         "status": trace.status.value if trace is not None else state.get("phase", "unknown"),

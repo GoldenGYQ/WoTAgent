@@ -35,7 +35,7 @@ def test_adapter_rejects_relative_or_unsupported_environment_cases() -> None:
     assert unsupported is None
 
 
-def test_adapter_rejects_action_missing_from_the_mapped_td() -> None:
+def test_adapter_accepts_guest_bedroom_turn_off_declared_by_td() -> None:
     case = HomeBenchAdapter().convert({
         "id": "missing-action",
         "input": "Turn off the light in the guest bedroom.",
@@ -43,7 +43,11 @@ def test_adapter_rejects_action_missing_from_the_mapped_td() -> None:
         "type": "normal",
     })
 
-    assert case is None
+    assert case.expected_actions[0].model_dump() == {
+        "device_id": "light-003",
+        "action": "turnOff",
+        "input": {},
+    }
 
 
 def test_plan_scoring_is_order_independent_but_argument_exact() -> None:

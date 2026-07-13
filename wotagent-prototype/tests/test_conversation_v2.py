@@ -52,6 +52,85 @@ def test_conversation_store_persists_bounded_completed_history(tmp_path) -> None
     ]
 
 
+def test_conversation_store_keeps_pending_goal_and_current_role_as_structured_facts(tmp_path) -> None:
+    store = ConversationStore(tmp_path / "pending-goal.db")
+    conversation_id = store.create(role="viewer")["conversation_id"]
+    plan = TaskPlan(intent="control", summary="关闭全部灯", steps=[PlanStep(
+        id="off-1",
+        kind="action",
+        device_id="light-001",
+        action="turnOff",
+    )]).model_dump(mode="json")
+
+    store.start_turn(
+        conversation_id=conversation_id,
+        task_id="task-denied",
+        user_message="全关掉",
+        role="viewer",
+    )
+    store.finish_turn(
+        "task-denied",
+        response="权限不足",
+        status="denied",
+        result={
+            "status": "denied",
+            "plan": plan,
+            "policy_decisions": [{
+                "effect": "deny",
+                "reason_code": "RBAC_ACTION_DENIED",
+                "reason": "viewer cannot control",
+            }],
+        },
+    )
+
+    runtime = store.runtime_context(conversation_id, current_role="operator")
+
+    assert runtime["current_role"] == "operator"
+    assert runtime["pending_goal"]["user_message"] == "全关掉"
+    assert runtime["pending_goal"]["role"] == "viewer"
+    assert runtime["pending_goal"]["plan"]["steps"][0]["action"] == "turnOff"
+    assert runtime["pending_goal"]["policy_decisions"][0]["reason_code"] == "RBAC_ACTION_DENIED"
+
+    query_plan = TaskPlan(intent="query", summary="查询灯状态", steps=[PlanStep(
+        id="query-1",
+        kind="query",
+        device_id="light-001",
+        action="queryState",
+    )]).model_dump(mode="json")
+    store.start_turn(
+        conversation_id=conversation_id,
+        task_id="task-query",
+        user_message="现在灯是什么状态",
+        role="operator",
+    )
+    store.finish_turn(
+        "task-query",
+        response="灯已开启",
+        status="succeeded",
+        result={"status": "succeeded", "plan": query_plan},
+    )
+    assert store.runtime_context(
+        conversation_id, current_role="operator"
+    )["pending_goal"]["user_message"] == "全关掉"
+
+    store.start_turn(
+        conversation_id=conversation_id,
+        task_id="task-succeeded",
+        user_message="现在呢",
+        role="operator",
+    )
+    store.finish_turn(
+        "task-succeeded",
+        response="已关闭",
+        status="succeeded",
+        result={"status": "succeeded", "plan": plan},
+    )
+
+    assert store.runtime_context(
+        conversation_id, current_role="operator"
+    )["pending_goal"] is None
+
+
 def test_v2_reuses_conversation_context_but_isolates_graph_threads(monkeypatch, tmp_path) -> None:
     class CapturingGraph:
         def __init__(self) -> None:
@@ -94,6 +173,7 @@ def test_v2_reuses_conversation_context_but_isolates_graph_threads(monkeypatch, 
         {"role": "user", "content": "查询客厅灯"},
         {"role": "assistant", "content": "回复：查询客厅灯"},
     ]
+    assert graph.calls[1][0]["context"]["runtime"]["current_role"] == "operator"
     first_thread = graph.calls[0][1]["configurable"]["thread_id"]
     second_thread = graph.calls[1][1]["configurable"]["thread_id"]
     assert first_thread == first.json()["task_id"]

@@ -11,7 +11,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 from wotagent.agent_graph import AgentGraphDependencies, build_agent_graph
 from wotagent.conversation import ConversationStore
-from wotagent.domain import PlanStep, TaskPlan
+from wotagent.domain import PlanStep, PolicyDecision, TaskPlan
 from wotagent.orchestration import TaskOrchestrator
 from wotagent.policy import PolicyEngine
 
@@ -80,6 +80,47 @@ def test_v2_task_endpoint_returns_real_graph_result(monkeypatch) -> None:
                 break
     assert messages[-1]["status"] == "responded"
     assert all(item.get("sequence", 2) > 1 for item in messages[:-1])
+
+
+def test_policy_denial_has_semantic_status_and_persists_pending_goal(monkeypatch) -> None:
+    class DeniedGraph:
+        async def ainvoke(self, state, config=None):
+            return {
+                **state,
+                "phase": "responded",
+                "plan": TaskPlan(intent="control", summary="关闭全部灯", steps=[PlanStep(
+                    id="off-1",
+                    kind="action",
+                    device_id="light-001",
+                    action="turnOff",
+                )]),
+                "policy_decisions": [PolicyDecision(
+                    effect="deny",
+                    reason_code="RBAC_ACTION_DENIED",
+                    reason="viewer cannot control",
+                )],
+                "response": "权限不足",
+            }
+
+    monkeypatch.setattr(app_module, "_v2_graph", DeniedGraph())
+    client = TestClient(app_module.app)
+    conversation = client.post("/api/v2/conversations", json={"role": "viewer"}).json()
+
+    created = client.post("/api/v2/tasks", json={
+        "conversation_id": conversation["conversation_id"],
+        "message": "全关掉",
+        "role": "viewer",
+    })
+    task = client.get(f"/api/v2/tasks/{created.json()['task_id']}").json()
+    runtime = app_module._v2_conversation_store.runtime_context(
+        conversation["conversation_id"],
+        current_role="operator",
+    )
+
+    assert task["status"] == "denied"
+    assert task["result"]["policy_decisions"][0]["reason_code"] == "RBAC_ACTION_DENIED"
+    assert runtime["pending_goal"]["plan"]["summary"] == "关闭全部灯"
+    assert runtime["current_role"] == "operator"
 
 
 def test_v2_confirmation_endpoint_resumes_same_checkpoint(monkeypatch) -> None:

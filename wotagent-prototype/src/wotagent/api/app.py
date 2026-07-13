@@ -20,7 +20,7 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, WebSocket, WebSocke
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command
@@ -288,6 +288,7 @@ class TaskCreateV2Response(BaseModel):
     plan: dict[str, Any] | None = None
     trace: dict[str, Any] | None = None
     confirmation: dict[str, Any] | None = None
+    policy_decisions: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class TaskConfirmV2Request(BaseModel):
@@ -398,6 +399,7 @@ async def create_task_v2(
         conversation_id=conversation_id,
         task_id=task_id,
         user_message=req.message,
+        role=req.role,
     )
     await _v2_trace_store.create(
         task_id=task_id,
@@ -473,6 +475,11 @@ async def _run_v2_task(
             conversation_id,
             exclude_task_id=task_id,
         )
+        runtime_context = _v2_conversation_store.runtime_context(
+            conversation_id,
+            current_role=role,
+            exclude_task_id=task_id,
+        )
         await _v2_trace_store.record(
             task_id=task_id,
             type="context.built",
@@ -481,6 +488,8 @@ async def _run_v2_task(
                 "conversation_id": conversation_id,
                 "history_messages": len(history),
                 "history_characters": sum(len(item["content"]) for item in history),
+                "current_role": role,
+                "has_pending_goal": runtime_context["pending_goal"] is not None,
             },
         )
         result = await _v2_graph.ainvoke({
@@ -491,6 +500,7 @@ async def _run_v2_task(
             "role": role,
             "message": message,
             "conversation_history": history,
+            "context": {"runtime": runtime_context},
         }, config={"configurable": {"thread_id": task_id}})
         response = _task_v2_response(result, conversation_id)
         if response.status == "waiting_confirmation":
@@ -505,6 +515,7 @@ async def _run_v2_task(
                 task_id,
                 response=response.response,
                 status="waiting_confirmation",
+                result=response.model_dump(mode="json"),
             )
         else:
             await _finish_v2_trace(response)
@@ -516,7 +527,12 @@ async def _run_v2_task(
             data={"error": str(exc)},
         )
         await _v2_trace_store.finish(task_id, status="failed", result={"error": str(exc)})
-        _v2_conversation_store.finish_turn(task_id, response=str(exc), status="failed")
+        _v2_conversation_store.finish_turn(
+            task_id,
+            response=str(exc),
+            status="failed",
+            result={"status": "failed", "error": str(exc)},
+        )
 
 
 @app.get("/api/v2/tasks/{task_id}")
@@ -606,11 +622,17 @@ def _task_v2_response(result: dict[str, Any], session_id: str) -> TaskCreateV2Re
     trace = result.get("trace")
     interrupts = result.get("__interrupt__", [])
     confirmation = interrupts[0].value if interrupts else None
-    status = (
-        trace.status.value
-        if trace is not None
-        else "waiting_confirmation" if confirmation else result.get("phase", "unknown")
-    )
+    decisions = result.get("policy_decisions", [])
+    if trace is not None:
+        status = trace.status.value
+    elif confirmation:
+        status = "waiting_confirmation"
+    elif decisions and all(item.effect == "deny" for item in decisions):
+        status = "denied"
+    elif result.get("error"):
+        status = "failed"
+    else:
+        status = result.get("phase", "unknown")
     return TaskCreateV2Response(
         task_id=trace.task_id if trace is not None else result.get("task_id"),
         turn_id=(
@@ -627,6 +649,7 @@ def _task_v2_response(result: dict[str, Any], session_id: str) -> TaskCreateV2Re
         plan=plan.model_dump(mode="json") if plan is not None else None,
         trace=trace.model_dump(mode="json") if trace is not None else None,
         confirmation=confirmation,
+        policy_decisions=[item.model_dump(mode="json") for item in decisions],
     )
 
 
@@ -648,6 +671,7 @@ async def _finish_v2_trace(response: TaskCreateV2Response) -> None:
         response.task_id,
         response=response.response,
         status=response.status,
+        result=response.model_dump(mode="json"),
     )
 
 
