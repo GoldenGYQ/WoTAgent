@@ -57,11 +57,21 @@ def build_agent_graph(deps: AgentGraphDependencies, *, checkpointer: Any = None)
     async def plan_node(state: AgentState) -> dict[str, Any]:
         await _record(deps, state, "agent.node.started", "planner")
         try:
-            plan = await deps.planner(state)
+            capabilities = await deps.orchestrator.prepare()
+            planner_state = state
+            if capabilities is not None:
+                planner_state = {
+                    **state,
+                    "context": {**state.get("context", {}), "devices": capabilities},
+                }
+            plan = await deps.planner(planner_state)
             await _record(deps, state, "agent.node.completed", "planner", {
                 "plan": plan.model_dump(mode="json"),
             })
-            return {"plan": plan, "phase": "planned", "error": ""}
+            result: dict[str, Any] = {"plan": plan, "phase": "planned", "error": ""}
+            if capabilities is not None:
+                result["context"] = planner_state["context"]
+            return result
         except Exception as exc:
             await _record(deps, state, "agent.node.failed", "planner", {"error": str(exc)})
             return {"phase": "planning_failed", "error": str(exc)}
@@ -84,9 +94,10 @@ def build_agent_graph(deps: AgentGraphDependencies, *, checkpointer: Any = None)
         if deps.trace_store is not None:
             for item in trace.steps:
                 if item.execution is not None:
+                    default_tool = "query_state" if item.step.kind == "query" else "control_device"
                     await _record(deps, state, "agent.tool.completed", "executor", {
                         "step_id": item.step.id,
-                        "tool": "query_state" if item.step.kind == "query" else "control_device",
+                        "tool": item.execution.raw_result.get("_mcp_tool", default_tool),
                         "input": item.step.model_dump(mode="json"),
                         "output": item.execution.model_dump(mode="json"),
                     })

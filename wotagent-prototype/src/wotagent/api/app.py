@@ -84,7 +84,11 @@ _v2_policy = PolicyEngine()
 _v2_gateway = MCPDeviceGateway()
 _v2_trace_store = InMemoryTraceStore()
 _v2_graph = build_agent_graph(AgentGraphDependencies(
-    planner=LangChainTaskPlanner(_pipeline.planner, trace_store=_v2_trace_store),
+    planner=LangChainTaskPlanner(
+        _pipeline.planner,
+        trace_store=_v2_trace_store,
+        capability_provider=_v2_gateway.capabilities,
+    ),
     policy=_v2_policy,
     orchestrator=TaskOrchestrator(_v2_gateway, _v2_policy),
     responder=LangChainResponseComposer(_pipeline.response_model, trace_store=_v2_trace_store),

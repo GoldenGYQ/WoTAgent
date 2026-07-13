@@ -23,6 +23,17 @@ class TaskOrchestrator:
         self.gateway = gateway
         self.policy = policy or PolicyEngine()
 
+    async def prepare(self) -> list[dict[str, Any]] | None:
+        initialize = getattr(self.gateway, "initialize", None)
+        if callable(initialize):
+            await initialize()
+        capability_provider = getattr(self.gateway, "capabilities", None)
+        if not callable(capability_provider):
+            return None
+        capabilities = await capability_provider()
+        self.policy.replace_capabilities(capabilities)
+        return capabilities
+
     async def execute(
         self,
         plan: TaskPlan,
@@ -31,6 +42,7 @@ class TaskOrchestrator:
         confirmed: bool = False,
         task_id: str | None = None,
     ) -> TaskTrace:
+        await self.prepare()
         trace = TaskTrace(
             **({"task_id": task_id} if task_id else {}),
             plan=plan,

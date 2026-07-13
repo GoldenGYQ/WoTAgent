@@ -61,6 +61,32 @@ def test_parameterless_action_rejects_extra_values() -> None:
     assert denied.reason_code == "PARAMETER_INVALID"
 
 
+def test_runtime_mcp_capabilities_replace_local_td_registry() -> None:
+    policy = PolicyEngine()
+    policy.replace_capabilities([{
+        "device_id": "remote-esp32-1",
+        "actions": [{
+            "name": "setLevel",
+            "input_schema": {
+                "type": "object",
+                "properties": {"level": {"type": "number", "maximum": 10}},
+                "required": ["level"],
+                "additionalProperties": False,
+            },
+        }],
+    }])
+    remote = PlanStep(
+        id="remote",
+        kind="action",
+        device_id="remote-esp32-1",
+        action="setLevel",
+        input={"level": 7},
+    )
+
+    assert policy.evaluate("operator", remote).effect == "allow"
+    assert policy.evaluate("operator", action_step("turnOn", {})).reason_code == "DEVICE_NOT_FOUND"
+
+
 def test_known_actions_receive_deterministic_postconditions_when_planner_omits_them() -> None:
     turn_on = action_step("turnOn", {})
     brightness = action_step("setBrightness", {"brightness": 60})

@@ -3,13 +3,40 @@
   "id": "urn:dev:wot:light-007",
   "title": "Bathroom2Light",
   "location": "bathroom2",
-  "capabilities": ["luminance"],
+  "capabilities": [
+    "luminance"
+  ],
   "actions": {
-    "turnOn": { "input": { "type": "boolean" } },
-    "setBrightness": { "input": { "type": "number" } }
+    "turnOn": {
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "setBrightness": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "brightness": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "brightness"
+        ],
+        "additionalProperties": false
+      }
+    }
   },
   "properties": {
-    "on": { "type": "boolean" },
-    "brightness": { "type": "number" }
+    "on": {
+      "type": "boolean"
+    },
+    "brightness": {
+      "type": "number"
+    }
   }
 }

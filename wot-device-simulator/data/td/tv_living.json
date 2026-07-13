@@ -3,13 +3,40 @@
   "id": "urn:dev:wot:tv-001",
   "title": "LivingRoomTV",
   "location": "living_room",
-  "capabilities": ["entertainment"],
+  "capabilities": [
+    "entertainment"
+  ],
   "actions": {
-    "turnOn": { "input": { "type": "boolean" } },
-    "setVolume": { "input": { "type": "number" } }
+    "turnOn": {
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "setVolume": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "volume": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "volume"
+        ],
+        "additionalProperties": false
+      }
+    }
   },
   "properties": {
-    "on": { "type": "boolean" },
-    "volume": { "type": "number" }
+    "on": {
+      "type": "boolean"
+    },
+    "volume": {
+      "type": "number"
+    }
   }
 }

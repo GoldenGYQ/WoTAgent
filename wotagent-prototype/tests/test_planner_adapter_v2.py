@@ -99,6 +99,28 @@ def test_capability_context_falls_back_to_all_devices_for_generic_request() -> N
     assert len(capability_context("查询所有设备状态")) == len(capability_context())
 
 
+def test_planner_uses_injected_mcp_capability_provider_as_source_of_truth() -> None:
+    runnable = FakeRunnable({"intent": "chat", "summary": "ok", "steps": []})
+
+    async def capabilities():
+        return [{
+            "device_id": "remote-esp32-1",
+            "title": "RemoteESP32Light",
+            "location": "living_room",
+            "actions": [{"name": "turnOn", "input_schema": {"type": "object"}}],
+            "properties": ["on"],
+        }]
+
+    asyncio.run(LangChainTaskPlanner(
+        runnable,
+        capability_provider=capabilities,
+    )({"message": "打开客厅灯"}))
+
+    system_prompt = runnable.messages[0][1]
+    assert "remote-esp32-1" in system_prompt
+    assert "light-001" not in system_prompt
+
+
 def test_planner_records_usage_and_safe_reasoning_summary() -> None:
     async def run():
         store = InMemoryTraceStore()

@@ -1,0 +1,29 @@
+{
+  "episodes": 600,
+  "query_types": {
+    "qt1": 100,
+    "qt2": 100,
+    "qt3": 100,
+    "qt4-1": 100,
+    "qt4-2": 100,
+    "qt4-3": 100
+  },
+  "td_action_assertions": {
+    "total": 1177,
+    "mapped": 1167,
+    "coverage": 0.9915038232795242
+  },
+  "td_action_ready_episodes": 99,
+  "simuhome_runtime_connected": false,
+  "temporal_episodes": 300,
+  "unsupported_attributes": {
+    "1.Channel.CurrentChannel.MajorNumber": 5,
+    "1.Channel.CurrentChannel.MinorNumber": 5
+  },
+  "required_features": [
+    "device_control",
+    "environment_control",
+    "room_and_attribute_query",
+    "temporal_workflow"
+  ]
+}

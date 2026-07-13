@@ -3,14 +3,43 @@
   "id": "urn:dev:wot:humidifier-001",
   "title": "BedroomHumidifier",
   "location": "bedroom1",
-  "capabilities": ["humidity"],
+  "capabilities": [
+    "humidity"
+  ],
   "actions": {
-    "turnOn": { "input": { "type": "boolean" } },
-    "setMistLevel": { "input": { "type": "number" } }
+    "turnOn": {
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "setMistLevel": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "level": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 3
+          }
+        },
+        "required": [
+          "level"
+        ],
+        "additionalProperties": false
+      }
+    }
   },
   "properties": {
-    "on": { "type": "boolean" },
-    "currentHumidity": { "type": "number" },
-    "mistLevel": { "type": "number" }
+    "on": {
+      "type": "boolean"
+    },
+    "currentHumidity": {
+      "type": "number"
+    },
+    "mistLevel": {
+      "type": "number"
+    }
   }
 }

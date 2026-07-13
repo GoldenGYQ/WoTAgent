@@ -65,10 +65,12 @@ wot-sim-api
 
 | 工具 | 说明 |
 |------|------|
+| `<device>__read_state` | 根据 TD 自动生成的状态读取工具，属性列表来自 TD |
+| `<device>__action__<action>` | 根据 TD 自动生成的动作工具，输入 schema 直接来自 TD |
 | `list_devices` | 列出所有设备（ID、标题、位置、能力） |
-| `list_all_states` | 获取所有设备运行时状态（一次调用） |
+| `query_all_states` | 获取所有设备运行时状态（一次调用） |
 | `query_state(device_id)` | 获取单个设备运行时状态 |
-| `control_device(device_id, action, params)` | 执行设备动作（开关、调亮度、设温度等） |
+| `control_device(device_id, action, params)` | 兼容及模拟器调试用底层总线；v2 Agent 使用 TD 生成工具 |
 | `drift()` | 触发一次环境漂移周期 |
 | `poll_once()` | 评估规则并返回命中规则 |
 | `patch_state(device_id, property, value)` | 直接设置设备属性 |

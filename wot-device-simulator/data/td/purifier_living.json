@@ -3,14 +3,46 @@
   "id": "urn:dev:wot:purifier-001",
   "title": "LivingRoomPurifier",
   "location": "living_room",
-  "capabilities": ["air_quality"],
+  "capabilities": [
+    "air_quality"
+  ],
   "actions": {
-    "turnOn": { "input": { "type": "boolean" } },
-    "setSpeed": { "input": { "type": "string" } }
+    "turnOn": {
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "setSpeed": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "speed": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          }
+        },
+        "required": [
+          "speed"
+        ],
+        "additionalProperties": false
+      }
+    }
   },
   "properties": {
-    "on": { "type": "boolean" },
-    "pm25": { "type": "number" },
-    "speed": { "type": "string" }
+    "on": {
+      "type": "boolean"
+    },
+    "pm25": {
+      "type": "number"
+    },
+    "speed": {
+      "type": "string"
+    }
   }
 }

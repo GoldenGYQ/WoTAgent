@@ -26,8 +26,57 @@ from typing import Any
 
 from .simulator import DeviceStateStore, get_simulator
 from .td import find_devices, get_device_by_id, load_tds
+from .td_tools import TDToolDefinition, compile_tool_catalog
 
 logger = logging.getLogger(__name__)
+
+
+def _register_td_tools(mcp, sim, definitions: list[TDToolDefinition]) -> None:
+    """Register executable MCP tools compiled from TD affordances."""
+    from fastmcp.tools.function_tool import FunctionTool
+
+    for definition in definitions:
+        if definition.operation == "read":
+            async def handler(
+                _device_id: str = definition.device_id,
+            ) -> dict[str, Any]:
+                DeviceStateStore.initialize()
+                return {
+                    "success": True,
+                    "device_id": _device_id,
+                    "state": DeviceStateStore.get(_device_id),
+                }
+        else:
+            async def handler(
+                _device_id: str = definition.device_id,
+                _action: str = definition.affordance,
+                **arguments: Any,
+            ) -> dict[str, Any]:
+                return await sim.control_device(
+                    device_id=_device_id,
+                    action=_action,
+                    parameters=arguments,
+                )
+
+        tool = FunctionTool(
+            name=definition.name,
+            description=definition.description,
+            parameters=definition.input_schema,
+            fn=handler,
+            return_type=dict[str, Any],
+            run_in_thread=False,
+            meta={
+                "wot": {
+                    "device_id": definition.device_id,
+                    "operation": definition.operation,
+                    "affordance": definition.affordance,
+                    "title": definition.title,
+                    "location": definition.location,
+                    "properties": list(definition.properties),
+                }
+            },
+        )
+        mcp.add_tool(tool)
 
 
 def _build_server(sim=None):
@@ -129,9 +178,14 @@ def _build_server(sim=None):
     async def inject_event(event_type: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
         return await sim.inject_event(event_type=event_type, data=data or {})
 
+    _register_td_tools(mcp, sim, compile_tool_catalog(load_tds()))
     return mcp
 
 
 def main() -> None:
     mcp = _build_server()
     mcp.run()
+
+
+if __name__ == "__main__":
+    main()

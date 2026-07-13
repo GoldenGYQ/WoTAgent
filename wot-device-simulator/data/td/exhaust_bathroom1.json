@@ -3,13 +3,40 @@
   "id": "urn:dev:wot:exhaust-002",
   "title": "Bathroom1Exhaust",
   "location": "bathroom1",
-  "capabilities": ["ventilation"],
+  "capabilities": [
+    "ventilation"
+  ],
   "actions": {
-    "turnOn": { "input": { "type": "boolean" } },
-    "setSpeed": { "input": { "type": "number" } }
+    "turnOn": {
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "setSpeed": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "speed": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 3
+          }
+        },
+        "required": [
+          "speed"
+        ],
+        "additionalProperties": false
+      }
+    }
   },
   "properties": {
-    "on": { "type": "boolean" },
-    "speed": { "type": "number" }
+    "on": {
+      "type": "boolean"
+    },
+    "speed": {
+      "type": "number"
+    }
   }
 }

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from ..domain import TaskPlan
 from ..wot import load_tds
@@ -50,6 +50,23 @@ def capability_context(message: str = "", max_devices: int = 8) -> list[dict[str
         }
         for td in load_tds()
     ]
+    return select_capability_context(all_devices, message, max_devices=max_devices)
+
+
+def select_capability_context(
+    all_devices: list[dict[str, Any]],
+    message: str = "",
+    *,
+    max_devices: int = 8,
+) -> list[dict[str, Any]]:
+    """Select relevant capabilities regardless of whether TDs came from disk or MCP."""
+    all_devices = [
+        {
+            **device,
+            "location_aliases": list(_LOCATION_TERMS.get(str(device.get("location", "")), ())),
+        }
+        for device in all_devices
+    ]
     text = message.lower().strip()
     if not text:
         return all_devices
@@ -80,10 +97,18 @@ class LangChainTaskPlanner:
 
     runnable: Any
     trace_store: InMemoryTraceStore | None = None
+    capability_provider: Callable[[], Awaitable[list[dict[str, Any]]]] | None = None
 
     async def __call__(self, state: dict[str, Any]) -> TaskPlan:
         message = state.get("message", "")
-        devices = state.get("context", {}).get("devices") or capability_context(message)
+        provided = state.get("context", {}).get("devices")
+        if provided:
+            all_devices = list(provided)
+        elif self.capability_provider is not None:
+            all_devices = await self.capability_provider()
+        else:
+            all_devices = capability_context("")
+        devices = select_capability_context(all_devices, message)
         system = (
             "You are the WoTAgent planner. Return only the generate_plan tool call. "
             "Use only device_id, action names, and exact input_schema parameter names listed below. "
@@ -101,7 +126,7 @@ class LangChainTaskPlanner:
                     "purpose": "task_planning",
                     "prompt_version": "planner-v2.0",
                     "device_count": len(devices),
-                    "all_device_count": len(load_tds()),
+                    "all_device_count": len(all_devices),
                     "message_length": len(state.get("message", "")),
                 },
             )

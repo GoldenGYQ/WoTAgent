@@ -47,6 +47,7 @@ def _normalize_tool(tool_obj: Any) -> dict[str, Any]:
         "title": getattr(tool_obj, "title", None),
         "input_schema": getattr(tool_obj, "inputSchema", {}) or {},
         "output_schema": getattr(tool_obj, "outputSchema", None),
+        "meta": getattr(tool_obj, "meta", None) or {},
     }
 
 
@@ -84,6 +85,8 @@ class MCPToolClient:
         self._connected = False
         self._lock = asyncio.Lock()
         self._warned = False  # log warning only once
+        self._td_tool_cache: dict[tuple[str, str, str], str] = {}
+        self._td_tools: dict[str, dict[str, Any]] = {}
 
     def _make_client(self) -> Client:
         if self._server_url:
@@ -134,6 +137,8 @@ class MCPToolClient:
             finally:
                 self._client = None
                 self._connected = False
+                self._td_tool_cache.clear()
+                self._td_tools.clear()
                 logger.info("MCP client disconnected")
 
     async def list_tools(self) -> list[dict[str, Any]]:
@@ -154,6 +159,83 @@ class MCPToolClient:
             except TypeError:
                 normalized = [_normalize_tool(response)]
         return normalized
+
+    async def resolve_td_tool(
+        self,
+        device_id: str,
+        operation: str,
+        affordance: str,
+    ) -> str:
+        """Resolve a TD affordance from server-published MCP tool metadata."""
+        key = (device_id, operation, affordance)
+        cached = self._td_tool_cache.get(key)
+        if cached is not None:
+            return cached
+
+        await self.refresh_td_catalog()
+        resolved = self._td_tool_cache.get(key)
+        if resolved is None:
+            raise LookupError(
+                f"MCP server has no TD tool for device={device_id!r}, "
+                f"operation={operation!r}, affordance={affordance!r}"
+            )
+        return resolved
+
+    async def refresh_td_catalog(self) -> int:
+        """Discover TD bindings once; this handshake is outside device-call SLAs."""
+        count = 0
+        for tool in await self.list_tools():
+            binding = (tool.get("meta") or {}).get("wot") or {}
+            if not binding:
+                continue
+            candidate = (
+                str(binding.get("device_id", "")),
+                str(binding.get("operation", "")),
+                str(binding.get("affordance", "")),
+            )
+            self._td_tool_cache[candidate] = str(tool["name"])
+            self._td_tools[str(tool["name"])] = tool
+            count += 1
+        return count
+
+    async def td_capabilities(self) -> list[dict[str, Any]]:
+        """Reconstruct the planner capability view from the MCP tool catalog."""
+        if not self._td_tools:
+            await self.refresh_td_catalog()
+        devices: dict[str, dict[str, Any]] = {}
+        for tool in self._td_tools.values():
+            binding = (tool.get("meta") or {}).get("wot") or {}
+            device_id = str(binding.get("device_id", ""))
+            if not device_id:
+                continue
+            device = devices.setdefault(device_id, {
+                "device_id": device_id,
+                "title": str(binding.get("title", device_id)),
+                "location": str(binding.get("location", "")),
+                "actions": [],
+                "properties": [],
+            })
+            if binding.get("operation") == "invoke":
+                device["actions"].append({
+                    "name": str(binding.get("affordance", "")),
+                    "input_schema": tool.get("input_schema") or {},
+                })
+            elif binding.get("operation") == "read":
+                device["properties"] = list(binding.get("properties") or [])
+        for device in devices.values():
+            device["actions"].sort(key=lambda item: item["name"])
+        return sorted(devices.values(), key=lambda item: item["device_id"])
+
+    async def call_td_tool(
+        self,
+        device_id: str,
+        operation: str,
+        affordance: str,
+        arguments: dict[str, Any] | None = None,
+        timeout: float = _MCP_CALL_TIMEOUT,
+    ) -> tuple[str, dict[str, Any]]:
+        tool_name = await self.resolve_td_tool(device_id, operation, affordance)
+        return tool_name, await self.call_tool(tool_name, arguments or {}, timeout=timeout)
 
     async def call_tool(
         self,
@@ -181,7 +263,10 @@ class MCPToolClient:
         text_output = "\n".join(f for f in text_fragments if f).strip()
         return {
             "text": text_output,
-            "structured": getattr(response, "structuredContent", None),
+            "structured": (
+                getattr(response, "structuredContent", None)
+                or getattr(response, "structured_content", None)
+            ),
             "raw": response,
         }
 

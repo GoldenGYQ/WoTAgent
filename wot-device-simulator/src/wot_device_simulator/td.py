@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 class TDAction(BaseModel):
     name: str
     input_type: str | None = None
+    input_schema: dict[str, Any] = Field(default_factory=dict)
     description: str = ""
 
 
@@ -53,7 +54,12 @@ def _parse_td(raw: dict[str, Any]) -> ThingDescription:
     actions = []
     for name, spec in (raw.get("actions") or {}).items():
         inp = spec.get("input", {}) if isinstance(spec, dict) else {}
-        actions.append(TDAction(name=name, input_type=inp.get("type")))
+        actions.append(TDAction(
+            name=name,
+            input_type=inp.get("type"),
+            input_schema=inp,
+            description=str(spec.get("description", "")) if isinstance(spec, dict) else "",
+        ))
 
     properties = []
     for name, spec in (raw.get("properties") or {}).items():

@@ -3,16 +3,67 @@
   "id": "urn:dev:wot:ac-002",
   "title": "Bedroom1AC",
   "location": "bedroom1",
-  "capabilities": ["temperature"],
+  "capabilities": [
+    "temperature"
+  ],
   "actions": {
-    "turnOn": { "input": { "type": "boolean" } },
-    "setTemperature": { "input": { "type": "number" } },
-    "setMode": { "input": { "type": "string" } }
+    "turnOn": {
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "setTemperature": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "temperature": {
+            "type": "number",
+            "minimum": 16,
+            "maximum": 30
+          }
+        },
+        "required": [
+          "temperature"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "setMode": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "cool",
+              "heat",
+              "fan",
+              "auto",
+              "dry"
+            ]
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "additionalProperties": false
+      }
+    }
   },
   "properties": {
-    "on": { "type": "boolean" },
-    "currentTemperature": { "type": "number" },
-    "targetTemp": { "type": "number" },
-    "mode": { "type": "string" }
+    "on": {
+      "type": "boolean"
+    },
+    "currentTemperature": {
+      "type": "number"
+    },
+    "targetTemp": {
+      "type": "number"
+    },
+    "mode": {
+      "type": "string"
+    }
   }
 }

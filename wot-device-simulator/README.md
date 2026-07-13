@@ -65,10 +65,12 @@ Then open:
 
 | Tool | Description |
 |------|-------------|
+| `<device>__read_state` | TD-generated state reader with properties declared by that TD |
+| `<device>__action__<action>` | TD-generated action tool whose input schema is copied from the TD |
 | `list_devices` | List all devices with metadata (ID, title, location, capabilities) |
-| `list_all_states` | Get runtime state for ALL devices in one call |
+| `query_all_states` | Get runtime state for ALL devices in one call |
 | `query_state(device_id)` | Get runtime state for one device |
-| `control_device(device_id, action, params)` | Execute an action (turnOn, setBrightness, setTemp, etc.) |
+| `control_device(device_id, action, params)` | Low-level compatibility and simulator-debug action bus; v2 Agent execution uses generated tools |
 | `drift()` | Trigger one environmental drift cycle |
 | `poll_once()` | Evaluate rules and return triggered ones |
 | `patch_state(device_id, property, value)` | Directly set a device property |
