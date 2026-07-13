@@ -1,0 +1,39 @@
+import { describe, expect, it } from 'vitest'
+import type { TraceEvent } from '../types/agent'
+import { eventSummary, eventTitle, eventTone } from './trace'
+
+function event(type: string, data: Record<string, unknown> = {}): TraceEvent {
+  return {
+    event_id: 'event-1',
+    sequence: 1,
+    timestamp: '2026-07-13T08:00:00Z',
+    trace_id: 'task-1',
+    task_id: 'task-1',
+    session_id: 'session-1',
+    type,
+    node: 'executor',
+    iteration: 1,
+    duration_ms: 1234,
+    data,
+  }
+}
+
+describe('trace presentation', () => {
+  it('labels model and tool events with concise summaries', () => {
+    const model = event('model.request.completed', { total_tokens: 912 })
+    const tool = event('agent.tool.completed', { tool: 'light_001__action__turn_on', step_id: 's1' })
+
+    expect(eventTitle(model)).toBe('模型响应')
+    expect(eventSummary(model)).toBe('912 tokens · 1.23 s')
+    expect(eventTone(model)).toBe('model')
+    expect(eventSummary(tool)).toContain('light_001__action__turn_on')
+    expect(eventTone(tool)).toBe('tool')
+  })
+
+  it('surfaces verification failures', () => {
+    const verification = event('verification.completed', { passed: false })
+    expect(eventTitle(verification)).toBe('状态验证')
+    expect(eventSummary(verification)).toBe('后置条件未满足')
+    expect(eventTone(verification)).toBe('verify')
+  })
+})
