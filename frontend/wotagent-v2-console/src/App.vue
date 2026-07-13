@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import {
   Activity,
   PanelLeft,
@@ -15,6 +15,9 @@ import { useAgentRuntime } from './composables/useAgentRuntime'
 
 const {
   tasks,
+  conversations,
+  activeConversationId,
+  activeConversation,
   activeTaskId,
   activeTask,
   role,
@@ -23,6 +26,9 @@ const {
   confirm,
   checkBackend,
   hydrateRuntime,
+  selectConversation,
+  newConversation: resetConversation,
+  deleteConversation,
 } = useAgentRuntime()
 
 const draft = ref('')
@@ -31,6 +37,9 @@ const submitError = ref('')
 const mobileView = ref<'workspace' | 'trace'>('workspace')
 const drawerOpen = ref(false)
 const composer = ref<HTMLTextAreaElement | null>(null)
+const conversationTasks = computed(() => tasks.filter(
+  (task) => task.conversationId === activeConversationId.value,
+))
 
 async function send(): Promise<void> {
   const message = draft.value.trim()
@@ -65,11 +74,21 @@ function chooseTask(taskId: string): void {
   drawerOpen.value = false
 }
 
+async function chooseConversation(conversationId: string): Promise<void> {
+  await selectConversation(conversationId)
+  drawerOpen.value = false
+}
+
 function newTask(): void {
-  activeTaskId.value = null
+  resetConversation()
   drawerOpen.value = false
   mobileView.value = 'workspace'
   void nextTick(() => composer.value?.focus())
+}
+
+async function removeConversation(conversationId: string): Promise<void> {
+  if (!window.confirm('删除该会话及其历史消息？')) return
+  await deleteConversation(conversationId)
 }
 
 onMounted(async () => {
@@ -100,14 +119,22 @@ onMounted(async () => {
 
     <div class="desktop-layout">
       <TaskSidebar
-        :tasks="tasks"
-        :active-task-id="activeTaskId"
-        @select="chooseTask"
+        :conversations="conversations"
+        :active-conversation-id="activeConversationId"
+        @select="chooseConversation"
         @create="newTask"
+        @delete="removeConversation"
       />
 
       <div class="workspace-column" :class="{ 'mobile-hidden': mobileView !== 'workspace' }">
-        <TaskWorkspace :task="activeTask" @confirm="(approved) => activeTask && confirm(activeTask.id, approved)" @example="useExample" />
+        <TaskWorkspace
+          :conversation="activeConversation"
+          :tasks="conversationTasks"
+          :active-task="activeTask"
+          @confirm="confirm"
+          @select-task="chooseTask"
+          @example="useExample"
+        />
         <div class="composer-region">
           <div v-if="submitError" class="composer-error">{{ submitError }}</div>
           <div class="composer-shell">
@@ -151,7 +178,13 @@ onMounted(async () => {
           <strong>任务</strong>
           <button class="icon-button" type="button" title="关闭" @click="drawerOpen = false"><X :size="17" /></button>
         </div>
-        <TaskSidebar :tasks="tasks" :active-task-id="activeTaskId" @select="chooseTask" @create="newTask" />
+        <TaskSidebar
+          :conversations="conversations"
+          :active-conversation-id="activeConversationId"
+          @select="chooseConversation"
+          @create="newTask"
+          @delete="removeConversation"
+        />
       </div>
     </div>
   </div>

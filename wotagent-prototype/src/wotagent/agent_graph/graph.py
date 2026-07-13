@@ -28,6 +28,7 @@ class AgentState(TypedDict, total=False):
     user_id: str
     role: str
     message: str
+    conversation_history: list[dict[str, str]]
     context: dict[str, Any]
     plan: TaskPlan
     policy_decisions: list[PolicyDecision]

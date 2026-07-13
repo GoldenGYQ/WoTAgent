@@ -1,4 +1,11 @@
-import type { AgentRole, TaskCreateResponse, TaskRecord, TraceEvent } from '../types/agent'
+import type {
+  AgentRole,
+  ConversationRecord,
+  ConversationTurn,
+  TaskCreateResponse,
+  TaskRecord,
+  TraceEvent,
+} from '../types/agent'
 
 export interface TraceSubscription {
   close: () => void
@@ -26,10 +33,29 @@ export const agentV2Api = {
     return request('/api/health')
   },
 
-  createTask(message: string, sessionId: string, role: AgentRole): Promise<TaskCreateResponse> {
+  createConversation(role: AgentRole): Promise<ConversationRecord> {
+    return request('/api/v2/conversations', {
+      method: 'POST',
+      body: JSON.stringify({ role, user_id: 'local-user' }),
+    })
+  },
+
+  listConversations(): Promise<{ conversations: ConversationRecord[] }> {
+    return request('/api/v2/conversations?user_id=local-user')
+  },
+
+  getConversationTurns(conversationId: string): Promise<{ conversation_id: string; turns: ConversationTurn[] }> {
+    return request(`/api/v2/conversations/${encodeURIComponent(conversationId)}/turns`)
+  },
+
+  deleteConversation(conversationId: string): Promise<{ status: string; conversation_id: string }> {
+    return request(`/api/v2/conversations/${encodeURIComponent(conversationId)}`, { method: 'DELETE' })
+  },
+
+  createTask(message: string, conversationId: string, role: AgentRole): Promise<TaskCreateResponse> {
     return request('/api/v2/tasks', {
       method: 'POST',
-      body: JSON.stringify({ message, session_id: sessionId, role, user_id: 'local-user' }),
+      body: JSON.stringify({ message, conversation_id: conversationId, role, user_id: 'local-user' }),
     })
   },
 

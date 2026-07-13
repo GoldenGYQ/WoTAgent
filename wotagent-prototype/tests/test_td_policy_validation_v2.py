@@ -109,3 +109,15 @@ def test_llm_cannot_override_standard_action_semantics_with_conflicting_postcond
     )
 
     assert step.postconditions[0].value is True
+
+
+def test_query_steps_discard_llm_generated_unknown_postconditions() -> None:
+    step = PlanStep(
+        id="s1",
+        kind="query",
+        device_id="light-001",
+        action="getProperties",
+        postconditions=[{"property": "brightness", "value": "?"}],
+    )
+
+    assert step.postconditions == []

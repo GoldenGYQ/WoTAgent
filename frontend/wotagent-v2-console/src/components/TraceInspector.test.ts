@@ -5,6 +5,8 @@ import { EMPTY_USAGE, type RuntimeTask } from '../types/agent'
 
 const task: RuntimeTask = {
   id: 'task-1',
+  turnId: 'turn-1',
+  conversationId: 'conv-1',
   sessionId: 'session-1',
   message: '打开客厅灯',
   role: 'operator',

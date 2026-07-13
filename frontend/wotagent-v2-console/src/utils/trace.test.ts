@@ -36,4 +36,14 @@ describe('trace presentation', () => {
     expect(eventSummary(verification)).toBe('后置条件未满足')
     expect(eventTone(verification)).toBe('verify')
   })
+
+  it('describes the bounded conversation context added to a task', () => {
+    const context = event('context.built', {
+      history_messages: 4,
+      history_characters: 128,
+    })
+    expect(eventTitle(context)).toBe('会话上下文')
+    expect(eventSummary(context)).toContain('4 条历史')
+    expect(eventTone(context)).toBe('verify')
+  })
 })

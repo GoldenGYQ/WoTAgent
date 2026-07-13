@@ -30,6 +30,8 @@ export interface TraceEvent {
 
 export interface TaskCreateResponse {
   task_id: string | null
+  turn_id: string | null
+  conversation_id: string
   session_id: string
   status: string
   response: string
@@ -87,6 +89,8 @@ export type StreamState = 'idle' | 'connecting' | 'live' | 'polling' | 'closed'
 
 export interface RuntimeTask {
   id: string
+  turnId: string
+  conversationId: string
   sessionId: string
   message: string
   role: AgentRole
@@ -102,6 +106,32 @@ export interface RuntimeTask {
   updatedAt: string
   error: string
   streamState: StreamState
+}
+
+export interface ConversationTurn {
+  turn_id: string
+  conversation_id: string
+  task_id: string
+  user_message: string
+  assistant_message: string
+  status: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ConversationRecord {
+  conversation_id: string
+  user_id: string
+  role: AgentRole
+  title: string
+  created_at: string
+  updated_at: string
+  turn_count: number
+}
+
+export interface RuntimeConversation extends ConversationRecord {
+  turns: ConversationTurn[]
+  loading: boolean
 }
 
 export const EMPTY_USAGE: UsageSummary = {

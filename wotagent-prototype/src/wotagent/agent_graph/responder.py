@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage, message_chunk_to_message
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, message_chunk_to_message
 from ..telemetry import InMemoryTraceStore
 
 
@@ -38,7 +38,14 @@ class LangChainResponseComposer:
                 data={"purpose": "final_response", "prompt_version": "responder-v2.0"},
             )
         started = time.perf_counter()
-        messages = [SystemMessage(content=system), HumanMessage(content=prompt)]
+        messages = [SystemMessage(content=system)]
+        for item in state.get("conversation_history", []):
+            content = str(item.get("content", ""))
+            if item.get("role") == "assistant":
+                messages.append(AIMessage(content=content))
+            elif item.get("role") == "user":
+                messages.append(HumanMessage(content=content))
+        messages.append(HumanMessage(content=prompt))
         ttft_ms: float | None = None
         if hasattr(self.runnable, "astream"):
             aggregate = None

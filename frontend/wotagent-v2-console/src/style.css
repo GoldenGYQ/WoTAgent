@@ -120,14 +120,19 @@ button:focus-visible, textarea:focus-visible {
 .sidebar-section-label { height: 38px; padding: 0 12px; gap: 6px; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; }
 .sidebar-section-label span { margin-left: auto; font-variant-numeric: tabular-nums; }
 .task-list { overflow-y: auto; padding: 0 8px 10px; }
+.conversation-list-row { position: relative; display: flex; align-items: stretch; border: 1px solid transparent; border-radius: 5px; }
+.conversation-list-row:hover { background: #f0f3f5; }
+.conversation-list-row.active { background: #e9f3f2; border-color: #c7e0dc; }
 .task-list-item {
-  width: 100%; min-height: 62px; display: flex; flex-direction: column; justify-content: center; gap: 8px;
-  padding: 9px 10px; border: 1px solid transparent; border-radius: 5px; background: transparent; text-align: left;
+  min-width: 0; flex: 1; min-height: 62px; display: flex; flex-direction: column; justify-content: center; gap: 8px;
+  padding: 9px 32px 9px 10px; border: 0; border-radius: 5px; background: transparent; text-align: left;
 }
-.task-list-item:hover { background: #f0f3f5; }
-.task-list-item.active { background: #e9f3f2; border-color: #c7e0dc; }
+.conversation-delete { position: absolute; top: 8px; right: 6px; width: 25px; height: 25px; display: grid; place-items: center; border: 0; border-radius: 4px; color: transparent; background: transparent; }
+.conversation-list-row:hover .conversation-delete, .conversation-list-row.active .conversation-delete, .conversation-delete:focus-visible { color: var(--text-faint); }
+.conversation-delete:hover { color: var(--red) !important; background: var(--red-soft); }
 .task-list-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: 13px; font-weight: 600; }
 .task-list-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.task-list-meta > span { font-size: 10px; color: var(--text-muted); }
 .task-list-meta time { font-size: 10px; color: var(--text-faint); }
 .task-list-empty { padding: 24px 10px; text-align: center; color: var(--text-faint); font-size: 12px; }
 
@@ -142,6 +147,7 @@ button:focus-visible, textarea:focus-visible {
 .task-workspace { min-height: 0; flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .workspace-header { height: 45px; flex: 0 0 45px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; border-bottom: 1px solid var(--line); }
 .task-identity { gap: 9px; min-width: 0; }
+.conversation-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .task-id, .session-id { font-family: "Cascadia Code", Consolas, monospace; font-size: 10px; color: var(--text-muted); }
 .task-id { overflow: hidden; text-overflow: ellipsis; }
 .session-id { color: var(--text-faint); }
@@ -154,11 +160,17 @@ button:focus-visible, textarea:focus-visible {
 .metric-item strong { margin-left: auto; overflow: hidden; text-overflow: ellipsis; font-size: 11px; color: var(--text); font-variant-numeric: tabular-nums; }
 
 .conversation-pane { flex: 1; min-height: 0; overflow-y: auto; padding: 20px clamp(18px, 4vw, 56px) 28px; }
+.turn-group { max-width: 860px; margin-bottom: 18px; padding: 2px 0 4px 10px; border-left: 2px solid transparent; border-bottom: 1px solid #edf0f2; }
+.turn-group.selected { border-left-color: #9fcfc9; }
 .message-block { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 11px; max-width: 820px; margin-bottom: 22px; }
+.message-content { min-width: 0; }
 .message-avatar { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 6px; background: #e9edf1; color: #4d5c6a; font-size: 11px; font-weight: 700; }
 .assistant-message .message-avatar { background: var(--teal-soft); color: var(--teal); }
-.message-role { display: block; margin: 0 0 5px; font-size: 10px; font-weight: 700; color: var(--text-faint); text-transform: uppercase; }
+.message-role { display: flex; align-items: center; gap: 8px; margin: 0 0 5px; font-size: 10px; font-weight: 700; color: var(--text-faint); text-transform: uppercase; }
+.turn-task-link { max-width: 150px; overflow: hidden; text-overflow: ellipsis; padding: 0; border: 0; color: #648092; background: transparent; font-family: "Cascadia Code", Consolas, monospace; font-size: 9px; text-transform: none; white-space: nowrap; }
+.turn-task-link:hover { color: var(--teal); text-decoration: underline; }
 .message-block p { margin: 0; font-size: 14px; line-height: 1.7; color: var(--text); white-space: pre-wrap; }
+.conversation-loading { padding: 20px 0; color: var(--text-faint); font-size: 11px; text-align: center; }
 
 .runtime-band, .confirmation-band, .error-band { max-width: 820px; margin: 0 0 22px 41px; border-left: 3px solid var(--blue); background: var(--blue-soft); }
 .runtime-band { min-height: 46px; display: flex; align-items: center; gap: 10px; padding: 8px 12px; }

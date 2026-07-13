@@ -5,15 +5,26 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver
 
 from wotagent.agent_graph import AgentGraphDependencies, build_agent_graph
+from wotagent.conversation import ConversationStore
 from wotagent.domain import PlanStep, TaskPlan
 from wotagent.orchestration import TaskOrchestrator
 from wotagent.policy import PolicyEngine
 
 app_module = importlib.import_module("wotagent.api.app")
+
+
+@pytest.fixture(autouse=True)
+def isolated_conversation_store(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(
+        app_module,
+        "_v2_conversation_store",
+        ConversationStore(tmp_path / "api-v2-conversations.db"),
+    )
 
 
 class FakeGraph:

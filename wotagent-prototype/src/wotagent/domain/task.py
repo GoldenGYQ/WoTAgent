@@ -67,6 +67,10 @@ class PlanStep(BaseModel):
     def infer_standard_postconditions(self) -> "PlanStep":
         """Make verification mandatory for known state-changing WoT actions."""
         if self.kind != "action":
+            # A query observes an unknown value; it cannot assert a target
+            # postcondition such as brightness == "?" without creating a
+            # false execution failure after a successful read.
+            self.postconditions = []
             return self
         inferred: dict[str, Any] | None = None
         if self.action == "turnOn":

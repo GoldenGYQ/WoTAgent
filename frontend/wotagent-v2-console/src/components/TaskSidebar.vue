@@ -1,16 +1,16 @@
 <script setup lang="ts">
-import { CirclePlus, ListTree } from 'lucide-vue-next'
-import StatusBadge from './StatusBadge.vue'
-import type { RuntimeTask } from '../types/agent'
+import { MessageSquare, MessageSquarePlus, Trash2 } from 'lucide-vue-next'
+import type { RuntimeConversation } from '../types/agent'
 
 defineProps<{
-  tasks: RuntimeTask[]
-  activeTaskId: string | null
+  conversations: RuntimeConversation[]
+  activeConversationId: string | null
 }>()
 
 const emit = defineEmits<{
-  select: [taskId: string]
+  select: [conversationId: string]
   create: []
+  delete: [conversationId: string]
 }>()
 
 function relativeTime(value: string): string {
@@ -25,31 +25,43 @@ function relativeTime(value: string): string {
   <aside class="task-sidebar">
     <div class="sidebar-action">
       <button class="new-task-button" type="button" @click="emit('create')">
-        <CirclePlus :size="17" />
-        新任务
+        <MessageSquarePlus :size="17" />
+        新会话
       </button>
     </div>
     <div class="sidebar-section-label">
-      <ListTree :size="14" />
-      最近任务
-      <span>{{ tasks.length }}</span>
+      <MessageSquare :size="14" />
+      最近会话
+      <span>{{ conversations.length }}</span>
     </div>
-    <nav class="task-list" aria-label="最近任务">
-      <button
-        v-for="task in tasks"
-        :key="task.id"
-        class="task-list-item"
-        :class="{ active: task.id === activeTaskId }"
-        type="button"
-        @click="emit('select', task.id)"
+    <nav class="task-list" aria-label="最近会话">
+      <div
+        v-for="conversation in conversations"
+        :key="conversation.conversation_id"
+        class="conversation-list-row"
+        :class="{ active: conversation.conversation_id === activeConversationId }"
       >
-        <span class="task-list-title">{{ task.message }}</span>
-        <span class="task-list-meta">
-          <StatusBadge :status="task.status" />
-          <time>{{ relativeTime(task.updatedAt) }}</time>
-        </span>
-      </button>
-      <div v-if="tasks.length === 0" class="task-list-empty">暂无任务</div>
+        <button
+          class="task-list-item"
+          type="button"
+          @click="emit('select', conversation.conversation_id)"
+        >
+          <span class="task-list-title">{{ conversation.title }}</span>
+          <span class="task-list-meta">
+            <span>{{ conversation.turn_count }} 轮</span>
+            <time>{{ relativeTime(conversation.updated_at) }}</time>
+          </span>
+        </button>
+        <button
+          class="conversation-delete"
+          type="button"
+          title="删除会话"
+          @click="emit('delete', conversation.conversation_id)"
+        >
+          <Trash2 :size="14" />
+        </button>
+      </div>
+      <div v-if="conversations.length === 0" class="task-list-empty">暂无会话</div>
     </nav>
   </aside>
 </template>

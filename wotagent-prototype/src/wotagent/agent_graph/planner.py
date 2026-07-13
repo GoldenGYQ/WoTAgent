@@ -131,10 +131,15 @@ class LangChainTaskPlanner:
                 },
             )
         started = time.perf_counter()
-        result = await self.runnable.ainvoke([
-            ("system", system),
-            ("human", state.get("message", "")),
-        ])
+        messages: list[Any] = [("system", system)]
+        for item in state.get("conversation_history", []):
+            content = str(item.get("content", ""))
+            if item.get("role") == "assistant":
+                messages.append(("assistant", content))
+            elif item.get("role") == "user":
+                messages.append(("human", content))
+        messages.append(("human", state.get("message", "")))
+        result = await self.runnable.ainvoke(messages)
         arguments = _extract_tool_arguments(result)
         plan = TaskPlan.model_validate(arguments)
         if self.trace_store is not None and task_id:

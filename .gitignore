@@ -37,6 +37,8 @@ wagent*.log
 data/memory/
 data/state.db
 data/state.db-*
+wotagent-prototype/data/conversations.db*
+wotagent-prototype/data/agent_checkpoints.db*
 chroma_db/
 
 # --- Model files ---

@@ -22,6 +22,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command
 
 logger = logging.getLogger("wotagent.api")
@@ -52,6 +53,7 @@ _env_path = Path(__file__).resolve().parents[3] / ".env"
 load_dotenv(_env_path, encoding="utf-8")
 
 from ..core import create_wot_pipeline, execute_plan_directly, get_session_manager, invoke_agent, invoke_agent_stream, AgentContext
+from ..conversation import ConversationStore
 from ..events import Event, get_bus
 from ..logging import configure_logging, install_event_bus_handler
 from ..memory import ConversationMemory, SessionTranscript
@@ -83,17 +85,25 @@ _pipeline = create_wot_pipeline(
 _v2_policy = PolicyEngine()
 _v2_gateway = MCPDeviceGateway()
 _v2_trace_store = InMemoryTraceStore()
-_v2_graph = build_agent_graph(AgentGraphDependencies(
-    planner=LangChainTaskPlanner(
-        _pipeline.planner,
+_v2_conversation_store = ConversationStore(os.getenv("WOTAGENT_CONVERSATION_DB"))
+
+
+def _build_v2_graph(checkpointer: Any):
+    return build_agent_graph(AgentGraphDependencies(
+        planner=LangChainTaskPlanner(
+            _pipeline.planner,
+            trace_store=_v2_trace_store,
+            capability_provider=_v2_gateway.capabilities,
+        ),
+        policy=_v2_policy,
+        orchestrator=TaskOrchestrator(_v2_gateway, _v2_policy),
+        responder=LangChainResponseComposer(_pipeline.response_model, trace_store=_v2_trace_store),
         trace_store=_v2_trace_store,
-        capability_provider=_v2_gateway.capabilities,
-    ),
-    policy=_v2_policy,
-    orchestrator=TaskOrchestrator(_v2_gateway, _v2_policy),
-    responder=LangChainResponseComposer(_pipeline.response_model, trace_store=_v2_trace_store),
-    trace_store=_v2_trace_store,
-), checkpointer=InMemorySaver())
+    ), checkpointer=checkpointer)
+
+
+_v2_graph = _build_v2_graph(InMemorySaver())
+_bootstrap_v2_graph = _v2_graph
 _session_manager = get_session_manager(timeout_minutes=30)
 
 # Start perception engine (async — started on FastAPI startup event)
@@ -132,6 +142,19 @@ else:
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
+    global _v2_graph
+    checkpoint_context = None
+    previous_graph = _v2_graph
+    if _v2_graph is _bootstrap_v2_graph:
+        checkpoint_path = os.getenv(
+            "WOTAGENT_CHECKPOINT_DB",
+            str(Path(__file__).resolve().parents[3] / "data" / "agent_checkpoints.db"),
+        )
+        checkpoint_context = AsyncSqliteSaver.from_conn_string(checkpoint_path)
+        checkpointer = await checkpoint_context.__aenter__()
+        await checkpointer.setup()
+        _v2_graph = _build_v2_graph(checkpointer)
+        logger.info("Agent 2.0 checkpoints: %s", checkpoint_path)
     logger.info("Starting perception engine...")
     await _perception_engine.start()
     try:
@@ -140,6 +163,9 @@ async def _lifespan(_app: FastAPI):
         if _perception_engine.is_running:
             logger.info("Stopping perception engine...")
             await _perception_engine.stop()
+        _v2_graph = previous_graph
+        if checkpoint_context is not None:
+            await checkpoint_context.__aexit__(None, None, None)
 
 app = FastAPI(
     title="WoTAgent",
@@ -246,6 +272,7 @@ class PerceptionPollResponse(BaseModel):
 
 class TaskCreateV2Request(BaseModel):
     message: str
+    conversation_id: str | None = None
     session_id: str | None = None
     role: str = "operator"
     user_id: str = "local-user"
@@ -253,6 +280,8 @@ class TaskCreateV2Request(BaseModel):
 
 class TaskCreateV2Response(BaseModel):
     task_id: str | None = None
+    turn_id: str | None = None
+    conversation_id: str
     session_id: str
     status: str
     response: str
@@ -271,9 +300,76 @@ class TraceEventsV2Response(BaseModel):
     next_cursor: int
 
 
+class ConversationCreateV2Request(BaseModel):
+    user_id: str = "local-user"
+    role: str = "operator"
+    title: str = "新会话"
+
+
+class ConversationV2Response(BaseModel):
+    conversation_id: str
+    user_id: str
+    role: str
+    title: str
+    created_at: str
+    updated_at: str
+    turn_count: int = 0
+
+
+class ConversationListV2Response(BaseModel):
+    conversations: list[ConversationV2Response]
+
+
+class ConversationTurnsV2Response(BaseModel):
+    conversation_id: str
+    turns: list[dict[str, Any]]
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+
+@app.post("/api/v2/conversations", response_model=ConversationV2Response, status_code=201)
+async def create_conversation_v2(req: ConversationCreateV2Request) -> dict[str, Any]:
+    return _v2_conversation_store.create(
+        user_id=req.user_id,
+        role=req.role,
+        title=req.title,
+    )
+
+
+@app.get("/api/v2/conversations", response_model=ConversationListV2Response)
+async def list_conversations_v2(user_id: str = "local-user") -> dict[str, Any]:
+    return {"conversations": _v2_conversation_store.list(user_id=user_id)}
+
+
+@app.get("/api/v2/conversations/{conversation_id}", response_model=ConversationV2Response)
+async def get_conversation_v2(conversation_id: str) -> dict[str, Any]:
+    conversation = _v2_conversation_store.get(conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="conversation not found")
+    return conversation
+
+
+@app.get(
+    "/api/v2/conversations/{conversation_id}/turns",
+    response_model=ConversationTurnsV2Response,
+)
+async def get_conversation_turns_v2(conversation_id: str) -> dict[str, Any]:
+    if _v2_conversation_store.get(conversation_id) is None:
+        raise HTTPException(status_code=404, detail="conversation not found")
+    return {
+        "conversation_id": conversation_id,
+        "turns": _v2_conversation_store.turns(conversation_id),
+    }
+
+
+@app.delete("/api/v2/conversations/{conversation_id}")
+async def delete_conversation_v2(conversation_id: str) -> dict[str, str]:
+    if not _v2_conversation_store.delete(conversation_id):
+        raise HTTPException(status_code=404, detail="conversation not found")
+    return {"status": "deleted", "conversation_id": conversation_id}
 
 
 @app.post("/api/v2/tasks", response_model=TaskCreateV2Response, status_code=202)
@@ -286,26 +382,42 @@ async def create_task_v2(
     This endpoint intentionally coexists with ``/api/chat`` until the v2 event
     stream and confirmation resume flow have completed their own acceptance.
     """
-    session_id = req.session_id or f"sess_{uuid.uuid4().hex[:12]}"
+    conversation_id = req.conversation_id or req.session_id
+    if conversation_id is None:
+        conversation = _v2_conversation_store.create(user_id=req.user_id, role=req.role)
+        conversation_id = conversation["conversation_id"]
+    elif _v2_conversation_store.get(conversation_id) is None:
+        _v2_conversation_store.create(
+            conversation_id=conversation_id,
+            user_id=req.user_id,
+            role=req.role,
+        )
     request_id = f"req_{uuid.uuid4().hex[:12]}"
     task_id = f"task_{uuid.uuid4().hex[:12]}"
+    turn = _v2_conversation_store.start_turn(
+        conversation_id=conversation_id,
+        task_id=task_id,
+        user_message=req.message,
+    )
     await _v2_trace_store.create(
         task_id=task_id,
-        session_id=session_id,
+        session_id=conversation_id,
         request_id=request_id,
     )
     background_tasks.add_task(
         _run_v2_task,
         task_id=task_id,
         request_id=request_id,
-        session_id=session_id,
+        conversation_id=conversation_id,
         user_id=req.user_id,
         role=req.role,
         message=req.message,
     )
     return TaskCreateV2Response(
         task_id=task_id,
-        session_id=session_id,
+        turn_id=turn["turn_id"],
+        conversation_id=conversation_id,
+        session_id=conversation_id,
         status="accepted",
         response="",
     )
@@ -316,19 +428,31 @@ async def confirm_task_v2(
     task_id: str,
     req: TaskConfirmV2Request,
 ) -> TaskCreateV2Response:
-    """Resume the checkpointed task associated with this session/thread."""
+    """Resume the checkpointed execution thread associated with this task."""
     record = await _v2_trace_store.get(task_id)
     if record is None:
-        raise HTTPException(status_code=404, detail="task not found")
-    session_id = record.session_id
-    snapshot = await _v2_graph.aget_state({"configurable": {"thread_id": session_id}})
+        turn = _v2_conversation_store.turn_for_task(task_id)
+        if turn is None:
+            raise HTTPException(status_code=404, detail="task not found")
+        if turn["status"] != "waiting_confirmation":
+            raise HTTPException(status_code=409, detail="task is not waiting for confirmation")
+        conversation_id = turn["conversation_id"]
+        await _v2_trace_store.create(
+            task_id=task_id,
+            session_id=conversation_id,
+            request_id=f"req_resume_{uuid.uuid4().hex[:8]}",
+        )
+        await _v2_trace_store.set_status(task_id, "waiting_confirmation")
+    else:
+        conversation_id = record.session_id
+    snapshot = await _v2_graph.aget_state({"configurable": {"thread_id": task_id}})
     if not snapshot.values or not snapshot.interrupts:
-        raise HTTPException(status_code=409, detail="session has no task waiting for confirmation")
+        raise HTTPException(status_code=409, detail="task is not waiting for confirmation")
     result = await _v2_graph.ainvoke(
         Command(resume={"approved": req.approved}),
-        config={"configurable": {"thread_id": session_id}},
+        config={"configurable": {"thread_id": task_id}},
     )
-    response = _task_v2_response(result, session_id)
+    response = _task_v2_response(result, conversation_id)
     await _finish_v2_trace(response)
     return response
 
@@ -337,7 +461,7 @@ async def _run_v2_task(
     *,
     task_id: str,
     request_id: str,
-    session_id: str,
+    conversation_id: str,
     user_id: str,
     role: str,
     message: str,
@@ -345,15 +469,30 @@ async def _run_v2_task(
     await _v2_trace_store.set_status(task_id, "running")
     await _v2_trace_store.record(task_id=task_id, type="task.started", node="api")
     try:
+        history = _v2_conversation_store.context(
+            conversation_id,
+            exclude_task_id=task_id,
+        )
+        await _v2_trace_store.record(
+            task_id=task_id,
+            type="context.built",
+            node="context",
+            data={
+                "conversation_id": conversation_id,
+                "history_messages": len(history),
+                "history_characters": sum(len(item["content"]) for item in history),
+            },
+        )
         result = await _v2_graph.ainvoke({
             "request_id": request_id,
             "task_id": task_id,
-            "session_id": session_id,
+            "session_id": conversation_id,
             "user_id": user_id,
             "role": role,
             "message": message,
-        }, config={"configurable": {"thread_id": session_id}})
-        response = _task_v2_response(result, session_id)
+            "conversation_history": history,
+        }, config={"configurable": {"thread_id": task_id}})
+        response = _task_v2_response(result, conversation_id)
         if response.status == "waiting_confirmation":
             await _v2_trace_store.record(
                 task_id=task_id,
@@ -362,6 +501,11 @@ async def _run_v2_task(
                 data={"confirmation": response.confirmation or {}},
             )
             await _v2_trace_store.set_status(task_id, "waiting_confirmation")
+            _v2_conversation_store.finish_turn(
+                task_id,
+                response=response.response,
+                status="waiting_confirmation",
+            )
         else:
             await _finish_v2_trace(response)
     except Exception as exc:
@@ -372,6 +516,7 @@ async def _run_v2_task(
             data={"error": str(exc)},
         )
         await _v2_trace_store.finish(task_id, status="failed", result={"error": str(exc)})
+        _v2_conversation_store.finish_turn(task_id, response=str(exc), status="failed")
 
 
 @app.get("/api/v2/tasks/{task_id}")
@@ -468,6 +613,12 @@ def _task_v2_response(result: dict[str, Any], session_id: str) -> TaskCreateV2Re
     )
     return TaskCreateV2Response(
         task_id=trace.task_id if trace is not None else result.get("task_id"),
+        turn_id=(
+            (_v2_conversation_store.turn_for_task(
+                trace.task_id if trace is not None else result.get("task_id", "")
+            ) or {}).get("turn_id")
+        ),
+        conversation_id=session_id,
         session_id=session_id,
         status=status,
         response=result.get("response", "") or (
@@ -492,6 +643,11 @@ async def _finish_v2_trace(response: TaskCreateV2Response) -> None:
         response.task_id,
         status=response.status,
         result=response.model_dump(mode="json"),
+    )
+    _v2_conversation_store.finish_turn(
+        response.task_id,
+        response=response.response,
+        status=response.status,
     )
 
 

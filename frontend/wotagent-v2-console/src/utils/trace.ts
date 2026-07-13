@@ -5,6 +5,7 @@ export type EventTone = 'neutral' | 'model' | 'policy' | 'tool' | 'verify' | 'su
 export function eventTone(event: TraceEvent): EventTone {
   if (event.type.includes('failed')) return 'danger'
   if (event.type.startsWith('model.')) return 'model'
+  if (event.type === 'context.built') return 'verify'
   if (event.type.startsWith('policy.')) return 'policy'
   if (event.type.startsWith('agent.tool')) return 'tool'
   if (event.type.startsWith('verification.')) return 'verify'
@@ -18,6 +19,7 @@ export function eventTitle(event: TraceEvent): string {
     'task.waiting_confirmation': '等待确认',
     'task.succeeded': '任务完成',
     'task.failed': '任务失败',
+    'context.built': '会话上下文',
     'agent.node.started': `${nodeLabel(event.node)}启动`,
     'agent.node.completed': `${nodeLabel(event.node)}完成`,
     'agent.node.failed': `${nodeLabel(event.node)}失败`,
@@ -35,6 +37,9 @@ export function eventTitle(event: TraceEvent): string {
 
 export function eventSummary(event: TraceEvent): string {
   const data = event.data
+  if (event.type === 'context.built') {
+    return `${number(data.history_messages)} 条历史 · ${number(data.history_characters)} 字符`
+  }
   if (event.type === 'model.request.started') return String(data.purpose ?? '调用模型')
   if (event.type === 'model.request.completed') {
     return `${number(data.total_tokens)} tokens · ${duration(event.duration_ms)}`
@@ -68,6 +73,7 @@ export function nodeLabel(node: string): string {
     responder: 'Response',
     orchestrator: 'Loop',
     api: 'API',
+    context: 'Context',
   }
   return labels[node] ?? (node || 'Agent')
 }
