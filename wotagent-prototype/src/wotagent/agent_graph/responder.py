@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, message_chunk_to_message
-from ..telemetry import InMemoryTraceStore
+from ..telemetry import InMemoryTraceStore, extract_usage_with_cost
 
 
 @dataclass
@@ -63,7 +63,7 @@ class LangChainResponseComposer:
         if not response:
             raise ValueError("response agent returned empty content")
         if self.trace_store is not None and task_id:
-            usage = _usage(message)
+            usage = extract_usage_with_cost(message)
             await self.trace_store.record(
                 task_id=task_id,
                 type="model.request.completed",
@@ -104,21 +104,6 @@ def _last_message(result: Any) -> Any:
     if hasattr(result, "content"):
         return result
     raise ValueError("response agent returned no message")
-
-
-def _usage(message: Any) -> dict[str, int]:
-    usage = getattr(message, "usage_metadata", None) or {}
-    response = getattr(message, "response_metadata", None) or {}
-    raw = response.get("token_usage") or response.get("usage") or {}
-    input_tokens = int(usage.get("input_tokens", raw.get("prompt_tokens", 0)) or 0)
-    output_tokens = int(usage.get("output_tokens", raw.get("completion_tokens", 0)) or 0)
-    details = usage.get("output_token_details") or {}
-    return {
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "reasoning_tokens": int(details.get("reasoning", raw.get("reasoning_tokens", 0)) or 0),
-        "total_tokens": int(usage.get("total_tokens", raw.get("total_tokens", input_tokens + output_tokens)) or 0),
-    }
 
 
 def _model_name(message: Any) -> str:

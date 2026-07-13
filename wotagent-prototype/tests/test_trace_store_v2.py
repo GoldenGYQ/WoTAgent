@@ -31,7 +31,11 @@ def test_usage_and_loop_metrics_are_aggregated_from_events() -> None:
             "output_tokens": 20,
             "reasoning_tokens": 30,
             "total_tokens": 150,
+            "cache_hit_tokens": 80,
+            "cache_miss_tokens": 20,
             "estimated_cost": 0.02,
+            "currency": "CNY",
+            "pricing_available": True,
             "ttft_ms": 120.0,
         }, duration_ms=400.0)
         await store.record(task_id="task-2", type="agent.tool.completed")
@@ -46,7 +50,10 @@ def test_usage_and_loop_metrics_are_aggregated_from_events() -> None:
     assert record.usage.model_calls == 1
     assert record.usage.tool_calls == 1
     assert record.usage.total_tokens == 150
+    assert record.usage.cache_hit_tokens == 80
+    assert record.usage.cache_miss_tokens == 20
     assert record.usage.estimated_cost == 0.02
+    assert record.usage.pricing_available is True
     assert record.usage.model_latency_ms == 400.0
     assert record.usage.ttft_ms_total == 120.0
     assert record.usage.ttft_measurements == 1

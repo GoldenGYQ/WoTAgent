@@ -9,6 +9,13 @@ const props = defineProps<{ task: RuntimeTask }>()
 const ttft = computed(() => props.task.usage.ttft_measurements
   ? props.task.usage.ttft_ms_total / props.task.usage.ttft_measurements
   : 0)
+
+const estimatedCost = computed(() => {
+  if (!props.task.usage.pricing_available) return '未配置'
+  const value = props.task.usage.estimated_cost
+  if (value > 0 && value < 0.0001) return '<¥0.0001'
+  return `¥${value.toFixed(4)}`
+})
 </script>
 
 <template>
@@ -36,7 +43,7 @@ const ttft = computed(() => props.task.usage.ttft_measurements
     <div class="metric-item" title="预估调用费用">
       <Coins :size="15" />
       <span>费用</span>
-      <strong>¥{{ task.usage.estimated_cost.toFixed(4) }}</strong>
+      <strong>{{ estimatedCost }}</strong>
     </div>
   </div>
 </template>

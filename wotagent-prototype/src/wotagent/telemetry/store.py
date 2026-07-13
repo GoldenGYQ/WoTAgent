@@ -34,8 +34,11 @@ class UsageSummary(BaseModel):
     output_tokens: int = 0
     reasoning_tokens: int = 0
     total_tokens: int = 0
+    cache_hit_tokens: int = 0
+    cache_miss_tokens: int = 0
     estimated_cost: float = 0.0
     currency: str = "CNY"
+    pricing_available: bool = False
     model_latency_ms: float = 0.0
     ttft_ms_total: float = 0.0
     ttft_measurements: int = 0
@@ -112,9 +115,20 @@ class InMemoryTraceStore:
             record.updated_at = utc_now()
             if type == "model.request.completed":
                 record.usage.model_calls += 1
-                for key in ("input_tokens", "output_tokens", "reasoning_tokens", "total_tokens"):
+                for key in (
+                    "input_tokens",
+                    "output_tokens",
+                    "reasoning_tokens",
+                    "total_tokens",
+                    "cache_hit_tokens",
+                    "cache_miss_tokens",
+                ):
                     setattr(record.usage, key, getattr(record.usage, key) + int(event.data.get(key, 0)))
                 record.usage.estimated_cost += float(event.data.get("estimated_cost", 0.0))
+                record.usage.currency = str(event.data.get("currency", record.usage.currency))
+                record.usage.pricing_available = (
+                    record.usage.pricing_available or bool(event.data.get("pricing_available", False))
+                )
                 record.usage.model_latency_ms += float(duration_ms or 0.0)
                 if event.data.get("ttft_ms") is not None:
                     record.usage.ttft_ms_total += float(event.data["ttft_ms"])

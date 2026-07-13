@@ -7,8 +7,11 @@ export interface UsageSummary {
   output_tokens: number
   reasoning_tokens: number
   total_tokens: number
+  cache_hit_tokens: number
+  cache_miss_tokens: number
   estimated_cost: number
   currency: string
+  pricing_available: boolean
   model_latency_ms: number
   ttft_ms_total: number
   ttft_measurements: number
@@ -141,8 +144,11 @@ export const EMPTY_USAGE: UsageSummary = {
   output_tokens: 0,
   reasoning_tokens: 0,
   total_tokens: 0,
+  cache_hit_tokens: 0,
+  cache_miss_tokens: 0,
   estimated_cost: 0,
   currency: 'CNY',
+  pricing_available: false,
   model_latency_ms: 0,
   ttft_ms_total: 0,
   ttft_measurements: 0,

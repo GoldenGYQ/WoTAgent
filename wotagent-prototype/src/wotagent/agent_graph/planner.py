@@ -9,7 +9,7 @@ from typing import Any, Awaitable, Callable
 
 from ..domain import TaskPlan
 from ..wot import load_tds
-from ..telemetry import InMemoryTraceStore
+from ..telemetry import InMemoryTraceStore, extract_usage_with_cost
 
 
 _LOCATION_TERMS: dict[str, tuple[str, ...]] = {
@@ -143,7 +143,7 @@ class LangChainTaskPlanner:
         arguments = _extract_tool_arguments(result)
         plan = TaskPlan.model_validate(arguments)
         if self.trace_store is not None and task_id:
-            usage = _extract_usage(result)
+            usage = extract_usage_with_cost(result)
             await self.trace_store.record(
                 task_id=task_id,
                 type="model.request.completed",
@@ -190,25 +190,6 @@ def _extract_tool_arguments(result: Any) -> dict[str, Any]:
         raise ValueError(f"unexpected planner tool: {function.get('name')}")
     arguments = function.get("arguments", {})
     return json.loads(arguments) if isinstance(arguments, str) else arguments
-
-
-def _extract_usage(result: Any) -> dict[str, int]:
-    usage = getattr(result, "usage_metadata", None) or {}
-    response = getattr(result, "response_metadata", None) or {}
-    raw = response.get("token_usage") or response.get("usage") or {}
-    input_tokens = int(usage.get("input_tokens", raw.get("prompt_tokens", 0)) or 0)
-    output_tokens = int(usage.get("output_tokens", raw.get("completion_tokens", 0)) or 0)
-    total_tokens = int(usage.get("total_tokens", raw.get("total_tokens", input_tokens + output_tokens)) or 0)
-    output_details = usage.get("output_token_details") or {}
-    reasoning_tokens = int(
-        output_details.get("reasoning", raw.get("reasoning_tokens", 0)) or 0
-    )
-    return {
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "reasoning_tokens": reasoning_tokens,
-        "total_tokens": total_tokens,
-    }
 
 
 def _extract_model_name(result: Any) -> str:
