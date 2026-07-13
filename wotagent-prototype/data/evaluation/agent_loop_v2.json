@@ -1,0 +1,101 @@
+[
+  {
+    "case_id": "verification_miss_then_recover",
+    "category": "execution_recovery",
+    "description": "设备第一次接受开灯命令但状态未变化，Agent 必须观察失败、重规划并再次执行。",
+    "support": "implemented",
+    "turns": [{"message": "打开客厅灯", "role": "operator"}],
+    "fault": {"type": "verification_miss", "fail_iterations": [1]},
+    "expected": {
+      "min_iterations": 2,
+      "max_iterations": 2,
+      "final_status": "succeeded",
+      "required_events": ["agent.loop.completed", "agent.recovery.completed", "verification.completed"],
+      "expected_actions": [{"device_id": "light-001", "action": "turnOn", "input": {}}]
+    }
+  },
+  {
+    "case_id": "tool_failure_then_recover",
+    "category": "execution_recovery",
+    "description": "设备网关第一次调用失败，Agent 必须重新规划并只重试目标动作。",
+    "support": "implemented",
+    "turns": [{"message": "打开客厅灯", "role": "operator"}],
+    "fault": {"type": "tool_failure", "fail_iterations": [1]},
+    "expected": {
+      "min_iterations": 2,
+      "max_iterations": 2,
+      "final_status": "succeeded",
+      "required_events": ["agent.loop.completed", "agent.recovery.completed", "agent.tool.completed"],
+      "expected_actions": [{"device_id": "light-001", "action": "turnOn", "input": {}}]
+    }
+  },
+  {
+    "case_id": "persistent_failure_stops_at_bound",
+    "category": "loop_safety",
+    "description": "设备持续失败时 Agent 只能执行两轮，随后必须有界停止。",
+    "support": "implemented",
+    "turns": [{"message": "打开客厅灯", "role": "operator"}],
+    "fault": {"type": "persistent_failure", "fail_iterations": [1, 2]},
+    "expected": {
+      "min_iterations": 2,
+      "max_iterations": 2,
+      "final_status": "failed",
+      "required_events": ["agent.loop.completed", "agent.recovery.completed", "agent.tool.completed"],
+      "expected_actions": [{"device_id": "light-001", "action": "turnOn", "input": {}}]
+    }
+  },
+  {
+    "case_id": "partial_batch_replans_failed_subset",
+    "category": "partial_success_recovery",
+    "description": "批量关灯只有一个设备失败时，下一轮只能补偿失败设备，不能重放成功步骤。",
+    "support": "target",
+    "turns": [{"message": "关闭所有灯", "role": "operator"}],
+    "fault": {"type": "partial_failure", "fail_iterations": [1], "target_step_ids": ["light-003"]},
+    "expected": {
+      "min_iterations": 2,
+      "max_iterations": 2,
+      "final_status": "succeeded",
+      "required_events": ["agent.loop.completed", "agent.recovery.completed", "plan.diff.generated"],
+      "expected_actions": [{"device_id": "light-003", "action": "turnOff", "input": {}}]
+    }
+  },
+  {
+    "case_id": "successful_task_correction_executes_diff",
+    "category": "correction_loop",
+    "description": "用户纠正上一成功任务时，Agent 应生成最小差异计划并直接修正低风险灯光。",
+    "support": "target",
+    "turns": [
+      {"message": "卧室灯调到最亮，其它灯35%", "role": "operator"},
+      {"message": "另一个卧室也算卧室，不应该是35%", "role": "operator"}
+    ],
+    "fault": {"type": "user_correction", "target_step_ids": ["light-003"]},
+    "expected": {
+      "min_iterations": 2,
+      "max_iterations": 2,
+      "final_status": "succeeded",
+      "required_events": ["task.correction.detected", "plan.diff.generated", "agent.loop.completed"],
+      "expected_actions": [{"device_id": "light-003", "action": "setBrightness", "input": {"brightness": 100}}]
+    }
+  },
+  {
+    "case_id": "clarification_resumes_same_task",
+    "category": "clarification_loop",
+    "description": "目标有歧义时先询问，用户补充后应恢复同一任务并进入第二轮执行。",
+    "support": "target",
+    "turns": [
+      {"message": "把卧室灯打开", "role": "operator"},
+      {"message": "两个卧室都打开", "role": "operator"}
+    ],
+    "fault": {"type": "clarification", "details": {"ambiguous_scope": "bedroom"}},
+    "expected": {
+      "min_iterations": 2,
+      "max_iterations": 2,
+      "final_status": "succeeded",
+      "required_events": ["task.clarification.requested", "task.clarification.resumed", "agent.loop.completed"],
+      "expected_actions": [
+        {"device_id": "light-002", "action": "turnOn", "input": {}},
+        {"device_id": "light-003", "action": "turnOn", "input": {}}
+      ]
+    }
+  }
+]
