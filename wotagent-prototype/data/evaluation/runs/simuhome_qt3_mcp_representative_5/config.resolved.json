@@ -1,0 +1,18 @@
+{
+  "run_id": "simuhome_qt3_20260715T013632Z",
+  "benchmark_root": "D:\\Users\\gyq16\\Desktop\\PRJ\\WoTAgent\\.cache\\benchmarks\\SimuHome\\data\\benchmark",
+  "base_url": "http://127.0.0.1:18081/api",
+  "episodes": [
+    "qt3_feasible_seed_2.json",
+    "qt3_feasible_seed_4.json",
+    "qt3_feasible_seed_7.json",
+    "qt3_feasible_seed_10.json",
+    "qt3_feasible_seed_13.json"
+  ],
+  "thinking": false,
+  "role": "admin",
+  "model": "deepseek-v4-flash",
+  "agent_gateway": "mcp",
+  "capability_source": "dynamic-td",
+  "runtime_binding": "simuhome-rest-matter"
+}

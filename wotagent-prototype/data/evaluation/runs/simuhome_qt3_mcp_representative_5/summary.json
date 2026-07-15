@@ -1,0 +1,46 @@
+{
+  "config": {
+    "run_id": "simuhome_qt3_20260715T013632Z",
+    "benchmark_root": "D:\\Users\\gyq16\\Desktop\\PRJ\\WoTAgent\\.cache\\benchmarks\\SimuHome\\data\\benchmark",
+    "base_url": "http://127.0.0.1:18081/api",
+    "episodes": [
+      "qt3_feasible_seed_2.json",
+      "qt3_feasible_seed_4.json",
+      "qt3_feasible_seed_7.json",
+      "qt3_feasible_seed_10.json",
+      "qt3_feasible_seed_13.json"
+    ],
+    "thinking": false,
+    "role": "admin",
+    "model": "deepseek-v4-flash",
+    "agent_gateway": "mcp",
+    "capability_source": "dynamic-td",
+    "runtime_binding": "simuhome-rest-matter"
+  },
+  "metrics": {
+    "episodes": 5,
+    "episode_success_rate": 1.0,
+    "goal_success_rate": 1.0,
+    "required_action_success_rate": 1.0,
+    "assertion_accuracy": 1.0,
+    "agent_success_rate": 1.0,
+    "mean_duration_ms": 3856.086779991165,
+    "mean_tokens_per_episode": 3702.2,
+    "mean_cost_per_episode": 0.0036335679999999993,
+    "mean_ttft_ms": 1243.6711400048807,
+    "total_usage": {
+      "model_calls": 10.0,
+      "tool_calls": 11.0,
+      "input_tokens": 17098.0,
+      "output_tokens": 1413.0,
+      "reasoning_tokens": 0.0,
+      "total_tokens": 18511.0,
+      "cache_hit_tokens": 1792.0,
+      "cache_miss_tokens": 15306.0,
+      "estimated_cost": 0.018167839999999998,
+      "model_latency_ms": 17085.767899930943,
+      "ttft_ms_total": 6218.355700024404,
+      "ttft_measurements": 5.0
+    }
+  }
+}

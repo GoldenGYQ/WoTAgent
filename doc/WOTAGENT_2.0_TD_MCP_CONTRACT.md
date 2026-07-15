@@ -73,7 +73,7 @@ TaskPlan(light-001, setBrightness, 53)
 
 测试基线：
 
-- WoTAgent 后端：123 passed，1 个需真实模型的测试默认跳过。
+- WoTAgent 后端：156 passed，1 个需真实模型的测试默认跳过。
 - Device Simulator：59 passed。
 - 新增单点测试覆盖 TD 编译、schema 一致性、FastMCP 注册执行、Client 元数据发现、Planner 单一事实源和 SimuHome 语义映射。
 
@@ -84,15 +84,18 @@ TaskPlan(light-001, setBrightness, 53)
 - 六类 query type 各 100 个；feasible/infeasible 各 300 个。
 - 1177 条 Matter 目标断言中 1167 条可翻译为 WoTAgent 规范动作，静态覆盖率 99.15%；结果写入 `data/evaluation/simuhome_alignment_600.json`。
 - 仅剩 10 条电视频道 major/minor 组合断言未映射，需建模为原子 `setChannel` 动作。
-- 报告中的 `td_action_ready_episodes` 仅表示动作语义可翻译，不表示 SimuHome runtime 已连接。
-- `simuhome_runtime_connected=false` 是当前真实状态。
+- 静态报告中的 `td_action_ready_episodes` 只表示动作语义可翻译；该历史文件的 `simuhome_runtime_connected=false` 不再代表当前实现状态。
 
-正式跑分前仍需完成：
+已完成 qt3 Runtime 子链路：
 
-1. Matter home config 到动态 TD 的转换。
-2. TD form 到 SimuHome HTTP command/attribute API 的 binding adapter。
-3. 房间环境状态查询和环境因果控制。
-4. 虚拟时间、锚点事件与工作流调度节点。
-5. episode reset、轨迹导出和 goal-state evaluator。
+1. 每个 episode 的 Matter home config 转换为动态 TD。
+2. TD action schema 编译为具名 FastMCP 工具。
+3. Agent 通过 `MCPDeviceGateway` 发现和调用工具。
+4. MCP 工具通过 SimuHome REST/Matter binding 执行 command/attribute write。
+5. episode reset、required action、最终状态断言、Token/TTFT 和完整 trace 持久化。
+
+代表性 qt3 feasible 5 集结果为 5/5 episode 成功、11/11 Matter 断言通过。证据位于 `data/evaluation/runs/simuhome_qt3_mcp_representative_5/`。
+
+尚未完成的是房间环境因果控制、虚拟时间、锚点事件和工作流调度，因此不能声称 qt1/qt2/qt4 或 600 集全量适配完成。
 
 频道 major/minor 等组合字段不会拆成伪动作；应在 TD 中定义一个原子 `setChannel` schema 后再接入。

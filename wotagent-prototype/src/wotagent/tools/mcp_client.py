@@ -78,9 +78,11 @@ class MCPToolClient:
         self,
         server_url: str | None = None,
         server_file: str | None = None,
+        server: Any | None = None,
     ):
         self._server_url = server_url
         self._server_file = server_file
+        self._server = server
         self._client: Client | None = None
         self._connected = False
         self._lock = asyncio.Lock()
@@ -89,6 +91,8 @@ class MCPToolClient:
         self._td_tools: dict[str, dict[str, Any]] = {}
 
     def _make_client(self) -> Client:
+        if self._server is not None:
+            return Client(self._server)
         if self._server_url:
             return Client(self._server_url)
         if self._server_file:
@@ -214,6 +218,9 @@ class MCPToolClient:
                 "location": str(binding.get("location", "")),
                 "actions": [],
                 "properties": [],
+                "device_type": str(binding.get("device_type", "")),
+                "aliases": list(binding.get("aliases") or []),
+                "location_aliases": list(binding.get("location_aliases") or []),
             })
             if binding.get("operation") == "invoke":
                 device["actions"].append({

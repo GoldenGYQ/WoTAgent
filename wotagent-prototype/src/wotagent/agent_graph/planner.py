@@ -34,6 +34,14 @@ _DEVICE_TERMS: dict[str, tuple[str, ...]] = {
     "purifier": ("净化器", "purifier"),
     "tv": ("电视", "tv"),
     "gas_sensor": ("燃气", "gas"),
+    "window_covering_controller": ("百叶窗", "窗帘", "blind", "blinds", "shade", "curtain"),
+    "dimmable_light": ("调光灯", "dimmer", "dimmable light"),
+    "laundry_dryer": ("烘干机", "dryer"),
+    "laundry_washer": ("洗衣机", "washer"),
+    "dishwasher": ("洗碗机", "dishwasher"),
+    "refrigerator": ("冰箱", "refrigerator", "fridge"),
+    "freezer": ("冷冻柜", "freezer"),
+    "heat_pump": ("热泵", "heat pump"),
 }
 
 
@@ -66,7 +74,10 @@ def select_capability_context(
     all_devices = [
         {
             **device,
-            "location_aliases": list(_LOCATION_TERMS.get(str(device.get("location", "")), ())),
+            "location_aliases": sorted(
+                set(device.get("location_aliases", []))
+                | set(_LOCATION_TERMS.get(str(device.get("location", "")), ()))
+            ),
         }
         for device in all_devices
     ]
@@ -81,16 +92,39 @@ def select_capability_context(
         device_type for device_type, terms in _DEVICE_TERMS.items()
         if any(term in text for term in terms)
     }
+    for device in all_devices:
+        location = str(device.get("location", ""))
+        location_text = location.replace("_", " ").lower()
+        if location_text and location_text in text:
+            locations.add(location)
+        device_type = str(device.get("device_type", "")).lower()
+        type_text = device_type.replace("_", " ")
+        distinctive = type_text.rsplit(" ", 1)[-1]
+        if type_text and (type_text in text or distinctive in text):
+            device_types.add(device_type)
     if not locations and not device_types:
         return all_devices
 
     def matches(device: dict[str, Any]) -> bool:
         title = device["title"].lower()
         location_match = not locations or device["location"] in locations
-        type_match = not device_types or any(device_type in title for device_type in device_types)
+        actual_type = str(device.get("device_type", "")).lower()
+        type_match = not device_types or any(
+            device_type in title
+            or device_type == actual_type
+            or (device_type == "ac" and actual_type == "air_conditioner")
+            for device_type in device_types
+        )
         return location_match and type_match
 
     selected = [device for device in all_devices if matches(device)]
+    selected.sort(
+        key=lambda device: max(
+            (len(alias) for alias in device.get("aliases", []) if alias.lower() in text),
+            default=0,
+        ),
+        reverse=True,
+    )
     return selected[:max_devices] if selected else all_devices
 
 
@@ -151,6 +185,8 @@ class LangChainTaskPlanner:
             "You are the WoTAgent planner. Return only the generate_plan tool call. "
             "Use only device_id, action names, and exact input_schema parameter names listed below. "
             "Location aliases identify the same canonical room. "
+            "Resolve targets by exact title or alias wording first; modifiers such as dimmer are significant "
+            "and must not be added when absent from the request. "
             "Runtime facts are authoritative and must not be inferred from assistant prose. "
             "Never ask the user whether their role changed; Policy checks current_role after planning. "
             "For elliptical follow-ups, prefer the pending goal or last actionable task when present. "

@@ -97,16 +97,28 @@ Planner 使用强制 Function Calling 和完整结构化返回，本轮不把 co
 
 ## 6. SimuHome 对齐判断
 
-SimuHome snapshot 已下载并检查。其 qt1/qt2/qt3 任务依赖 Matter 房间状态、洗衣机、烘干机、窗帘、环境照度和时序调度等当前 WoTAgent 设备空间尚未提供的能力。直接替换设备名称会改变任务语义，因此本阶段不运行伪对齐分数，也不消耗模型 Token。
+SimuHome official Runtime 已在未修改 episode 上接入。当前链路不是 Agent 直连 REST，而是：
 
-当前只复用 SimuHome 的方法：
+```text
+initial_home_config -> dynamic TD -> generated FastMCP tools
+-> MCPDeviceGateway -> Planner/Policy/Executor/Verifier
+-> SimuHome REST/Matter binding -> official goal-state evaluator
+```
 
-- 最终 goal-state 评分。
-- required action/里程碑记录。
-- feasible/infeasible 分类。
-- 环境状态与动作结果分离。
+2026-07-15 代表性 qt3 feasible 子集结果：
 
-待项目增加对应 TD 和环境变量后，再运行正式 SimuHome-adapted 子集。
+| 指标 | 结果 |
+|---|---:|
+| Episodes | 5 |
+| Episode Success | 100% |
+| Required Action Success | 100% |
+| Matter Assertion Accuracy | 100% (11/11) |
+| Mean Tokens/Episode | 3702.2 |
+| Mean TTFT | 1243.7ms |
+| Mean End-to-End Latency | 3856.1ms |
+| Estimated Cost/Episode | 0.003634 CNY |
+
+该结果只证明 qt3 即时设备控制链路在所选 5 集上可运行，不代表 600 集全量成绩。qt1/qt2/qt4 的时间推进、环境因果和工作流调度仍未接入。
 
 ## 7. 产物
 
@@ -114,12 +126,13 @@ SimuHome snapshot 已下载并检查。其 qt1/qt2/qt3 任务依赖 Matter 房�
 - `data/evaluation/homebench_v2_20_all_context.json`
 - `data/evaluation/homebench_v2_20_context_v2.json`
 - `data/evaluation/end_to_end_v2_5.json`
+- `data/evaluation/runs/simuhome_qt3_mcp_representative_5/`
 
-这些文件包含逐条计划、评分、Token 和延迟，便于复查而不只保留汇总数字。
+SimuHome 目录包含 resolved config、144 份逐 episode 动态 TD、逐条计划与断言、CSV/JSON 汇总、分析报告和 77 条完整 Agent trace event，便于复查而不只保留汇总数字。
 
 ## 8. 下一步
 
 1. 增加 action 与 postcondition 一致性校验，阻断 `turnOn + on=false`。
 2. 加入 HomeBench 无效指令子集，评价拒绝和澄清能力。
 3. 对 Planner 评测执行 `pass^3` 小样本，评价重复运行稳定性。
-4. 扩充环境 TD 后再接 SimuHome qt2/qt3。
+4. 扩充环境 TD、虚拟时间和工作流节点后接 SimuHome qt1/qt2/qt4。

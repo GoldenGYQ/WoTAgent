@@ -1,0 +1,6 @@
+﻿episode,seed,score,goal_success,required_action_success,assertions_passed,assertions_total,agent_status,duration_ms,error
+qt3_feasible_seed_2.json,2,1,True,True,2,2,succeeded,4808.388400007971,
+qt3_feasible_seed_4.json,4,1,True,True,2,2,succeeded,3541.326999955345,
+qt3_feasible_seed_7.json,7,1,True,True,1,1,succeeded,2375.922899984289,
+qt3_feasible_seed_10.json,10,1,True,True,3,3,succeeded,4121.427699981723,
+qt3_feasible_seed_13.json,13,1,True,True,3,3,succeeded,4433.3679000264965,

@@ -22,13 +22,17 @@ def _payload(result: dict[str, Any]) -> dict[str, Any]:
 class MCPDeviceGateway:
     name = "mcp"
 
-    def __init__(self) -> None:
+    def __init__(self, client: Any | None = None) -> None:
         self._initialized = False
+        self._client = client
+
+    async def _get_client(self):
+        return self._client or await get_mcp_client()
 
     async def initialize(self) -> None:
         if self._initialized:
             return
-        client = await get_mcp_client()
+        client = await self._get_client()
         count = await client.refresh_td_catalog()
         if count == 0:
             raise ConnectionError("MCP server published no TD-generated tools")
@@ -36,7 +40,7 @@ class MCPDeviceGateway:
 
     async def capabilities(self) -> list[dict[str, Any]]:
         await self.initialize()
-        client = await get_mcp_client()
+        client = await self._get_client()
         return await client.td_capabilities()
 
     async def list_devices(self, location: str | None = None) -> list[dict[str, Any]]:
@@ -44,7 +48,7 @@ class MCPDeviceGateway:
 
     async def query_state(self, device_id: str) -> dict[str, Any]:
         await self.initialize()
-        client = await get_mcp_client()
+        client = await self._get_client()
         tool_name, response = await client.call_td_tool(
             device_id=device_id,
             operation="read",
@@ -65,7 +69,7 @@ class MCPDeviceGateway:
         idempotency_key: str,
     ) -> dict[str, Any]:
         await self.initialize()
-        client = await get_mcp_client()
+        client = await self._get_client()
         tool_name, response = await client.call_td_tool(
             device_id=device_id,
             operation="invoke",
