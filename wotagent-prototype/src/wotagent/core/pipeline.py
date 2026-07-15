@@ -136,10 +136,10 @@ def create_wot_pipeline(
             reasoning_effort=reasoning_effort,
             enable_thinking=True,
         )
-        thinking_planner = thinking_plan_llm.bind(
-            tools=[PLAN_SCHEMA],
-            tool_choice={"type": "function", "function": {"name": "generate_plan"}},
-        )
+        # Thinking models on OpenAI-compatible providers such as DeepSeek do
+        # not support forced tool_choice. Use this model for analysis only;
+        # the direct planner below remains responsible for the forced schema.
+        thinking_planner = thinking_plan_llm
         thinking_response_llm = _build_llm(
             model_name=model_name,
             temperature=temperature,

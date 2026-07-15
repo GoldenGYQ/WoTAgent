@@ -31,6 +31,20 @@ class FakeRunnable:
         )
 
 
+class FakeThinkingRunnable:
+    def __init__(self, analysis: str = "Resolve the request as a chat response.") -> None:
+        self.analysis = analysis
+        self.messages = None
+
+    async def ainvoke(self, messages):
+        self.messages = messages
+        return SimpleNamespace(
+            content=self.analysis,
+            usage_metadata={"input_tokens": 60, "output_tokens": 15, "total_tokens": 75},
+            response_metadata={"model_name": "fake-thinking-planner"},
+        )
+
+
 def test_parses_valid_function_call_into_typed_plan() -> None:
     runnable = FakeRunnable({
         "intent": "control",
@@ -57,7 +71,7 @@ def test_thinking_request_uses_dedicated_planner_and_marks_trace() -> None:
         store = InMemoryTraceStore()
         await store.create(task_id="task-thinking", session_id="sess", request_id="req")
         direct = FakeRunnable({"intent": "chat", "summary": "direct", "steps": []})
-        deep = FakeRunnable({"intent": "chat", "summary": "deep", "steps": []})
+        deep = FakeThinkingRunnable("Classify this request as chat.")
         plan = await LangChainTaskPlanner(
             direct,
             trace_store=store,
@@ -67,11 +81,16 @@ def test_thinking_request_uses_dedicated_planner_and_marks_trace() -> None:
 
     plan, direct, deep, events = asyncio.run(run())
 
-    assert plan.summary == "deep"
-    assert direct.messages is None
+    assert plan.summary == "direct"
+    assert "Private planning analysis" in direct.messages[-1][1]
+    assert "Classify this request as chat." in direct.messages[-1][1]
     assert deep.messages is not None
-    completed = next(event for event in events if event.type == "model.request.completed")
-    assert completed.data["thinking"] is True
+    assert "Available devices" in deep.messages[0][1]
+    completed = [event for event in events if event.type == "model.request.completed"]
+    assert [event.data["purpose"] for event in completed] == ["task_analysis", "task_planning"]
+    assert completed[0].data["model_thinking"] is True
+    assert completed[1].data["model_thinking"] is False
+    assert all("reasoning_content" not in event.data for event in events)
 
 
 def test_thinking_request_fails_when_server_capability_is_disabled() -> None:

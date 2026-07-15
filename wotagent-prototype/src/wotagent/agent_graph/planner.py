@@ -107,7 +107,6 @@ class LangChainTaskPlanner:
         thinking = bool(state.get("thinking", False))
         if thinking and self.thinking_runnable is None:
             raise ValueError("thinking mode is not available on this server")
-        runnable = self.thinking_runnable if thinking else self.runnable
         message = state.get("message", "")
         provided = state.get("context", {}).get("devices")
         if provided:
@@ -160,6 +159,25 @@ class LangChainTaskPlanner:
             f"Available devices: {json.dumps(devices, ensure_ascii=False)}"
         )
         task_id = state.get("task_id", "")
+        messages: list[Any] = [("system", system)]
+        for item in state.get("conversation_history", []):
+            content = str(item.get("content", ""))
+            if item.get("role") == "assistant":
+                messages.append(("assistant", content))
+            elif item.get("role") == "user":
+                messages.append(("human", content))
+
+        analysis = ""
+        if thinking:
+            analysis = await self._analyze(state, messages, devices)
+        user_prompt = state.get("message", "")
+        if analysis:
+            user_prompt += (
+                "\n\nPrivate planning analysis (advisory only; verify it against runtime facts "
+                f"and TD capabilities):\n{analysis}"
+            )
+        messages.append(("human", user_prompt))
+
         if self.trace_store is not None and task_id:
             await self.trace_store.record(
                 task_id=task_id,
@@ -173,18 +191,12 @@ class LangChainTaskPlanner:
                     "message_length": len(state.get("message", "")),
                     "attempt": 1,
                     "thinking": thinking,
+                    "model_thinking": False,
+                    "analysis_available": bool(analysis),
                 },
             )
         started = time.perf_counter()
-        messages: list[Any] = [("system", system)]
-        for item in state.get("conversation_history", []):
-            content = str(item.get("content", ""))
-            if item.get("role") == "assistant":
-                messages.append(("assistant", content))
-            elif item.get("role") == "user":
-                messages.append(("human", content))
-        messages.append(("human", state.get("message", "")))
-        result = await runnable.ainvoke(messages)
+        result = await self.runnable.ainvoke(messages)
         await self._record_model_completion(state, result, started, attempt=1)
         arguments = _extract_tool_arguments(result)
         plan = TaskPlan.model_validate(arguments)
@@ -206,6 +218,7 @@ class LangChainTaskPlanner:
                         "prompt_version": "planner-v2.1",
                         "attempt": 2,
                         "thinking": thinking,
+                        "model_thinking": False,
                     },
                 )
             repair_prompt = (
@@ -223,7 +236,7 @@ class LangChainTaskPlanner:
                 ("human", f"{state.get('message', '')}\n\nPlanner correction: {repair_prompt}"),
             ]
             repair_started = time.perf_counter()
-            result = await runnable.ainvoke(repair_messages)
+            result = await self.runnable.ainvoke(repair_messages)
             await self._record_model_completion(state, result, repair_started, attempt=2)
             arguments = _extract_tool_arguments(result)
             plan = TaskPlan.model_validate(arguments)
@@ -245,6 +258,63 @@ class LangChainTaskPlanner:
                 },
             )
         return plan
+
+    async def _analyze(
+        self,
+        state: dict[str, Any],
+        planner_messages: list[Any],
+        devices: list[dict[str, Any]],
+    ) -> str:
+        task_id = state.get("task_id", "")
+        if self.trace_store is not None and task_id:
+            await self.trace_store.record(
+                task_id=task_id,
+                type="model.request.started",
+                node="planner",
+                data={
+                    "purpose": "task_analysis",
+                    "prompt_version": "planner-analysis-v1",
+                    "device_count": len(devices),
+                    "thinking": True,
+                    "model_thinking": True,
+                },
+            )
+        analysis_messages = [
+            (
+                "system",
+                "You are the private analysis stage of a WoT task planner. Analyze the user's "
+                "intent, references, target scope, dependencies, and ambiguities using only the "
+                "provided runtime facts and TD capabilities. Do not call tools and do not claim "
+                "that any action was executed. Return concise planning guidance for a separate "
+                "structured planner.\n"
+                f"Runtime facts: {json.dumps(state.get('context', {}).get('runtime', {}), ensure_ascii=False)}\n"
+                f"Available devices: {json.dumps(devices, ensure_ascii=False)}",
+            ),
+            *planner_messages[1:],
+            ("human", state.get("message", "")),
+        ]
+        started = time.perf_counter()
+        result = await self.thinking_runnable.ainvoke(analysis_messages)
+        analysis = _extract_content(result).strip()
+        if not analysis:
+            raise ValueError("thinking planner returned empty analysis")
+        if self.trace_store is not None and task_id:
+            await self.trace_store.record(
+                task_id=task_id,
+                type="model.request.completed",
+                node="planner",
+                duration_ms=(time.perf_counter() - started) * 1000,
+                data={
+                    "purpose": "task_analysis",
+                    "prompt_version": "planner-analysis-v1",
+                    "model": _extract_model_name(result),
+                    "thinking": True,
+                    "model_thinking": True,
+                    "analysis_characters": len(analysis),
+                    **extract_usage_with_cost(result),
+                },
+            )
+        return analysis
 
     async def _record_model_completion(
         self,
@@ -268,6 +338,7 @@ class LangChainTaskPlanner:
                 "attempt": attempt,
                 "model": _extract_model_name(result),
                 "thinking": bool(state.get("thinking", False)),
+                "model_thinking": False,
                 **extract_usage_with_cost(result),
             },
         )
@@ -295,6 +366,22 @@ def _extract_tool_arguments(result: Any) -> dict[str, Any]:
     arguments = function.get("arguments", {})
     return json.loads(arguments) if isinstance(arguments, str) else arguments
 
+
+def _extract_content(result: Any) -> str:
+    message = result
+    if isinstance(result, dict):
+        messages = result.get("messages", [])
+        if messages:
+            message = messages[-1]
+    content = getattr(message, "content", "")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            str(item.get("text", "")) if isinstance(item, dict) else str(item)
+            for item in content
+        )
+    return str(content or "")
 
 def _extract_model_name(result: Any) -> str:
     metadata = getattr(result, "response_metadata", None) or {}
