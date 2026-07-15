@@ -26,6 +26,7 @@ from wotagent.agent_graph import (
 )
 from wotagent.core import create_wot_pipeline
 from wotagent.evaluation import SimuHomeMCPHarness
+from wotagent.evaluation.simuhome import evaluate_qt3_runtime
 from wotagent.orchestration import TaskOrchestrator
 from wotagent.policy import PolicyEngine
 from wotagent.telemetry import InMemoryTraceStore
@@ -146,7 +147,9 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             duration_ms = (time.perf_counter() - started) * 1000
             await asyncio.sleep(0.2)
             final_state = await harness.binding.home_state()
-            evaluation = evaluate_qt3(episode, final_state, harness.binding.tool_invocations)
+            evaluation = evaluate_qt3_runtime(
+                episode, final_state, harness.binding.tool_invocations
+            )
             record = await store.get(task_id)
             events = await store.events(task_id)
             trace = result.get("trace")
@@ -193,50 +196,6 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     (output_dir / "analysis.md").write_text(render_analysis(summary, rows), encoding="utf-8")
     print(json.dumps({"output_dir": str(output_dir.resolve()), **summary["metrics"]}, ensure_ascii=False))
     return summary
-
-
-def evaluate_qt3(
-    episode: dict[str, Any],
-    final_state: dict[str, Any],
-    tools_invoked: list[dict[str, Any]],
-) -> dict[str, Any]:
-    required_results = []
-    for required in episode.get("eval", {}).get("required_actions", []):
-        found = any(
-            item.get("tool") == required.get("tool")
-            and _is_subset(required.get("params", {}), item.get("params", {}))
-            for item in tools_invoked
-        )
-        required_results.append({**required, "invoked": found})
-    target_results = []
-    passed = 0
-    total = 0
-    for goal in episode.get("eval", {}).get("goals", []):
-        differences = []
-        for assertion in goal.get("asserts", []):
-            total += 1
-            actual = _read_device_attribute(final_state, goal["device_id"], assertion["attribute"])
-            expected = assertion.get("value")
-            ok = actual == expected
-            passed += int(ok)
-            if not ok:
-                differences.append({
-                    "attribute": assertion["attribute"], "expected": expected, "actual": actual,
-                })
-        target_results.append({
-            "device_id": goal["device_id"], "ok": not differences, "diffs": differences,
-        })
-    required_ok = all(item["invoked"] for item in required_results)
-    goals_ok = all(item["ok"] for item in target_results)
-    return {
-        "score": int(required_ok and goals_ok),
-        "goal_success": goals_ok,
-        "required_action_success": required_ok,
-        "assertions_passed": passed,
-        "assertions_total": total,
-        "required_actions": required_results,
-        "targets_eval": target_results,
-    }
 
 
 def summarize(rows: list[dict[str, Any]], resolved: dict[str, Any]) -> dict[str, Any]:
@@ -315,36 +274,6 @@ def render_analysis(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
         )
     lines.extend(["", "## Scope", "", "Only qt3 feasible immediate-control episodes are included. Temporal and environment-aware qt1/qt2/qt4 remain future work."])
     return "\n".join(lines) + "\n"
-
-
-def _is_subset(expected: Any, actual: Any) -> bool:
-    if isinstance(expected, dict) and isinstance(actual, dict):
-        return all(key in actual and _is_subset(value, actual[key]) for key, value in expected.items())
-    if isinstance(expected, list) and isinstance(actual, list):
-        return all(item in actual for item in expected)
-    return expected == actual
-
-
-def _read_device_attribute(state: dict[str, Any], device_id: str, attribute: str) -> Any:
-    for room in (state.get("rooms") or {}).values():
-        for device in room.get("devices", []):
-            if str(device.get("device_id")) != device_id:
-                continue
-            attrs = device.get("attributes") or {}
-            if attribute in attrs:
-                return attrs[attribute]
-            parts = attribute.split(".")
-            for index in range(len(parts) - 1, 1, -1):
-                base = ".".join(parts[:index])
-                value = attrs.get(base)
-                for key in parts[index:]:
-                    if isinstance(value, dict):
-                        value = value.get(key)
-                    else:
-                        value = getattr(value, key, None)
-                if value is not None:
-                    return value
-    return None
 
 
 if __name__ == "__main__":

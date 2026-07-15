@@ -4,8 +4,8 @@ import json
 import asyncio
 
 import httpx
-from scripts.evaluate_simuhome_v2 import evaluate_qt3
 from wotagent.agent_graph.planner import select_capability_context
+from wotagent.evaluation.simuhome import evaluate_qt3_runtime
 from wotagent.gateway.simuhome import SimuHomeBinding
 
 
@@ -141,11 +141,11 @@ def test_qt3_evaluator_requires_discovery_and_exact_final_state() -> None:
     attrs["1.LevelControl.CurrentLevel"] = 35
     tools = [{"tool": "get_room_devices", "params": {"room_id": "living_room"}}]
 
-    passed = evaluate_qt3(episode, final_state, tools)
+    passed = evaluate_qt3_runtime(episode, final_state, tools)
     assert passed["score"] == 1
     assert passed["assertions_passed"] == 2
 
-    failed = evaluate_qt3(episode, final_state, [])
+    failed = evaluate_qt3_runtime(episode, final_state, [])
     assert failed["score"] == 0
     assert failed["goal_success"] is True
     assert failed["required_action_success"] is False

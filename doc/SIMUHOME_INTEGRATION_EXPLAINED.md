@@ -411,3 +411,169 @@ Planner 会根据用户提到的房间、设备类型和 alias 裁剪能力目�
 > 我们将 SimuHome benchmark 中的 Matter 设备配置动态转换为 WoT Thing Description，再自动编译为 FastMCP 工具，由 WoTAgent 的 MCP Client、Planner、确定性 Executor 和 Verifier 完成自然语言设备控制，并通过 SimuHome 原始 Matter 状态断言进行闭环评测；当前在 5 个代表性 qt3 feasible episode 上实现 5/5 成功，并保留了动态 TD、完整 trace、Token、TTFT 和最终状态证据。
 
 这句话强调的是已经真实实现的链路，同时没有夸大成全量 benchmark 或真实硬件已经完成。
+
+## 11. 自己如何运行和检查
+
+### 11.1 转换程序在哪里
+
+当前转换不是一段提示词，而是固定的 Python 程序，主要分为四层：
+
+| 层 | 代码 | 作用 |
+|---|---|---|
+| Matter 能力识别 | `wotagent/gateway/simuhome.py::_device_capability` | 根据属性 key 判断设备支持哪些属性和动作 |
+| 动态 TD 生成 | `wotagent/evaluation/simuhome_mcp.py::capabilities_to_tds` | 将设备能力记录转换为 `ThingDescription` |
+| MCP 工具编译 | `wotagent/wot/tool_compiler.py::compile_td_tools` | 根据 TD 生成 read/action 工具名和 JSON Schema |
+| 执行协议绑定 | `wotagent/gateway/simuhome.py::SimuHomeBinding._binding` | 把 WoT 动作翻译成 SimuHome REST/Matter command 或 attribute write |
+
+完整组装入口是：
+
+```text
+wotagent/evaluation/simuhome_mcp.py::SimuHomeMCPHarness.create
+```
+
+它依次完成：reset episode、发现设备、生成 TD、构建 FastMCP Server、创建 MCP Client 和 `MCPDeviceGateway`。
+
+### 11.2 准备 SimuHome 环境
+
+第一次运行时，在项目根目录执行：
+
+```powershell
+cd .cache\benchmarks\SimuHome
+uv sync
+```
+
+`uv sync` 会根据 SimuHome 的 `pyproject.toml` 安装它需要的 Python 3.13 和依赖。已经安装过则不需要重复执行。
+
+### 11.3 启动 SimuHome Runtime
+
+```powershell
+cd D:\Users\gyq16\Desktop\PRJ\WoTAgent\.cache\benchmarks\SimuHome
+uv run simuhome server-start --port 18081
+uv run simuhome health --port 18081
+```
+
+看到 `[health] OK`，说明 Runtime 可用。使用 `18081` 是为了避免与 WoTAgent API 的 `8000` 和原设备仿真器的 `18080` 冲突。
+
+### 11.4 只查看动态 TD，不调用大模型
+
+在另一个 PowerShell 中执行：
+
+```powershell
+cd D:\Users\gyq16\Desktop\PRJ\WoTAgent\wotagent-prototype
+
+.\.venv\Scripts\python.exe scripts\inspect_simuhome_td.py `
+  --episode ..\.cache\benchmarks\SimuHome\data\benchmark\qt3_feasible_seed_7.json `
+  --output data\evaluation\manual\simuhome_seed7_inspection.json
+```
+
+这条命令会：
+
+1. 重置 seed 7 的虚拟家庭；
+2. 生成动态 TD；
+3. 编译并发现 MCP 工具；
+4. 读取当前状态并按 episode 目标评分；
+5. 将完整结果写入指定 JSON 文件。
+
+它不会调用 LLM，因此报告中应看到：
+
+```json
+{
+  "llm_called": false,
+  "token_cost": 0
+}
+```
+
+因为此时还没有执行开灯动作，初始状态通常不满足目标，所以 `evaluation.score` 可能为 0。这是正常的。
+
+### 11.5 手动通过 MCP 执行动作并评分
+
+继续使用 seed 7：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\inspect_simuhome_td.py `
+  --episode ..\.cache\benchmarks\SimuHome\data\benchmark\qt3_feasible_seed_7.json `
+  --device-id living_room_on_off_light_1 `
+  --action turnOn `
+  --output data\evaluation\manual\simuhome_seed7_turn_on.json
+```
+
+本机实测输出的关键信息为：
+
+```text
+LLM called: false
+Token cost: 0
+Dynamic TD count: 26
+MCP tool count: 110
+Called MCP tool: living_room_on_off_light_1__action__turn_on
+Verification MCP tool: living_room_on_off_light_1__read_state
+Observed on: true
+Matter assertions: 1/1
+Episode score: 1
+```
+
+这条命令证明的是确定性链路，不评价 Planner 的自然语言理解能力。
+
+带参数动作使用 `--arguments`。例如检查风速动作：
+
+```powershell
+--device-id bathroom_humidifier_1 `
+--action setSpeed `
+--arguments '{"speed":30}'
+```
+
+设备 ID 和动作名必须存在于该 episode 生成的 `capabilities_from_mcp` 中，否则 MCP Client 会拒绝调用。
+
+### 11.6 运行包含 LLM Planner 的完整评测
+
+确认 `wotagent-prototype/.env` 中配置了模型后执行：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\evaluate_simuhome_v2.py `
+  --benchmark-root ..\.cache\benchmarks\SimuHome\data\benchmark `
+  --base-url http://127.0.0.1:18081/api `
+  --seeds 7 `
+  --limit 1 `
+  --output-dir data\evaluation\runs\my_seed7_run
+```
+
+这次会调用 Planner 和 Response 模型，会产生 Token 消耗。它测试的是完整流程：
+
+```text
+自然语言 -> TaskPlan -> Policy -> MCP Action -> Verification -> Response -> Benchmark score
+```
+
+### 11.7 应该重点检查哪些字段
+
+打开检查脚本或完整评测生成的 JSON 后，重点看：
+
+| 字段 | 说明 |
+|---|---|
+| `tds` | Matter 设备最终被转换成了什么 TD |
+| `capabilities_from_mcp` | MCP Client 实际发现了哪些设备能力 |
+| `mcp_tools` | 自动生成的工具名、schema 和 metadata |
+| `manual_execution.result._mcp_tool` | 实际调用的具名 MCP action tool |
+| `manual_execution.observed_state._mcp_tool` | 验证时使用的 MCP read tool |
+| `binding_invocations` | MCP 工具最终执行了什么 REST/Matter 操作 |
+| `evaluation.required_actions` | 房间设备发现要求是否满足 |
+| `evaluation.targets_eval` | 每条预期值、实际值和差异 |
+| `evaluation.score` | required action 和全部状态断言是否同时通过 |
+
+### 11.8 关闭测试 Runtime
+
+优先使用 SimuHome 自带命令：
+
+```powershell
+cd D:\Users\gyq16\Desktop\PRJ\WoTAgent\.cache\benchmarks\SimuHome
+uv run simuhome server-stop --port 18081
+```
+
+如果该命令在 Windows 上报进程工具缺失，可先确认 `18081` 确实属于 SimuHome，再停止监听进程：
+
+```powershell
+$conn = Get-NetTCPConnection -LocalPort 18081 -State Listen
+$process = Get-CimInstance Win32_Process -Filter "ProcessId=$($conn.OwningProcess)"
+$process.CommandLine
+Stop-Process -Id $conn.OwningProcess
+```
+
+不要在未检查 `CommandLine` 的情况下停止一个不确定归属的进程。

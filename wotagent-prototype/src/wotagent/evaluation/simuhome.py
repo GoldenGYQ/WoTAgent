@@ -138,10 +138,91 @@ def analyze_simuhome_benchmark(root: Path) -> dict[str, Any]:
     }
 
 
+def evaluate_qt3_runtime(
+    episode: dict[str, Any],
+    final_state: dict[str, Any],
+    tools_invoked: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Apply SimuHome qt3 required-action and exact final-state semantics."""
+    required_results = []
+    for required in episode.get("eval", {}).get("required_actions", []):
+        found = any(
+            item.get("tool") == required.get("tool")
+            and _is_subset(required.get("params", {}), item.get("params", {}))
+            for item in tools_invoked
+        )
+        required_results.append({**required, "invoked": found})
+
+    target_results = []
+    passed = 0
+    total = 0
+    for goal in episode.get("eval", {}).get("goals", []):
+        differences = []
+        for assertion in goal.get("asserts", []):
+            total += 1
+            actual = _read_device_attribute(final_state, goal["device_id"], assertion["attribute"])
+            expected = assertion.get("value")
+            ok = actual == expected
+            passed += int(ok)
+            if not ok:
+                differences.append({
+                    "attribute": assertion["attribute"],
+                    "expected": expected,
+                    "actual": actual,
+                })
+        target_results.append({
+            "device_id": goal["device_id"],
+            "ok": not differences,
+            "diffs": differences,
+        })
+
+    required_ok = all(item["invoked"] for item in required_results)
+    goals_ok = all(item["ok"] for item in target_results)
+    return {
+        "score": int(required_ok and goals_ok),
+        "goal_success": goals_ok,
+        "required_action_success": required_ok,
+        "assertions_passed": passed,
+        "assertions_total": total,
+        "required_actions": required_results,
+        "targets_eval": target_results,
+    }
+
+
+def _is_subset(expected: Any, actual: Any) -> bool:
+    if isinstance(expected, dict) and isinstance(actual, dict):
+        return all(key in actual and _is_subset(value, actual[key]) for key, value in expected.items())
+    if isinstance(expected, list) and isinstance(actual, list):
+        return all(item in actual for item in expected)
+    return expected == actual
+
+
+def _read_device_attribute(state: dict[str, Any], device_id: str, attribute: str) -> Any:
+    for room in (state.get("rooms") or {}).values():
+        for device in room.get("devices", []):
+            if str(device.get("device_id")) != device_id:
+                continue
+            attrs = device.get("attributes") or {}
+            if attribute in attrs:
+                return attrs[attribute]
+            parts = attribute.split(".")
+            for index in range(len(parts) - 1, 1, -1):
+                value = attrs.get(".".join(parts[:index]))
+                for key in parts[index:]:
+                    if isinstance(value, dict):
+                        value = value.get(key)
+                    else:
+                        value = getattr(value, key, None)
+                if value is not None:
+                    return value
+    return None
+
+
 __all__ = [
     "CanonicalAction",
     "SimuHomeAlignment",
     "analyze_simuhome_benchmark",
     "analyze_simuhome_episode",
+    "evaluate_qt3_runtime",
     "translate_matter_assertion",
 ]
