@@ -1,4 +1,0 @@
-{"role": "user", "content": "灯好暗", "ts": 1780305193.6531246}
-{"role": "assistant", "content": "家里有好几个灯呢～你是觉得哪个房间的灯太暗了呀？客厅、卧室、厨房、浴室还是书房？", "ts": 1780305200.4697583}
-{"role": "user", "content": "全部", "ts": 1780305207.1203816}
-{"role": "assistant", "content": "I encountered an error: Client is not connected. Use the 'async with client:' context manager first.", "ts": 1780305214.2284856}

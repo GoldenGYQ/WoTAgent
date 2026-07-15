@@ -9,8 +9,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-# NOTE: Rule evaluation is done by wotagent-prototype PerceptionEngine.
-# The simulator only stores state and simulates drift.
+# Automation rules live outside this service; the simulator owns state and drift.
 from .td import find_devices, get_device_by_id, load_tds
 
 logger = logging.getLogger(__name__)

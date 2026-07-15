@@ -1,127 +1,69 @@
-# WoTAgent API Guide
+# WoTAgent 2.0 API Guide
 
-## Base URLs
+Base URL: `http://127.0.0.1:8000`.
 
-| Service | Base URL | Purpose |
-|---------|----------|---------|
-| Agent backend | `http://127.0.0.1:8000` | Chat pipeline, sessions, perception state, primary WebSocket stream |
-| Frontend dev server | `http://localhost:5173` | Vue UI (proxies `/api` and `/ws` to backend) |
-| Simulator platform | `http://127.0.0.1:18080` | Device simulation REST + simulator event stream |
+## Service
 
-## Startup Order
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/` | Service metadata |
+| GET | `/api/health` | Health and active pipeline |
+| GET | `/api/v2/capabilities` | Thinking and streaming capability |
 
-1. Simulator platform
-2. Agent backend
-3. Frontend
+## Conversations
 
-If you use one-click scripts:
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/v2/conversations` | Create a persistent conversation |
+| GET | `/api/v2/conversations` | List conversations |
+| GET | `/api/v2/conversations/{id}` | Read conversation metadata |
+| GET | `/api/v2/conversations/{id}/turns` | Read persisted turns |
+| DELETE | `/api/v2/conversations/{id}` | Delete a conversation |
 
-```bat
-scripts\start-simulator.bat
-scripts\start-agent.bat
-scripts\start-frontend.bat
+## Tasks
+
+Create a task:
+
+```http
+POST /api/v2/tasks
+Content-Type: application/json
+
+{
+  "conversation_id": "conv_123",
+  "message": "把客厅灯调到 45%",
+  "role": "operator",
+  "thinking": false
+}
 ```
 
-## Agent Backend API (`:8000`)
+The API returns `202 Accepted` with a `task_id`. Processing continues through FastAPI `BackgroundTasks`.
 
-### WebSocket (Primary realtime channel)
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/v2/tasks/{task_id}` | Task status, result, usage and loop metrics |
+| POST | `/api/v2/tasks/{task_id}/confirm` | Resume a checkpoint with `{ "approved": true }` |
+| GET | `/api/v2/traces/{task_id}` | Trace record alias |
+| GET | `/api/v2/tasks/{task_id}/events?after=N` | Ordered event replay |
+| GET | `/api/v2/tasks/{task_id}/events/stream?after=N` | SSE trace stream |
 
-- Endpoint: `ws://127.0.0.1:8000/ws`
-- Client commands:
+## WebSocket Trace
 
-| Type | Payload |
-|------|---------|
-| `chat` | `{"type":"chat","id":"cmd-1","data":{"message":"开客厅灯","session_id":"web_ui"}}` |
-| `ping` | `{"type":"ping","id":"cmd-2"}` |
+Connect to `ws://127.0.0.1:8000/ws/v2`, then send:
 
-- Server messages:
-
-| Type | Description |
-|------|-------------|
-| `response` | Acknowledge command receipt, includes `session_id` |
-| `event` | Forwarded EventBus events (`event_type`, `data`, `session_id`, `timestamp`) |
-| `pong` | Ping response |
-| `error` | Command-level error payload |
-
-### REST Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/health` | Service health |
-| GET | `/api/diag` | Pipeline/session/device diagnostics |
-| POST | `/api/chat` | Submit chat message (async processing) |
-| POST | `/api/session` | Create session |
-| GET | `/api/sessions` | List active sessions |
-| DELETE | `/api/session/{session_id}` | Delete one session |
-| GET | `/api/session/{session_id}/messages` | Load chat transcript entries |
-| GET | `/api/devices` | List devices with current state |
-| GET | `/api/perception/state` | Perception runtime state + device snapshot |
-| GET | `/api/perception/rules` | Rule status list |
-| POST | `/api/perception/poll` | Trigger one perception poll cycle |
-
-### Example (REST)
-
-```bash
-curl -X POST http://127.0.0.1:8000/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message":"把客厅灯调到30%","session_id":"web_ui","role":"operator"}'
+```json
+{"task_id":"task_123","after":0}
 ```
 
-## Simulator API (`:18080`)
+The server replays ordered events and ends with `stream.completed`. Events expose model request metadata, node transitions, tool input/output, policy decisions, verification, loop/recovery counts, Token usage, TTFT and estimated cost. Private chain-of-thought is deliberately not exposed.
 
-### REST Endpoints
+## Status Values
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/health` | Simulator health |
-| GET | `/api/td` | List all TD documents |
-| GET | `/api/td/{device_id}` | Get one TD by id |
-| GET | `/api/devices` | List simulator devices |
-| GET | `/api/state` | Full simulator state + summary |
-| GET | `/api/state/{device_id}` | State of one device |
-| POST | `/api/control` | Execute device action |
-| POST | `/api/poll` | Trigger one simulation poll |
-| GET | `/api/events` | Read recent simulator events |
-| POST | `/api/events/inject` | Inject manual event |
-| POST | `/api/state/patch` | Patch single property value |
-| POST | `/api/environment/set` | Batch set environment values |
-| GET | `/api/weather/fetch` | Fetch weather data (`mode=shell|http`) |
-| POST | `/api/weather/apply` | Apply weather to environment |
+- `accepted`, `running`
+- `waiting_confirmation`
+- `responded` for ordinary conversation
+- `succeeded`, `partial_success`
+- `denied`, `failed`, `cancelled`
 
-### Simulator WebSocket
+## Removed v1 Routes
 
-- Endpoint: `ws://127.0.0.1:18080/ws/events`
-- Behavior: publishes simulator-side event stream in JSON.
-
-### Example (Simulator control)
-
-```bash
-curl -X POST http://127.0.0.1:18080/api/control \
-  -H "Content-Type: application/json" \
-  -d '{"device_id":"light-001","action":"setBrightness","parameters":{"level":30}}'
-```
-
-## Event Types Commonly Used by Frontend
-
-| Event type | Meaning |
-|------------|---------|
-| `wot.agent.plan` | Intent classification result |
-| `wot.agent.thought` | Model reasoning chunk |
-| `wot.agent.token` | Response token chunk |
-| `wot.agent.action.started` | Tool call started |
-| `wot.agent.action.completed` | Tool call completed |
-| `wot.agent.action.failed` | Tool call failed |
-| `wot.agent.response` | Final response ready |
-| `wot.session.started` | Session run start |
-| `wot.session.ended` | Session run end |
-| `wot.perception.rule_triggered` | Rule-triggered automation started |
-
-## Troubleshooting
-
-- Frontend cannot connect WS:
-  - Verify backend is running on `127.0.0.1:8000`.
-  - Check Vite proxy in `frontend/wot-vue/vite.config.ts`.
-- `uv` command not found:
-  - Install uv and reopen terminal.
-- `OPENAI_API_KEY` missing:
-  - Set it in `wotagent-prototype/.env` before starting backend.
+`/api/chat`, `/api/session*`, `/api/perception/*`, `/api/devices`, and `/ws` belonged to the 1.0 runtime and are intentionally absent from 2.0.

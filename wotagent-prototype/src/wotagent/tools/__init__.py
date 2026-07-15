@@ -1,4 +1,5 @@
-from .iot import get_iot_tools
-from .registry import get_all_tools, get_system_tools
+"""MCP transport used by the WoTAgent 2.0 device gateway."""
 
-__all__ = ["get_all_tools", "get_iot_tools", "get_system_tools"]
+from .mcp_client import MCPToolClient, get_mcp_client
+
+__all__ = ["MCPToolClient", "get_mcp_client"]

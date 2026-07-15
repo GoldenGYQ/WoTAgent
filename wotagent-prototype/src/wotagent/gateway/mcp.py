@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
-import json
-
-from ..tools.iot import _mcp_list_devices
 from ..tools.mcp_client import get_mcp_client
 
 
@@ -44,7 +42,21 @@ class MCPDeviceGateway:
         return await client.td_capabilities()
 
     async def list_devices(self, location: str | None = None) -> list[dict[str, Any]]:
-        return await _mcp_list_devices(location)
+        capabilities = await self.capabilities()
+        devices = []
+        for capability in capabilities:
+            device_location = capability.get("location")
+            if location and device_location != location:
+                continue
+            devices.append({
+                "id": capability.get("device_id", capability.get("id", "")),
+                "title": capability.get("title", ""),
+                "location": device_location,
+                "capabilities": capability.get("capabilities", []),
+                "actions": capability.get("actions", []),
+                "properties": capability.get("properties", []),
+            })
+        return devices
 
     async def query_state(self, device_id: str) -> dict[str, Any]:
         await self.initialize()

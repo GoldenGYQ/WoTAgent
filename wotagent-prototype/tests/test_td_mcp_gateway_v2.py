@@ -7,9 +7,9 @@ from typing import Any
 
 import pytest
 
+from wotagent.evaluation.simuhome_mcp import build_mcp_server, capabilities_to_tds
 from wotagent.gateway import mcp as gateway_module
 from wotagent.gateway.mcp import MCPDeviceGateway
-from wotagent.evaluation.simuhome_mcp import build_mcp_server, capabilities_to_tds
 from wotagent.tools.mcp_client import MCPToolClient
 
 
@@ -80,6 +80,25 @@ def test_gateway_discovers_and_calls_td_generated_tools(monkeypatch) -> None:
     ]
     assert action["_mcp_tool"] == "light_001__action__set_brightness"
     assert state["_mcp_tool"] == "light_001__read_state"
+
+
+def test_gateway_lists_devices_from_td_catalog_without_legacy_iot_tools() -> None:
+    client = FakeMCPClient()
+    gateway = MCPDeviceGateway(client=client)
+
+    devices = asyncio.run(gateway.list_devices())
+
+    assert devices == [{
+        "id": "light-001",
+        "title": "light-001",
+        "location": "",
+        "capabilities": [],
+        "actions": [{
+            "name": "setBrightness",
+            "input_schema": {},
+        }],
+        "properties": [],
+    }]
 
 
 def test_client_rejects_missing_td_affordance() -> None:

@@ -8,8 +8,6 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import os
-import time
 from pathlib import Path
 
 
@@ -23,7 +21,7 @@ async def run_log_viewer(log_file: str = "wotagent.log", follow: bool = True) ->
     path = Path(log_file).resolve()
     if not path.exists():
         print(f"  Log file not found: {path}")
-        print(f"  Start wotagent repl or api first to generate logs.")
+        print("  Start wotagent api first to generate logs.")
         return
 
     if not follow:
