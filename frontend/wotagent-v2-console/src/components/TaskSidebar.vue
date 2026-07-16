@@ -3,6 +3,7 @@ import { MessageSquare, MessageSquarePlus, Trash2 } from 'lucide-vue-next'
 import type { RuntimeConversation } from '../types/agent'
 
 defineProps<{
+  collapsed?: boolean
   conversations: RuntimeConversation[]
   activeConversationId: string | null
 }>()
@@ -22,46 +23,48 @@ function relativeTime(value: string): string {
 </script>
 
 <template>
-  <aside class="task-sidebar">
+  <aside class="task-sidebar" :class="{ collapsed: collapsed ?? false }">
     <div class="sidebar-action">
       <button class="new-task-button" type="button" @click="emit('create')">
         <MessageSquarePlus :size="17" />
-        新会话
+        <span>新会话</span>
       </button>
     </div>
-    <div class="sidebar-section-label">
-      <MessageSquare :size="14" />
-      最近会话
-      <span>{{ conversations.length }}</span>
-    </div>
-    <nav class="task-list" aria-label="最近会话">
-      <div
-        v-for="conversation in conversations"
-        :key="conversation.conversation_id"
-        class="conversation-list-row"
-        :class="{ active: conversation.conversation_id === activeConversationId }"
-      >
-        <button
-          class="task-list-item"
-          type="button"
-          @click="emit('select', conversation.conversation_id)"
-        >
-          <span class="task-list-title">{{ conversation.title }}</span>
-          <span class="task-list-meta">
-            <span>{{ conversation.turn_count }} 轮</span>
-            <time>{{ relativeTime(conversation.updated_at) }}</time>
-          </span>
-        </button>
-        <button
-          class="conversation-delete"
-          type="button"
-          title="删除会话"
-          @click="emit('delete', conversation.conversation_id)"
-        >
-          <Trash2 :size="14" />
-        </button>
+    <template v-if="!collapsed">
+      <div class="sidebar-section-label">
+        <MessageSquare :size="14" />
+        最近会话
+        <span>{{ conversations.length }}</span>
       </div>
-      <div v-if="conversations.length === 0" class="task-list-empty">暂无会话</div>
-    </nav>
+      <nav class="task-list" aria-label="最近会话">
+        <div
+          v-for="conversation in conversations"
+          :key="conversation.conversation_id"
+          class="conversation-list-row"
+          :class="{ active: conversation.conversation_id === activeConversationId }"
+        >
+          <button
+            class="task-list-item"
+            type="button"
+            @click="emit('select', conversation.conversation_id)"
+          >
+            <span class="task-list-title">{{ conversation.title }}</span>
+            <span class="task-list-meta">
+              <span>{{ conversation.turn_count }} 轮</span>
+              <time>{{ relativeTime(conversation.updated_at) }}</time>
+            </span>
+          </button>
+          <button
+            class="conversation-delete"
+            type="button"
+            title="删除会话"
+            @click="emit('delete', conversation.conversation_id)"
+          >
+            <Trash2 :size="14" />
+          </button>
+        </div>
+        <div v-if="conversations.length === 0" class="task-list-empty">暂无会话</div>
+      </nav>
+    </template>
   </aside>
 </template>

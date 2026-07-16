@@ -57,6 +57,8 @@ const submitting = ref(false)
 const submitError = ref('')
 const mobileView = ref<'workspace' | 'trace'>('workspace')
 const drawerOpen = ref(false)
+const sidebarCollapsed = ref(false)
+const traceCollapsed = ref(false)
 const appView = ref<'agent' | 'eldercare'>('agent')
 const currentAccount = ref<LoginAccount | null>(savedAccount())
 const composer = ref<HTMLTextAreaElement | null>(null)
@@ -107,6 +109,14 @@ function newTask(): void {
   drawerOpen.value = false
   mobileView.value = 'workspace'
   void nextTick(() => composer.value?.focus())
+}
+
+function toggleSidebar(): void {
+  sidebarCollapsed.value = !sidebarCollapsed.value
+}
+
+function toggleTrace(): void {
+  traceCollapsed.value = !traceCollapsed.value
 }
 
 async function login(account: LoginAccount): Promise<void> {
@@ -162,8 +172,13 @@ onMounted(async () => {
       </div>
     </header>
 
-    <div v-if="appView === 'agent'" class="desktop-layout">
+    <div
+      v-if="appView === 'agent'"
+      class="desktop-layout"
+      :class="{ 'sidebar-collapsed': sidebarCollapsed, 'trace-collapsed': traceCollapsed }"
+    >
       <TaskSidebar
+        :collapsed="sidebarCollapsed"
         :conversations="conversations"
         :active-conversation-id="activeConversationId"
         @select="chooseConversation"
@@ -176,9 +191,15 @@ onMounted(async () => {
           :conversation="activeConversation"
           :tasks="conversationTasks"
           :active-task="activeTask"
+          :current-account-id="currentAccount.accountId"
+          :current-account-name="currentAccount.displayName"
+          :sidebar-collapsed="sidebarCollapsed"
+          :trace-collapsed="traceCollapsed"
           @confirm="confirm"
           @select-task="chooseTask"
           @example="useExample"
+          @toggle-sidebar="toggleSidebar"
+          @toggle-trace="toggleTrace"
         />
         <div class="composer-region">
           <div v-if="submitError" class="composer-error">{{ submitError }}</div>
@@ -221,7 +242,7 @@ onMounted(async () => {
         </div>
       </div>
 
-      <div class="inspector-column" :class="{ 'mobile-hidden': mobileView !== 'trace' }">
+      <div v-if="!traceCollapsed" class="inspector-column" :class="{ 'mobile-hidden': mobileView !== 'trace' }">
         <TraceInspector :task="activeTask" />
       </div>
     </div>

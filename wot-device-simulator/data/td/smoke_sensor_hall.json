@@ -1,0 +1,25 @@
+{
+  "@context": "https://www.w3.org/2022/wot/td/v1.1",
+  "id": "urn:dev:wot:smoke-sensor-001",
+  "title": "Hall Smoke Sensor",
+  "location": "hall",
+  "capabilities": ["security", "smoke_detection"],
+  "actions": {
+    "updateSmokeState": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "smokeLevel": {"type": "number", "minimum": 0, "maximum": 100},
+          "alarm": {"type": "boolean"},
+          "observedAt": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "properties": {
+    "smokeLevel": {"type": "number"},
+    "alarm": {"type": "boolean"},
+    "observedAt": {"type": "string"}
+  }
+}

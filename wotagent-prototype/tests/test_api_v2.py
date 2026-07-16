@@ -19,6 +19,19 @@ from wotagent.policy import PolicyEngine
 app_module = importlib.import_module("wotagent.api.app")
 
 
+def test_professional_agents_use_distinct_compiled_langgraphs() -> None:
+    graphs = app_module._domain_graphs
+
+    assert set(graphs) == {
+        "environment_agent",
+        "security_agent",
+        "energy_agent",
+        "housekeeping_agent",
+        "device_ops_agent",
+    }
+    assert len({id(graph) for graph in graphs.values()}) == 5
+
+
 @pytest.fixture(autouse=True)
 def isolated_conversation_store(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
@@ -94,6 +107,19 @@ def test_v2_capabilities_reports_thinking_without_exposing_private_reasoning(mon
     assert response.json()["thinking"]["supported"] is True
     assert response.json()["thinking"]["default"] is False
     assert response.json()["thinking"]["private_reasoning_exposed"] is False
+
+
+def test_prompt_profile_api_exposes_layer_versions_and_domain_boundaries() -> None:
+    response = TestClient(app_module.app).get("/api/v2/prompts")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["kernel_version"] == "prompt-kernel-v1"
+    assert body["context_pack_version"] == "context-pack-v1"
+    assert body["dynamic_context_in_system_prompt"] is False
+    profiles = {item["agent_id"]: item for item in body["profiles"]}
+    assert profiles["security_agent"]["tool_scopes"] == ["wot.security"]
+    assert profiles["energy_agent"]["tool_scopes"] == ["wot.energy"]
 
 
 def test_v2_task_rejects_thinking_when_server_capability_is_disabled(monkeypatch) -> None:

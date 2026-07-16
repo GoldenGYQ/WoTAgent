@@ -30,6 +30,9 @@ class Resident(BaseModel):
     room: str = Field(min_length=1)
     caregiver: str = "值班护理员"
     environment_device_id: str | None = None
+    wristband_device_id: str | None = None
+    mattress_device_id: str | None = None
+    environment_sensor_device_id: str | None = None
     active: bool = True
 
 

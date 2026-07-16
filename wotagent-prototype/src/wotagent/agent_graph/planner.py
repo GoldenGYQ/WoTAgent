@@ -11,8 +11,16 @@ from typing import Any, Awaitable, Callable
 from jsonschema import ValidationError, validate
 
 from ..domain import TaskPlan
-from ..wot import load_tds
+from ..prompting import (
+    DEVICE_PLANNING_CONTRACT,
+    AgentPromptProfile,
+    compact_history,
+    context_message,
+    profile_for,
+    prompt_system,
+)
 from ..telemetry import InMemoryTraceStore, extract_usage_with_cost
+from ..wot import load_tds
 
 
 _LOCATION_TERMS: dict[str, tuple[str, ...]] = {
@@ -34,6 +42,8 @@ _DEVICE_TERMS: dict[str, tuple[str, ...]] = {
     "purifier": ("净化器", "purifier"),
     "tv": ("电视", "tv"),
     "gas_sensor": ("燃气", "gas"),
+    "health": ("手环", "床垫", "健康", "心率", "血氧", "wristband", "mattress"),
+    "environment": ("环境传感器", "温湿度", "environment sensor"),
     "window_covering_controller": ("百叶窗", "窗帘", "blind", "blinds", "shade", "curtain"),
     "dimmable_light": ("调光灯", "dimmer", "dimmable light"),
     "laundry_dryer": ("烘干机", "dryer"),
@@ -42,6 +52,10 @@ _DEVICE_TERMS: dict[str, tuple[str, ...]] = {
     "refrigerator": ("冰箱", "refrigerator", "fridge"),
     "freezer": ("冷冻柜", "freezer"),
     "heat_pump": ("热泵", "heat pump"),
+    "security": ("门锁", "门禁", "摄像头", "烟雾", "安防", "security"),
+    "energy": ("电表", "能耗", "充电桩", "用电", "energy"),
+    "housekeeping": ("扫地机器人", "清洁", "家务", "vacuum"),
+    "device_ops": ("网关", "设备运维", "设备离线", "gateway"),
 }
 
 
@@ -136,6 +150,7 @@ class LangChainTaskPlanner:
     trace_store: InMemoryTraceStore | None = None
     capability_provider: Callable[[], Awaitable[list[dict[str, Any]]]] | None = None
     thinking_runnable: Any | None = None
+    agent_profile: AgentPromptProfile | None = None
 
     async def __call__(self, state: dict[str, Any]) -> TaskPlan:
         thinking = bool(state.get("thinking", False))
@@ -181,22 +196,20 @@ class LangChainTaskPlanner:
                 )
             return resumed
 
-        system = (
-            "You are the WoTAgent planner. Return only the generate_plan tool call. "
-            "Use only device_id, action names, and exact input_schema parameter names listed below. "
-            "Location aliases identify the same canonical room. "
-            "Resolve targets by exact title or alias wording first; modifiers such as dimmer are significant "
-            "and must not be added when absent from the request. "
-            "Runtime facts are authoritative and must not be inferred from assistant prose. "
-            "Never ask the user whether their role changed; Policy checks current_role after planning. "
-            "For elliptical follow-ups, prefer the pending goal or last actionable task when present. "
-            "Use intent=clarify only when no safe target can be resolved. Do not decide permissions.\n"
-            f"Runtime facts: {json.dumps(runtime_context, ensure_ascii=False)}\n"
-            f"Available devices: {json.dumps(devices, ensure_ascii=False)}"
+        profile = self.agent_profile or profile_for(
+            state.get("context", {}).get("delegated_agent")
         )
+        system = prompt_system(profile, DEVICE_PLANNING_CONTRACT)
+        runtime_message = context_message("runtime_context", runtime_context)
+        capability_message = context_message("capability_context", {"devices": devices})
+        history = compact_history(state.get("conversation_history", []))
         task_id = state.get("task_id", "")
-        messages: list[Any] = [("system", system)]
-        for item in state.get("conversation_history", []):
+        messages: list[Any] = [
+            ("system", system),
+            ("human", runtime_message),
+            ("human", capability_message),
+        ]
+        for item in history:
             content = str(item.get("content", ""))
             if item.get("role") == "assistant":
                 messages.append(("assistant", content))
@@ -221,7 +234,7 @@ class LangChainTaskPlanner:
                 node="planner",
                 data={
                     "purpose": "task_planning",
-                    "prompt_version": "planner-v2.1",
+                    "prompt_version": "planner-v3",
                     "device_count": len(devices),
                     "all_device_count": len(all_devices),
                     "message_length": len(state.get("message", "")),
@@ -229,6 +242,13 @@ class LangChainTaskPlanner:
                     "thinking": thinking,
                     "model_thinking": False,
                     "analysis_available": bool(analysis),
+                    "agent_id": profile.agent_id,
+                    "context_pack_version": "context-pack-v1",
+                    "system_characters": len(system),
+                    "runtime_context_characters": len(runtime_message),
+                    "capability_context_characters": len(capability_message),
+                    "history_messages": len(history),
+                    "history_characters": sum(len(item["content"]) for item in history),
                 },
             )
         started = time.perf_counter()
@@ -251,7 +271,7 @@ class LangChainTaskPlanner:
                     node="planner",
                     data={
                         "purpose": "task_planning_repair",
-                        "prompt_version": "planner-v2.1",
+                        "prompt_version": "planner-v3",
                         "attempt": 2,
                         "thinking": thinking,
                         "model_thinking": False,
@@ -309,24 +329,32 @@ class LangChainTaskPlanner:
                 node="planner",
                 data={
                     "purpose": "task_analysis",
-                    "prompt_version": "planner-analysis-v1",
+                    "prompt_version": "planner-analysis-v2",
                     "device_count": len(devices),
                     "thinking": True,
                     "model_thinking": True,
                 },
             )
+        profile = self.agent_profile or profile_for(
+            state.get("context", {}).get("delegated_agent")
+        )
         analysis_messages = [
             (
                 "system",
-                "You are the private analysis stage of a WoT task planner. Analyze the user's "
+                prompt_system(profile, (
+                    "Private analysis contract: analyze the user's "
                 "intent, references, target scope, dependencies, and ambiguities using only the "
                 "provided runtime facts and TD capabilities. Do not call tools and do not claim "
                 "that any action was executed. Return concise planning guidance for a separate "
-                "structured planner.\n"
-                f"Runtime facts: {json.dumps(state.get('context', {}).get('runtime', {}), ensure_ascii=False)}\n"
-                f"Available devices: {json.dumps(devices, ensure_ascii=False)}",
+                    "structured planner."
+                )),
             ),
-            *planner_messages[1:],
+            ("human", context_message(
+                "runtime_context",
+                state.get("context", {}).get("runtime", {}),
+            )),
+            ("human", context_message("capability_context", {"devices": devices})),
+            *planner_messages[3:],
             ("human", state.get("message", "")),
         ]
         started = time.perf_counter()
@@ -342,7 +370,7 @@ class LangChainTaskPlanner:
                 duration_ms=(time.perf_counter() - started) * 1000,
                 data={
                     "purpose": "task_analysis",
-                    "prompt_version": "planner-analysis-v1",
+                    "prompt_version": "planner-analysis-v2",
                     "model": _extract_model_name(result),
                     "thinking": True,
                     "model_thinking": True,
@@ -370,7 +398,7 @@ class LangChainTaskPlanner:
             duration_ms=(time.perf_counter() - started) * 1000,
             data={
                 "purpose": "task_planning" if attempt == 1 else "task_planning_repair",
-                "prompt_version": "planner-v2.1",
+                "prompt_version": "planner-v3",
                 "attempt": attempt,
                 "model": _extract_model_name(result),
                 "thinking": bool(state.get("thinking", False)),

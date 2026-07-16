@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from ..telemetry import InMemoryTraceStore
 from .actions import EldercareActionService
+from .collector import EldercareDeviceCollector
 from .graph import build_eldercare_butler_graph
 from .models import RiskEvent, SensorReading
 from .monitor import HealthMonitor
@@ -26,6 +27,12 @@ class EldercareRuntime:
         self.store = store
         self.trace_store = trace_store or InMemoryTraceStore()
         self.monitor = HealthMonitor(store)
+        self.environment_gateway = environment_gateway
+        self.collector = (
+            EldercareDeviceCollector(store, environment_gateway)
+            if environment_gateway is not None
+            else None
+        )
         self.actions = EldercareActionService(store, environment_gateway=environment_gateway)
         self.graph = build_eldercare_butler_graph(
             self.actions,
@@ -93,6 +100,33 @@ class EldercareRuntime:
             await self.trace_store.finish(task_id, status="failed", result=payload)
             return payload
 
+    async def consume_outbox_once(self, *, limit: int = 10) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
+        for item in self.store.claim_events(limit=limit):
+            try:
+                event = RiskEvent.model_validate(item["payload"])
+                result = await self.process_event(event)
+                if result.get("status") == "failed":
+                    raise RuntimeError(str(result.get("error", "butler event processing failed")))
+                self.store.complete_event(item["outbox_id"])
+                results.append(result)
+            except Exception as exc:
+                self.store.retry_event(item["outbox_id"], str(exc))
+        return results
+
+    async def consume_outbox_forever(
+        self,
+        stop_event: asyncio.Event,
+        *,
+        interval_seconds: float = 1.0,
+    ) -> None:
+        while not stop_event.is_set():
+            await self.consume_outbox_once()
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
+            except TimeoutError:
+                pass
+
     async def execute_user_delegations(
         self,
         *,
@@ -120,6 +154,76 @@ class EldercareRuntime:
 
     async def scan(self) -> list[dict[str, Any]]:
         return [await self.process_event(event) for event in self.monitor.evaluate_all()]
+
+    async def collect_devices(self) -> list[dict[str, Any]]:
+        if self.collector is None:
+            return []
+        results: list[dict[str, Any]] = []
+        for reading in await self.collector.collect_all():
+            results.append(await self.ingest(reading))
+        return results
+
+    async def collect_devices_forever(
+        self,
+        stop_event: asyncio.Event,
+        *,
+        interval_seconds: float = 2.0,
+    ) -> None:
+        if self.collector is None:
+            return
+        await self.collector.monitor_forever(
+            stop_event,
+            self.ingest,
+            interval_seconds=interval_seconds,
+        )
+
+    async def publish_reading(self, reading: SensorReading) -> dict[str, Any]:
+        if self.collector is None or self.environment_gateway is None:
+            raise RuntimeError("eldercare WoT/MCP sensor gateway is not configured")
+        resident = self.store.get_resident(reading.resident_id)
+        if resident is None:
+            raise KeyError(f"resident '{reading.resident_id}' not found")
+
+        bindings = {
+            "heart_rate": (resident.wristband_device_id, "updateVitals", "heartRate"),
+            "spo2": (resident.wristband_device_id, "updateVitals", "spo2"),
+            "fall_detected": (resident.wristband_device_id, "updateVitals", "fallDetected"),
+            "bed_occupancy": (resident.mattress_device_id, "updateSleepState", "bedOccupancy"),
+            "sleep_quality": (resident.mattress_device_id, "updateSleepState", "sleepQuality"),
+            "room_temperature": (
+                resident.environment_sensor_device_id,
+                "updateEnvironment",
+                "roomTemperature",
+            ),
+            "room_humidity": (
+                resident.environment_sensor_device_id,
+                "updateEnvironment",
+                "roomHumidity",
+            ),
+        }
+        device_id, action, property_name = bindings[reading.sensor_type]
+        if not device_id:
+            raise RuntimeError(
+                f"resident '{reading.resident_id}' has no device for {reading.sensor_type}"
+            )
+        await self.environment_gateway.control_device(
+            device_id,
+            action,
+            {
+                property_name: reading.value,
+                "observedAt": reading.observed_at.astimezone(UTC).isoformat(),
+            },
+            idempotency_key=f"sensor:{reading.reading_id}",
+        )
+        collected = await self.collector.collect_device(resident, device_id, force=True)
+        return {
+            "device_id": device_id,
+            "reading": reading.model_dump(mode="json"),
+            "collected": [item.model_dump(mode="json") for item in collected],
+            "events": [],
+            "tasks": [],
+            "delivery": "monitor_pending",
+        }
 
     async def monitor_forever(
         self,
@@ -188,7 +292,11 @@ class EldercareRuntime:
         events: list[dict[str, Any]] = []
         tasks: list[dict[str, Any]] = []
         for reading in readings:
-            result = await self.ingest(reading)
+            result = (
+                await self.publish_reading(reading)
+                if self.collector is not None
+                else await self.ingest(reading)
+            )
             events.extend(result["events"])
             tasks.extend(result["tasks"])
         return {

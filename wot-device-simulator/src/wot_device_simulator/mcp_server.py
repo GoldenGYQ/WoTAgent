@@ -73,6 +73,8 @@ def _register_td_tools(mcp, sim, definitions: list[TDToolDefinition]) -> None:
                     "title": definition.title,
                     "location": definition.location,
                     "properties": list(definition.properties),
+                    "capabilities": list(definition.capabilities),
+                    "mcp_scopes": list(definition.mcp_scopes),
                 }
             },
         )

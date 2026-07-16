@@ -1,0 +1,30 @@
+{
+  "@context": "https://www.w3.org/2022/wot/td/v1.1",
+  "id": "urn:dev:wot:ev-charger-001",
+  "title": "Garage EV Charger",
+  "location": "garage",
+  "capabilities": ["energy", "ev_charging"],
+  "actions": {
+    "startCharging": {
+      "input": {"type": "object", "properties": {}, "additionalProperties": false}
+    },
+    "stopCharging": {
+      "input": {"type": "object", "properties": {}, "additionalProperties": false}
+    },
+    "setChargingLimit": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "limitAmps": {"type": "number", "minimum": 6, "maximum": 32}
+        },
+        "required": ["limitAmps"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "properties": {
+    "charging": {"type": "boolean"},
+    "limitAmps": {"type": "number"},
+    "powerWatts": {"type": "number"}
+  }
+}

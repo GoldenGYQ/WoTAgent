@@ -53,6 +53,44 @@ class FakeMCPClient(MCPToolClient):
         return await super().refresh_td_catalog()
 
 
+class ScopedMCPClient(FakeMCPClient):
+    async def list_tools(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "name": "door_lock_001__read_state",
+                "meta": {"wot": {
+                    "device_id": "door-lock-001",
+                    "operation": "read",
+                    "affordance": "state",
+                    "capabilities": ["security"],
+                    "mcp_scopes": ["wot.security", "wot.device_ops"],
+                    "properties": ["locked"],
+                }},
+            },
+            {
+                "name": "door_lock_001__action__unlock",
+                "meta": {"wot": {
+                    "device_id": "door-lock-001",
+                    "operation": "invoke",
+                    "affordance": "unlock",
+                    "capabilities": ["security"],
+                    "mcp_scopes": ["wot.security"],
+                }},
+            },
+            {
+                "name": "smart_meter_001__read_state",
+                "meta": {"wot": {
+                    "device_id": "smart-meter-001",
+                    "operation": "read",
+                    "affordance": "state",
+                    "capabilities": ["energy"],
+                    "mcp_scopes": ["wot.energy", "wot.device_ops"],
+                    "properties": ["powerWatts"],
+                }},
+            },
+        ]
+
+
 def test_gateway_discovers_and_calls_td_generated_tools(monkeypatch) -> None:
     client = FakeMCPClient()
 
@@ -93,9 +131,11 @@ def test_gateway_lists_devices_from_td_catalog_without_legacy_iot_tools() -> Non
         "title": "light-001",
         "location": "",
         "capabilities": [],
+        "device_type": "",
         "actions": [{
             "name": "setBrightness",
             "input_schema": {},
+            "mcp_scopes": [],
         }],
         "properties": [],
     }]
@@ -105,6 +145,23 @@ def test_client_rejects_missing_td_affordance() -> None:
     client = FakeMCPClient()
     with pytest.raises(LookupError, match="no TD tool"):
         asyncio.run(client.resolve_td_tool("light-001", "invoke", "turnOff"))
+
+
+def test_scoped_gateway_exposes_only_domain_tools() -> None:
+    client = ScopedMCPClient()
+    security = MCPDeviceGateway(client=client, allowed_scopes={"wot.security"})
+    device_ops = MCPDeviceGateway(client=client, allowed_scopes={"wot.device_ops"})
+
+    security_devices = asyncio.run(security.capabilities())
+    device_ops_devices = asyncio.run(device_ops.capabilities())
+
+    assert [item["device_id"] for item in security_devices] == ["door-lock-001"]
+    assert [item["name"] for item in security_devices[0]["actions"]] == ["unlock"]
+    assert {item["device_id"] for item in device_ops_devices} == {
+        "door-lock-001",
+        "smart-meter-001",
+    }
+    assert all(item["actions"] == [] for item in device_ops_devices)
 
 
 def test_simuhome_dynamic_td_runs_through_real_in_process_mcp() -> None:

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import time
 from dataclasses import dataclass
 from typing import Any
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, message_chunk_to_message
+from langchain_core.messages import HumanMessage, SystemMessage, message_chunk_to_message
+from ..prompting import RESPONSE_CONTRACT, context_message
 from ..telemetry import InMemoryTraceStore, extract_usage_with_cost
 
 
@@ -23,19 +23,8 @@ class LangChainResponseComposer:
             raise ValueError("thinking mode is not available on this server")
         runnable = self.thinking_runnable if thinking else self.runnable
         facts = _response_facts(state)
-        system = (
-            "你是 WoTAgent 的最终 Response Agent。请根据下面经过验证的事实，"
-            "使用与用户相同的语言给出简洁自然的最终回复。\n"
-            "严格规则：\n"
-            "1. 不得调用工具、生成新计划或改变任务状态。\n"
-            "2. 只有 status=succeeded 时才能声称全部完成。\n"
-            "3. partial_success 必须分别说明成功和失败步骤。\n"
-            "4. failed/denied 时不得使用‘已完成’等成功措辞。\n"
-            "5. 只使用提供的事实，不推测设备状态或当前角色。\n"
-            "6. ACTION_NOT_DECLARED 只表示当前 TD 未声明该动作，不能说物理设备本身不支持。\n"
-            "7. 结构化执行事实优先于历史对话中的旧状态。"
-        )
-        prompt = f"执行事实：{json.dumps(facts, ensure_ascii=False)}"
+        system = RESPONSE_CONTRACT
+        prompt = context_message("response_facts", facts)
         task_id = state.get("task_id", "")
         if self.trace_store is not None and task_id:
             await self.trace_store.record(
@@ -44,19 +33,15 @@ class LangChainResponseComposer:
                 node="responder",
                 data={
                     "purpose": "final_response",
-                    "prompt_version": "responder-v2.0",
+                    "prompt_version": "responder-v3",
                     "thinking": thinking,
                 },
             )
         started = time.perf_counter()
-        messages = [SystemMessage(content=system)]
-        for item in state.get("conversation_history", []):
-            content = str(item.get("content", ""))
-            if item.get("role") == "assistant":
-                messages.append(AIMessage(content=content))
-            elif item.get("role") == "user":
-                messages.append(HumanMessage(content=content))
-        messages.append(HumanMessage(content=prompt))
+        messages = [
+            SystemMessage(content=system),
+            HumanMessage(content=prompt),
+        ]
         ttft_ms: float | None = None
         if hasattr(runnable, "astream"):
             aggregate = None
@@ -82,7 +67,7 @@ class LangChainResponseComposer:
                 duration_ms=(time.perf_counter() - started) * 1000,
                 data={
                     "purpose": "final_response",
-                    "prompt_version": "responder-v2.0",
+                    "prompt_version": "responder-v3",
                     "model": _model_name(message),
                     "ttft_ms": ttft_ms,
                     "ttft_available": ttft_ms is not None,

@@ -1,0 +1,34 @@
+{
+  "@context": "https://www.w3.org/2022/wot/td/v1.1",
+  "id": "urn:dev:wot:wristband-002",
+  "title": "Li Wristband",
+  "description": "Health wristband assigned to elderly-002.",
+  "location": "A-102",
+  "capabilities": [
+    "health",
+    "heart_rate",
+    "spo2",
+    "fall_detection"
+  ],
+  "actions": {
+    "updateVitals": {
+      "description": "Inject a simulated wristband sample.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "heartRate": { "type": "number", "minimum": 30, "maximum": 220 },
+          "spo2": { "type": "number", "minimum": 50, "maximum": 100 },
+          "fallDetected": { "type": "boolean" },
+          "observedAt": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "properties": {
+    "heartRate": { "type": "number" },
+    "spo2": { "type": "number" },
+    "fallDetected": { "type": "boolean" },
+    "observedAt": { "type": "string" }
+  }
+}

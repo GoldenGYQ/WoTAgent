@@ -1,0 +1,26 @@
+{
+  "@context": "https://www.w3.org/2022/wot/td/v1.1",
+  "id": "urn:dev:wot:camera-001",
+  "title": "Hall Security Camera",
+  "location": "hall",
+  "capabilities": ["security", "video_surveillance"],
+  "actions": {
+    "startRecording": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "durationSeconds": {"type": "integer", "minimum": 10, "maximum": 600}
+        },
+        "required": ["durationSeconds"],
+        "additionalProperties": false
+      }
+    },
+    "stopRecording": {
+      "input": {"type": "object", "properties": {}, "additionalProperties": false}
+    }
+  },
+  "properties": {
+    "online": {"type": "boolean"},
+    "recording": {"type": "boolean"}
+  }
+}

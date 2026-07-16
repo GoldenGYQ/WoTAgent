@@ -1,0 +1,20 @@
+{
+  "@context": "https://www.w3.org/2022/wot/td/v1.1",
+  "id": "urn:dev:wot:iot-gateway-001",
+  "title": "Villa IoT Gateway",
+  "location": "utility_room",
+  "capabilities": ["device_ops", "gateway"],
+  "actions": {
+    "restartGateway": {
+      "input": {"type": "object", "properties": {}, "additionalProperties": false}
+    },
+    "refreshCatalog": {
+      "input": {"type": "object", "properties": {}, "additionalProperties": false}
+    }
+  },
+  "properties": {
+    "online": {"type": "boolean"},
+    "connectedDevices": {"type": "integer"},
+    "lastRefresh": {"type": "string"}
+  }
+}

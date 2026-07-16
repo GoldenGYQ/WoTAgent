@@ -107,6 +107,18 @@ button:focus-visible, textarea:focus-visible {
   overflow: hidden;
 }
 
+.desktop-layout.sidebar-collapsed {
+  grid-template-columns: 56px minmax(0, 1fr) 390px;
+}
+
+.desktop-layout.trace-collapsed {
+  grid-template-columns: 248px minmax(0, 1fr);
+}
+
+.desktop-layout.sidebar-collapsed.trace-collapsed {
+  grid-template-columns: 56px minmax(0, 1fr);
+}
+
 .task-sidebar {
   min-width: 0;
   display: flex;
@@ -115,11 +127,18 @@ button:focus-visible, textarea:focus-visible {
   border-right: 1px solid var(--line);
   overflow: hidden;
 }
+.task-sidebar.collapsed { background: #fbfcfd; }
 .sidebar-action { padding: 12px; border-bottom: 1px solid var(--line); }
 .new-task-button {
   width: 100%; height: 34px; display: flex; align-items: center; justify-content: center; gap: 7px;
   border: 1px solid #0f766e; border-radius: 5px; color: #fff; background: var(--teal); font-weight: 650;
 }
+.task-sidebar.collapsed .sidebar-action { padding: 8px; }
+.task-sidebar.collapsed .new-task-button { padding: 0; justify-content: center; }
+.task-sidebar.collapsed .new-task-button span { display: none; }
+.task-sidebar.collapsed .sidebar-section-label,
+.task-sidebar.collapsed .task-list { display: none; }
+.task-sidebar.collapsed .new-task-button { width: 40px; height: 40px; margin: 0 auto; }
 .new-task-button:hover { background: #076d63; }
 .sidebar-section-label { height: 38px; padding: 0 12px; gap: 6px; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; }
 .sidebar-section-label span { margin-left: auto; font-variant-numeric: tabular-nums; }
@@ -293,6 +312,9 @@ button:focus-visible, textarea:focus-visible {
   .app-shell { padding-bottom: 43px; }
   .desktop-layout { height: calc(100dvh - 91px); display: block; }
   .desktop-layout > .task-sidebar { display: none; }
+  .desktop-layout.sidebar-collapsed,
+  .desktop-layout.trace-collapsed,
+  .desktop-layout.sidebar-collapsed.trace-collapsed { grid-template-columns: unset; }
   .workspace-column, .inspector-column { height: 100%; border-left: 0; }
   .mobile-hidden { display: none; }
   .mobile-icon-button { display: grid; }

@@ -37,6 +37,9 @@ class EldercareStore:
                     room TEXT NOT NULL,
                     caregiver TEXT NOT NULL,
                     environment_device_id TEXT,
+                    wristband_device_id TEXT,
+                    mattress_device_id TEXT,
+                    environment_sensor_device_id TEXT,
                     active INTEGER NOT NULL DEFAULT 1
                 );
                 CREATE TABLE IF NOT EXISTS sensor_readings (
@@ -74,6 +77,27 @@ class EldercareStore:
                     result_json TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS event_outbox (
+                    outbox_id TEXT PRIMARY KEY,
+                    event_id TEXT NOT NULL UNIQUE,
+                    topic TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    available_at TEXT NOT NULL,
+                    locked_at TEXT,
+                    processed_at TEXT,
+                    last_error TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_outbox_status_available
+                    ON event_outbox(status, available_at, created_at);
+                CREATE TABLE IF NOT EXISTS service_heartbeats (
+                    service_id TEXT PRIMARY KEY,
+                    status TEXT NOT NULL,
+                    details_json TEXT NOT NULL DEFAULT '{}',
+                    updated_at TEXT NOT NULL
+                );
                 """
             )
             columns = {
@@ -83,17 +107,29 @@ class EldercareStore:
                 connection.execute(
                     "ALTER TABLE residents ADD COLUMN environment_device_id TEXT"
                 )
+            for name in (
+                "wristband_device_id",
+                "mattress_device_id",
+                "environment_sensor_device_id",
+            ):
+                if name not in columns:
+                    connection.execute(f"ALTER TABLE residents ADD COLUMN {name} TEXT")
 
     def upsert_resident(self, resident: Resident) -> Resident:
         with self._lock, self._connect() as connection:
             connection.execute(
                 """INSERT INTO residents(
-                     resident_id, name, room, caregiver, environment_device_id, active
-                   ) VALUES (?, ?, ?, ?, ?, ?)
+                     resident_id, name, room, caregiver, environment_device_id,
+                     wristband_device_id, mattress_device_id,
+                     environment_sensor_device_id, active
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(resident_id) DO UPDATE SET
                      name=excluded.name, room=excluded.room,
                      caregiver=excluded.caregiver,
                      environment_device_id=excluded.environment_device_id,
+                     wristband_device_id=excluded.wristband_device_id,
+                     mattress_device_id=excluded.mattress_device_id,
+                     environment_sensor_device_id=excluded.environment_sensor_device_id,
                      active=excluded.active""",
                 (
                     resident.resident_id,
@@ -101,6 +137,9 @@ class EldercareStore:
                     resident.room,
                     resident.caregiver,
                     resident.environment_device_id,
+                    resident.wristband_device_id,
+                    resident.mattress_device_id,
+                    resident.environment_sensor_device_id,
                     int(resident.active),
                 ),
             )
@@ -114,6 +153,9 @@ class EldercareStore:
                 room="A-101",
                 caregiver="王护理员",
                 environment_device_id="ac-002",
+                wristband_device_id="wristband-001",
+                mattress_device_id="mattress-001",
+                environment_sensor_device_id="environment-sensor-001",
             ),
             Resident(
                 resident_id="elderly-002",
@@ -121,6 +163,9 @@ class EldercareStore:
                 room="A-102",
                 caregiver="赵护理员",
                 environment_device_id="ac-003",
+                wristband_device_id="wristband-002",
+                mattress_device_id="mattress-002",
+                environment_sensor_device_id="environment-sensor-002",
             ),
         ]
         existing = {item.resident_id: item for item in self.list_residents()}
@@ -128,10 +173,18 @@ class EldercareStore:
             current = existing.get(resident.resident_id)
             if current is None:
                 self.upsert_resident(resident)
-            elif current.environment_device_id is None:
-                self.upsert_resident(current.model_copy(update={
-                    "environment_device_id": resident.environment_device_id,
-                }))
+            else:
+                updates = {
+                    field: getattr(current, field) or getattr(resident, field)
+                    for field in (
+                        "environment_device_id",
+                        "wristband_device_id",
+                        "mattress_device_id",
+                        "environment_sensor_device_id",
+                    )
+                }
+                if any(getattr(current, field) != value for field, value in updates.items()):
+                    self.upsert_resident(current.model_copy(update=updates))
 
     def list_residents(self) -> list[Resident]:
         with self._lock, self._connect() as connection:
@@ -237,6 +290,162 @@ class EldercareStore:
             )
         return event
 
+    def enqueue_event(self, event: RiskEvent, *, topic: str = "health.risk") -> dict[str, Any]:
+        outbox_id = f"outbox_{uuid4().hex[:12]}"
+        created_at = datetime.now(UTC).isoformat()
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                """INSERT OR IGNORE INTO event_outbox(
+                     outbox_id, event_id, topic, payload_json, status, attempts,
+                     available_at, created_at
+                   ) VALUES (?, ?, ?, ?, 'pending', 0, ?, ?)""",
+                (
+                    outbox_id,
+                    event.event_id,
+                    topic,
+                    event.model_dump_json(),
+                    created_at,
+                    created_at,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM event_outbox WHERE event_id = ?",
+                (event.event_id,),
+            ).fetchone()
+        return self._outbox(row)
+
+    def claim_events(
+        self,
+        *,
+        limit: int = 10,
+        lease_seconds: int = 30,
+    ) -> list[dict[str, Any]]:
+        current = datetime.now(UTC)
+        now = current.isoformat()
+        stale_lock = (current - timedelta(seconds=lease_seconds)).isoformat()
+        with self._lock, self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            rows = connection.execute(
+                """SELECT * FROM event_outbox
+                   WHERE (status = 'pending' AND available_at <= ?)
+                      OR (status = 'processing' AND locked_at <= ?)
+                   ORDER BY created_at ASC LIMIT ?""",
+                (now, stale_lock, max(1, min(limit, 100))),
+            ).fetchall()
+            ids = [row["outbox_id"] for row in rows]
+            if ids:
+                placeholders = ",".join("?" for _ in ids)
+                connection.execute(
+                    f"""UPDATE event_outbox
+                        SET status = 'processing', locked_at = ?, attempts = attempts + 1
+                        WHERE outbox_id IN ({placeholders})""",
+                    [now, *ids],
+                )
+            connection.commit()
+            claimed = [
+                connection.execute(
+                    "SELECT * FROM event_outbox WHERE outbox_id = ?",
+                    (outbox_id,),
+                ).fetchone()
+                for outbox_id in ids
+            ]
+        return [self._outbox(row) for row in claimed if row is not None]
+
+    def complete_event(self, outbox_id: str) -> None:
+        now = datetime.now(UTC).isoformat()
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                """UPDATE event_outbox
+                   SET status = 'processed', processed_at = ?, locked_at = NULL
+                   WHERE outbox_id = ?""",
+                (now, outbox_id),
+            )
+
+    def retry_event(
+        self,
+        outbox_id: str,
+        error: str,
+        *,
+        delay_seconds: int = 5,
+        max_attempts: int = 5,
+    ) -> None:
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT attempts FROM event_outbox WHERE outbox_id = ?",
+                (outbox_id,),
+            ).fetchone()
+            attempts = int(row["attempts"]) if row else max_attempts
+            status = "failed" if attempts >= max_attempts else "pending"
+            available_at = (
+                datetime.now(UTC) + timedelta(seconds=delay_seconds)
+            ).isoformat()
+            connection.execute(
+                """UPDATE event_outbox
+                   SET status = ?, available_at = ?, locked_at = NULL, last_error = ?
+                   WHERE outbox_id = ?""",
+                (status, available_at, error[:1000], outbox_id),
+            )
+
+    def list_outbox(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        with self._lock, self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM event_outbox ORDER BY created_at DESC LIMIT ?",
+                (max(1, min(limit, 500)),),
+            ).fetchall()
+        return [self._outbox(row) for row in rows]
+
+    def heartbeat(
+        self,
+        service_id: str,
+        *,
+        status: str = "running",
+        details: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        updated_at = datetime.now(UTC).isoformat()
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                """INSERT INTO service_heartbeats(service_id, status, details_json, updated_at)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(service_id) DO UPDATE SET
+                     status=excluded.status,
+                     details_json=excluded.details_json,
+                     updated_at=excluded.updated_at""",
+                (
+                    service_id,
+                    status,
+                    json.dumps(details or {}, ensure_ascii=False),
+                    updated_at,
+                ),
+            )
+        return {
+            "service_id": service_id,
+            "status": status,
+            "details": details or {},
+            "updated_at": updated_at,
+        }
+
+    def service_status(self, service_id: str) -> dict[str, Any] | None:
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM service_heartbeats WHERE service_id = ?",
+                (service_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        updated_at = datetime.fromisoformat(row["updated_at"])
+        age_seconds = max(
+            0.0,
+            (datetime.now(UTC) - updated_at.astimezone(UTC)).total_seconds(),
+        )
+        return {
+            "service_id": row["service_id"],
+            "status": "online" if age_seconds <= 10 else "offline",
+            "reported_status": row["status"],
+            "details": json.loads(row["details_json"]),
+            "updated_at": row["updated_at"],
+            "age_seconds": round(age_seconds, 3),
+        }
+
     def list_risks(self, resident_id: str | None = None, *, limit: int = 100) -> list[RiskEvent]:
         query = "SELECT * FROM risk_events"
         params: list[Any] = []
@@ -332,6 +541,9 @@ class EldercareStore:
             room=row["room"],
             caregiver=row["caregiver"],
             environment_device_id=row["environment_device_id"],
+            wristband_device_id=row["wristband_device_id"],
+            mattress_device_id=row["mattress_device_id"],
+            environment_sensor_device_id=row["environment_sensor_device_id"],
             active=bool(row["active"]),
         )
 
@@ -362,3 +574,10 @@ class EldercareStore:
             occurred_at=datetime.fromisoformat(row["occurred_at"]),
             context=json.loads(row["context_json"]),
         )
+
+    @staticmethod
+    def _outbox(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            **dict(row),
+            "payload": json.loads(row["payload_json"]),
+        }

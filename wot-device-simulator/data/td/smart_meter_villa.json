@@ -1,0 +1,25 @@
+{
+  "@context": "https://www.w3.org/2022/wot/td/v1.1",
+  "id": "urn:dev:wot:smart-meter-001",
+  "title": "Villa Smart Meter",
+  "location": "utility_room",
+  "capabilities": ["energy", "power_metering"],
+  "actions": {
+    "updateEnergyState": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "powerWatts": {"type": "number", "minimum": 0},
+          "energyKwhToday": {"type": "number", "minimum": 0},
+          "observedAt": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "properties": {
+    "powerWatts": {"type": "number"},
+    "energyKwhToday": {"type": "number"},
+    "observedAt": {"type": "string"}
+  }
+}

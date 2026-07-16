@@ -20,9 +20,15 @@ def _payload(result: dict[str, Any]) -> dict[str, Any]:
 class MCPDeviceGateway:
     name = "mcp"
 
-    def __init__(self, client: Any | None = None) -> None:
+    def __init__(
+        self,
+        client: Any | None = None,
+        *,
+        allowed_scopes: set[str] | None = None,
+    ) -> None:
         self._initialized = False
         self._client = client
+        self.allowed_scopes = allowed_scopes
 
     async def _get_client(self):
         return self._client or await get_mcp_client()
@@ -39,7 +45,23 @@ class MCPDeviceGateway:
     async def capabilities(self) -> list[dict[str, Any]]:
         await self.initialize()
         client = await self._get_client()
-        return await client.td_capabilities()
+        capabilities = await client.td_capabilities()
+        if self.allowed_scopes is None:
+            return capabilities
+        filtered = []
+        for capability in capabilities:
+            actions = [
+                action for action in capability.get("actions", [])
+                if self._scope_allowed(action.get("mcp_scopes", []))
+            ]
+            readable = self._scope_allowed(capability.get("read_scopes", []))
+            if actions or readable:
+                filtered.append({
+                    **capability,
+                    "actions": actions,
+                    "properties": capability.get("properties", []) if readable else [],
+                })
+        return filtered
 
     async def list_devices(self, location: str | None = None) -> list[dict[str, Any]]:
         capabilities = await self.capabilities()
@@ -53,6 +75,7 @@ class MCPDeviceGateway:
                 "title": capability.get("title", ""),
                 "location": device_location,
                 "capabilities": capability.get("capabilities", []),
+                "device_type": capability.get("device_type", ""),
                 "actions": capability.get("actions", []),
                 "properties": capability.get("properties", []),
             })
@@ -61,6 +84,7 @@ class MCPDeviceGateway:
     async def query_state(self, device_id: str) -> dict[str, Any]:
         await self.initialize()
         client = await self._get_client()
+        await self._assert_allowed(client, device_id, "read", "state")
         tool_name, response = await client.call_td_tool(
             device_id=device_id,
             operation="read",
@@ -82,6 +106,7 @@ class MCPDeviceGateway:
     ) -> dict[str, Any]:
         await self.initialize()
         client = await self._get_client()
+        await self._assert_allowed(client, device_id, "invoke", action)
         tool_name, response = await client.call_td_tool(
             device_id=device_id,
             operation="invoke",
@@ -92,3 +117,35 @@ class MCPDeviceGateway:
         result["_mcp_tool"] = tool_name
         result.setdefault("idempotency_key", idempotency_key)
         return result
+
+    def _scope_allowed(self, scopes: list[str]) -> bool:
+        return self.allowed_scopes is None or bool(self.allowed_scopes.intersection(scopes))
+
+    async def _assert_allowed(
+        self,
+        client: Any,
+        device_id: str,
+        operation: str,
+        affordance: str,
+    ) -> None:
+        if self.allowed_scopes is None:
+            return
+        capabilities = await client.td_capabilities()
+        device = next(
+            (item for item in capabilities if item.get("device_id") == device_id),
+            None,
+        )
+        if device is None:
+            raise PermissionError(f"device '{device_id}' is outside MCP scope")
+        if operation == "read":
+            scopes = device.get("read_scopes", [])
+        else:
+            action = next(
+                (item for item in device.get("actions", []) if item.get("name") == affordance),
+                None,
+            )
+            scopes = action.get("mcp_scopes", []) if action else []
+        if not self._scope_allowed(scopes):
+            raise PermissionError(
+                f"{device_id}.{affordance} is outside MCP scopes {sorted(self.allowed_scopes)}"
+            )

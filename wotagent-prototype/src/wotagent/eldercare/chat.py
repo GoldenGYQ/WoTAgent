@@ -7,9 +7,16 @@ import time
 from typing import Any, Literal
 
 from fastmcp import Client
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
+from ..prompting import (
+    ELDERCARE_PLANNING_CONTRACT,
+    compact_history,
+    context_message,
+    profile_for,
+    prompt_system,
+)
 from ..telemetry import InMemoryTraceStore, extract_usage_with_cost
 from .mcp_server import build_eldercare_mcp
 from .models import DelegatedAction, DelegatedTask, Resident
@@ -112,22 +119,30 @@ class EldercareCommandPlanner:
         history: list[dict[str, Any]],
         residents: list[Resident],
         resolved_resident: Resident,
+        role: str = "operator",
         thinking: bool = False,
     ) -> EldercareCommandPlan:
-        catalog = [resident.model_dump(mode="json") for resident in residents]
-        system = (
-            "你是养老院 Butler 的命令 Planner。只返回 generate_eldercare_plan 工具调用。"
-            "只允许查询健康摘要、调节房间温度、通知护理员和创建照护任务。"
-            "不得诊断疾病，不得虚构传感器数据，不得改变 resident_id。"
-            "用户要求查看状态时使用 read_health_summary；要求联系人员时使用 notify_caregiver；"
-            "要求安排后续工作时使用 create_care_task；要求调温时使用 adjust_temperature。"
-            f"当前明确居民：{resolved_resident.model_dump_json()}。"
-            f"居民目录：{json.dumps(catalog, ensure_ascii=False)}"
+        system = prompt_system(
+            profile_for("eldercare_butler"),
+            ELDERCARE_PLANNING_CONTRACT,
         )
-        messages: list[Any] = [SystemMessage(content=system)]
-        for item in history[-6:]:
-            messages.append(HumanMessage(content=(
-                f"历史{item.get('role', 'user')}：{item.get('content', '')}"
+        messages: list[Any] = [
+            SystemMessage(content=system),
+            HumanMessage(content=context_message("resident_context", {
+                "resolved_resident": resolved_resident.model_dump(mode="json"),
+                "current_role": role,
+                "allowed_actions": [
+                    "read_health_summary",
+                    "adjust_temperature",
+                    "notify_caregiver",
+                    "create_care_task",
+                ],
+            })),
+        ]
+        for item in compact_history(history, max_messages=6):
+            message_type = HumanMessage if item["role"] == "user" else AIMessage
+            messages.append(message_type(content=(
+                f"Conversation reference ({item['role']}): {item['content']}"
             )))
         messages.append(HumanMessage(content=message))
         if thinking:
@@ -142,10 +157,28 @@ class EldercareCommandPlanner:
                 )
             analysis_started = time.perf_counter()
             analysis_result = await self.thinking_runnable.ainvoke([
-                SystemMessage(content=(
-                    "分析养老请求中的居民、查询目标、动作、风险和必要参数。"
-                    "只做规划分析，不调用工具，不声称已经执行。"
+                SystemMessage(content=prompt_system(
+                    profile_for("eldercare_butler"),
+                    "私有分析契约：分析居民、查询目标、动作、风险和必要参数。"
+                    "只做规划分析，不调用工具，不声称已经执行。",
                 )),
+                HumanMessage(content=context_message("resident_context", {
+                    "resolved_resident": resolved_resident.model_dump(mode="json"),
+                    "available_actions": [
+                        "read_health_summary",
+                        "adjust_temperature",
+                        "notify_caregiver",
+                        "create_care_task",
+                    ],
+                })),
+                *[
+                    (
+                        HumanMessage(content=f"Conversation reference (user): {item['content']}")
+                        if item["role"] == "user"
+                        else AIMessage(content=f"Conversation reference (assistant): {item['content']}")
+                    )
+                    for item in compact_history(history, max_messages=4)
+                ],
                 HumanMessage(content=message),
             ])
             if self.trace_store is not None:
@@ -172,8 +205,10 @@ class EldercareCommandPlanner:
                 node="eldercare_planner",
                 data={
                     "purpose": "eldercare_command_planning",
-                    "prompt_version": "eldercare-planner-v1",
+                    "prompt_version": "eldercare-planner-v2",
                     "resident_id": resolved_resident.resident_id,
+                    "agent_id": "eldercare_butler",
+                    "context_pack_version": "context-pack-v1",
                 },
             )
         started = time.perf_counter()
@@ -186,7 +221,7 @@ class EldercareCommandPlanner:
                 duration_ms=(time.perf_counter() - started) * 1000,
                 data={
                     "purpose": "eldercare_command_planning",
-                    "prompt_version": "eldercare-planner-v1",
+                    "prompt_version": "eldercare-planner-v2",
                     **extract_usage_with_cost(result),
                 },
             )
@@ -241,6 +276,7 @@ class EldercareChatAgent:
             history=history,
             residents=residents,
             resolved_resident=resident,
+            role=role,
             thinking=thinking,
         )
         if plan.intent == "clarify":
@@ -289,7 +325,7 @@ class EldercareChatAgent:
         await self.trace_store.record(
             task_id=task_id,
             type="agent.resource.completed",
-            node="care_agent",
+            node="health_agent",
             data={"mcp_server": "eldercare-health", "uri": uri, "output": payload},
         )
         return payload

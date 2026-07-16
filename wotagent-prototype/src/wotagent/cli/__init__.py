@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import signal
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -72,6 +74,34 @@ def _run_api(args: argparse.Namespace) -> None:
     )
 
 
+def _run_monitor(args: argparse.Namespace) -> None:
+    _setup_env()
+    from wotagent.eldercare import EldercareMonitorService, EldercareStore
+    from wotagent.gateway import MCPDeviceGateway
+
+    async def run() -> None:
+        store = EldercareStore()
+        store.seed_demo()
+        service = EldercareMonitorService(store, MCPDeviceGateway())
+        if args.once:
+            results = await service.collect_once()
+            print(f"Monitor collected {len(results)} changed device batches")
+            return
+        stop_event = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        for name in ("SIGINT", "SIGTERM"):
+            sig = getattr(signal, name, None)
+            if sig is not None:
+                try:
+                    loop.add_signal_handler(sig, stop_event.set)
+                except NotImplementedError:
+                    pass
+        print(f"WoT Monitor -> polling every {args.interval:g}s")
+        await service.run_forever(stop_event, interval_seconds=args.interval)
+
+    asyncio.run(run())
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="wotagent", description="WoTAgent 2.0")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -85,8 +115,17 @@ def main() -> None:
     api_parser.add_argument("--port", type=int, default=8000)
     api_parser.add_argument("--reload", action="store_true")
 
+    monitor_parser = sub.add_parser(
+        "monitor",
+        help="Start the independent WoT sensor monitor",
+    )
+    monitor_parser.add_argument("--interval", type=float, default=2.0)
+    monitor_parser.add_argument("--once", action="store_true")
+
     args = parser.parse_args()
     if args.command == "log":
         _run_log(args)
     elif args.command == "api":
         _run_api(args)
+    elif args.command == "monitor":
+        _run_monitor(args)

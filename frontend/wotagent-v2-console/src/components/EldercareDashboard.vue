@@ -46,6 +46,8 @@ const sections = [
   { value: 'health', label: '健康检测', icon: HeartPulse },
   { value: 'alerts', label: '异常告警', icon: BellRing },
 ] as const
+const POLL_INTERVAL_MS = 10000
+let refreshInFlight = false
 
 function displayMetric(type: string, fallback = '--'): string {
   const item = latest.value[type]
@@ -69,7 +71,8 @@ function deviceState(device: EldercareDevice): string {
 }
 
 async function refresh(): Promise<void> {
-  if (!selectedId.value) return
+  if (!selectedId.value || refreshInFlight) return
+  refreshInFlight = true
   try {
     const [health, riskData, actionData, deviceData] = await Promise.all([
       agentV2Api.getHealthSummary(selectedId.value),
@@ -83,6 +86,8 @@ async function refresh(): Promise<void> {
     devices.value = deviceData.devices
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    refreshInFlight = false
   }
 }
 
@@ -173,11 +178,45 @@ watch(sensorType, (value) => {
   unit.value = option?.unit ?? ''
   sensorValue.value = value === 'sleep_quality' ? 'good' : ['fall_detected', 'bed_occupancy'].includes(value) ? 'false' : value === 'room_temperature' ? '24' : value === 'spo2' ? '97' : '82'
 })
+
+function stopRefreshTimer(): void {
+  if (refreshTimer) {
+    clearInterval(refreshTimer)
+    refreshTimer = undefined
+  }
+}
+
+function startRefreshTimer(): void {
+  if (refreshTimer || document.visibilityState === 'hidden') return
+  refreshTimer = setInterval(() => {
+    void refresh()
+  }, POLL_INTERVAL_MS)
+}
+
+function syncRefreshTimer(): void {
+  if (document.visibilityState === 'hidden') {
+    stopRefreshTimer()
+    return
+  }
+  startRefreshTimer()
+}
+
+function handleVisibilityChange(): void {
+  syncRefreshTimer()
+  if (document.visibilityState === 'visible') {
+    void refresh()
+  }
+}
+
 onMounted(() => {
   void loadResidents()
-  refreshTimer = setInterval(refresh, 5000)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  syncRefreshTimer()
 })
-onBeforeUnmount(() => refreshTimer && clearInterval(refreshTimer))
+onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  stopRefreshTimer()
+})
 </script>
 
 <template>

@@ -9,6 +9,16 @@ from pathlib import Path
 import pytest
 
 
+def test_health_sensor_defaults_are_neutral() -> None:
+    from wot_device_simulator.simulator import _default_property_value
+
+    assert _default_property_value("heartRate", "number") == 78
+    assert _default_property_value("spo2", "number") == 97
+    assert _default_property_value("roomTemperature", "number") == 24
+    assert _default_property_value("roomHumidity", "number") == 50
+    assert _default_property_value("sleepQuality", "string") == "unknown"
+
+
 # ======================================================================
 # DeviceStateStore
 # ======================================================================

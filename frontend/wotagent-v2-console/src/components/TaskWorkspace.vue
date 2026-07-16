@@ -6,6 +6,8 @@ import {
   CircleAlert,
   Cpu,
   MessageSquareText,
+  PanelLeft,
+  Route,
   ShieldAlert,
   X,
 } from 'lucide-vue-next'
@@ -17,11 +19,17 @@ const props = defineProps<{
   conversation: RuntimeConversation | null
   tasks: RuntimeTask[]
   activeTask: RuntimeTask | null
+  currentAccountId: string | null
+  currentAccountName: string | null
+  sidebarCollapsed: boolean
+  traceCollapsed: boolean
 }>()
 const emit = defineEmits<{
   confirm: [taskId: string, approved: boolean]
   example: [message: string]
   selectTask: [taskId: string]
+  toggleSidebar: []
+  toggleTrace: []
 }>()
 
 function taskForTurn(turn: ConversationTurn): RuntimeTask | undefined {
@@ -43,15 +51,33 @@ function currentNode(task: RuntimeTask): string {
 
 <template>
   <main class="task-workspace">
+    <header class="workspace-header">
+      <button
+        class="icon-button workspace-toggle"
+        type="button"
+        :title="sidebarCollapsed ? '展开会话列表' : '折叠会话列表'"
+        :aria-pressed="!sidebarCollapsed"
+        @click="emit('toggleSidebar')"
+      >
+        <PanelLeft :size="15" />
+      </button>
+      <div class="task-identity workspace-title">
+        <strong class="conversation-title">{{ conversation?.title ?? `欢迎${currentAccountName ?? '某某'}` }}</strong>
+        <StatusBadge v-if="activeTask" :status="activeTask.status" />
+        <span v-if="activeTask?.thinking" class="thinking-mode"><BrainCircuit :size="13" />深度思考</span>
+      </div>
+      <button
+        class="icon-button workspace-toggle"
+        type="button"
+        :title="traceCollapsed ? '展开 Trace 面板' : '折叠 Trace 面板'"
+        :aria-pressed="!traceCollapsed"
+        @click="emit('toggleTrace')"
+      >
+        <Route :size="15" />
+      </button>
+    </header>
+
     <template v-if="conversation">
-      <header class="workspace-header">
-        <div class="task-identity">
-          <strong class="conversation-title">{{ conversation.title }}</strong>
-          <StatusBadge v-if="activeTask" :status="activeTask.status" />
-          <span v-if="activeTask?.thinking" class="thinking-mode"><BrainCircuit :size="13" />深度思考</span>
-        </div>
-        <span class="session-id">{{ conversation.conversation_id }}</span>
-      </header>
       <MetricStrip v-if="activeTask" :task="activeTask" />
 
       <div class="conversation-pane">
@@ -123,8 +149,10 @@ function currentNode(task: RuntimeTask): string {
 
     <div v-else class="workspace-empty">
       <div class="empty-mark"><Cpu :size="27" /></div>
-      <h1>WoTAgent 2.0</h1>
-      <p>开始一段设备或养老照护协作会话</p>
+      <div class="empty-identity">
+        <strong>{{ currentAccountId ?? 'JH-1' }}</strong>
+        <span>欢迎{{ currentAccountName ?? '某某' }}</span>
+      </div>
       <div class="example-grid">
         <button type="button" @click="emit('example', '把客厅灯打开并调到 45% 亮度')">
           <MessageSquareText :size="16" />把客厅灯调到 45%
@@ -142,3 +170,46 @@ function currentNode(task: RuntimeTask): string {
     </div>
   </main>
 </template>
+
+<style scoped>
+.empty-identity {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  margin: 16px 0 4px;
+  text-align: center;
+}
+
+.empty-identity strong {
+  font-size: 42px;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  color: var(--teal);
+}
+
+.empty-identity span {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.workspace-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.workspace-title {
+  justify-content: center;
+  min-width: 0;
+}
+
+.workspace-toggle {
+  flex: 0 0 auto;
+}
+
+.workspace-title .conversation-title {
+  text-align: center;
+}
+</style>

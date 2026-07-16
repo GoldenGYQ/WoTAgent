@@ -39,7 +39,15 @@ const conversation: RuntimeConversation = {
 describe('TaskWorkspace', () => {
   it('renders every turn in one conversation instead of replacing the previous task', () => {
     const wrapper = mount(TaskWorkspace, {
-      props: { conversation, tasks: [], activeTask: null },
+      props: {
+        conversation,
+        tasks: [],
+        activeTask: null,
+        currentAccountId: 'JH-1',
+        currentAccountName: '王护理员',
+        sidebarCollapsed: false,
+        traceCollapsed: false,
+      },
     })
 
     expect(wrapper.text()).toContain('查询客厅灯状态')
@@ -47,5 +55,22 @@ describe('TaskWorkspace', () => {
     expect(wrapper.text()).toContain('把它关闭')
     expect(wrapper.text()).toContain('客厅灯已关闭')
     expect(wrapper.findAll('.turn-group')).toHaveLength(2)
+  })
+
+  it('shows the current account id and welcome copy in the empty state', () => {
+    const wrapper = mount(TaskWorkspace, {
+      props: {
+        conversation: null,
+        tasks: [],
+        activeTask: null,
+        currentAccountId: 'JH-2',
+        currentAccountName: '赵观察员',
+        sidebarCollapsed: false,
+        traceCollapsed: false,
+      },
+    })
+
+    expect(wrapper.text()).toContain('JH-2')
+    expect(wrapper.text()).toContain('欢迎赵观察员')
   })
 })

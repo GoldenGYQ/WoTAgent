@@ -1,0 +1,34 @@
+{
+  "@context": "https://www.w3.org/2022/wot/td/v1.1",
+  "id": "urn:dev:wot:mattress-001",
+  "title": "Zhang Smart Mattress",
+  "description": "Smart mattress assigned to elderly-001.",
+  "location": "A-101",
+  "capabilities": [
+    "health",
+    "sleep",
+    "bed_occupancy"
+  ],
+  "actions": {
+    "updateSleepState": {
+      "description": "Inject a simulated mattress sample.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "bedOccupancy": { "type": "boolean" },
+          "sleepQuality": {
+            "type": "string",
+            "enum": ["good", "fair", "poor", "unknown"]
+          },
+          "observedAt": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "properties": {
+    "bedOccupancy": { "type": "boolean" },
+    "sleepQuality": { "type": "string" },
+    "observedAt": { "type": "string" }
+  }
+}

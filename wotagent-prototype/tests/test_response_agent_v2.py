@@ -74,9 +74,9 @@ def test_response_agent_receives_verified_execution_facts_and_records_usage() ->
     response, runnable, record = asyncio.run(run())
 
     assert response == "客厅灯已打开，并完成状态验证。"
-    assert '"passed": true' in runnable.prompt
-    assert '"status": "succeeded"' in runnable.prompt
-    assert '"current_role": "operator"' in runnable.prompt
+    assert '"passed":true' in runnable.prompt
+    assert '"status":"succeeded"' in runnable.prompt
+    assert '"current_role":"operator"' in runnable.prompt
     assert len(runnable.context) == 2
     assert record.usage.model_calls == 1
     assert record.usage.total_tokens == 92
@@ -105,6 +105,22 @@ def test_thinking_request_uses_dedicated_response_model() -> None:
     assert response == "deep"
     assert direct.context is None
     assert deep.context is not None
+
+
+def test_response_agent_does_not_repeat_conversation_history() -> None:
+    runnable = FakeResponder()
+    state = {
+        **success_state(),
+        "conversation_history": [
+            {"role": "user", "content": "OLD_USER_CONTEXT_SHOULD_NOT_REPEAT"},
+            {"role": "assistant", "content": "OLD_ASSISTANT_CONTEXT_SHOULD_NOT_REPEAT"},
+        ],
+    }
+
+    asyncio.run(LangChainResponseComposer(runnable)(state))
+
+    assert "OLD_USER_CONTEXT_SHOULD_NOT_REPEAT" not in runnable.prompt
+    assert "OLD_ASSISTANT_CONTEXT_SHOULD_NOT_REPEAT" not in runnable.prompt
 
 
 def test_streaming_response_records_real_ttft_measurement() -> None:

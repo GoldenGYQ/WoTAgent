@@ -60,10 +60,24 @@ def _migrate_from_json() -> None:
 
 
 def _default_property_value(prop_name: str, prop_type: str) -> Any:
+    name_lower = prop_name.lower()
     if prop_type == "boolean":
+        if name_lower in {"locked", "online"}:
+            return True
         return False
     if prop_type in ("number", "integer"):
-        name_lower = prop_name.lower()
+        if name_lower == "heartrate":
+            return 78
+        if name_lower == "spo2":
+            return 97
+        if name_lower == "roomtemperature":
+            return 24
+        if name_lower == "roomhumidity":
+            return 50
+        if name_lower == "batterylevel":
+            return 100
+        if name_lower == "limitamps":
+            return 16
         if "temp" in name_lower:
             return round(random.uniform(24.0, 34.0), 1)
         if "humid" in name_lower:
@@ -71,6 +85,8 @@ def _default_property_value(prop_name: str, prop_type: str) -> Any:
         if "bright" in name_lower or "level" in name_lower:
             return 0
         return 0
+    if name_lower == "sleepquality":
+        return "unknown"
     return ""
 
 
@@ -106,6 +122,16 @@ class DeviceStateStore:
                 if p.name not in props:
                     props[p.name] = _default_property_value(p.name, p.type)
                     changed = True
+            if "observedAt" in props and not props["observedAt"]:
+                for p in td.properties:
+                    default = _default_property_value(p.name, p.type)
+                    if (
+                        p.name != "observedAt"
+                        and props.get(p.name) in (0, "")
+                        and default not in (0, "")
+                    ):
+                        props[p.name] = default
+                        changed = True
             if changed or row is None:
                 conn.execute(
                     "INSERT OR REPLACE INTO device_state VALUES (?, ?, ?)",
@@ -424,6 +450,40 @@ class SimulatorEngine:
             level = params.get("level", 1)
             DeviceStateStore.set_property(actual_device_id, "on", bool(level > 0))
             DeviceStateStore.set_property(actual_device_id, "mistLevel", level)
+        elif action_lower.startswith(("update", "simulate")):
+            current = DeviceStateStore.get(actual_device_id)
+            for property_name, value in params.items():
+                if property_name in current:
+                    DeviceStateStore.set_property(actual_device_id, property_name, value)
+        elif action_lower == "lock":
+            DeviceStateStore.set_property(actual_device_id, "locked", True)
+        elif action_lower == "unlock":
+            DeviceStateStore.set_property(actual_device_id, "locked", False)
+        elif action_lower == "startrecording":
+            DeviceStateStore.set_property(actual_device_id, "recording", True)
+        elif action_lower == "stoprecording":
+            DeviceStateStore.set_property(actual_device_id, "recording", False)
+        elif action_lower == "startcharging":
+            DeviceStateStore.set_property(actual_device_id, "charging", True)
+        elif action_lower == "stopcharging":
+            DeviceStateStore.set_property(actual_device_id, "charging", False)
+        elif action_lower == "setcharginglimit":
+            DeviceStateStore.set_property(
+                actual_device_id, "limitAmps", params.get("limitAmps", 16)
+            )
+        elif action_lower == "startcleaning":
+            DeviceStateStore.set_property(actual_device_id, "cleaning", True)
+            DeviceStateStore.set_property(actual_device_id, "status", "cleaning")
+        elif action_lower == "stopcleaning":
+            DeviceStateStore.set_property(actual_device_id, "cleaning", False)
+            DeviceStateStore.set_property(actual_device_id, "status", "paused")
+        elif action_lower == "returntodock":
+            DeviceStateStore.set_property(actual_device_id, "cleaning", False)
+            DeviceStateStore.set_property(actual_device_id, "status", "docked")
+        elif action_lower == "restartgateway":
+            DeviceStateStore.set_property(actual_device_id, "online", True)
+        elif action_lower == "refreshcatalog":
+            DeviceStateStore.set_property(actual_device_id, "lastRefresh", str(time.time()))
 
         self._stats["controls"] += 1
         new_state = DeviceStateStore.get(actual_device_id)

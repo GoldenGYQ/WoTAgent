@@ -1,0 +1,31 @@
+{
+  "@context": "https://www.w3.org/2022/wot/td/v1.1",
+  "id": "urn:dev:wot:environment-sensor-001",
+  "title": "A-101 Environment Sensor",
+  "description": "Room temperature and humidity sensor for elderly-001.",
+  "location": "A-101",
+  "capabilities": [
+    "environment",
+    "temperature",
+    "humidity"
+  ],
+  "actions": {
+    "updateEnvironment": {
+      "description": "Inject a simulated room environment sample.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "roomTemperature": { "type": "number", "minimum": -20, "maximum": 60 },
+          "roomHumidity": { "type": "number", "minimum": 0, "maximum": 100 },
+          "observedAt": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "properties": {
+    "roomTemperature": { "type": "number" },
+    "roomHumidity": { "type": "number" },
+    "observedAt": { "type": "string" }
+  }
+}

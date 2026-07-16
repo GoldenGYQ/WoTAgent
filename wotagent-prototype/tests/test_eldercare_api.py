@@ -5,7 +5,13 @@ import importlib
 from fastapi.testclient import TestClient
 
 from wotagent.conversation import ConversationStore
-from wotagent.eldercare import EldercareRuntime, EldercareStore, Resident, RiskEvent
+from wotagent.eldercare import (
+    EldercareMonitorService,
+    EldercareRuntime,
+    EldercareStore,
+    Resident,
+    RiskEvent,
+)
 from wotagent.telemetry import InMemoryTraceStore
 
 app_module = importlib.import_module("wotagent.api.app")
@@ -57,8 +63,33 @@ def test_eldercare_manual_reading_and_summary(monkeypatch, tmp_path) -> None:
         resident_id="elderly-001",
         name="张爷爷",
         room="A-101",
+        mattress_device_id="mattress-001",
     ))
-    runtime = EldercareRuntime(store, trace_store=InMemoryTraceStore())
+
+    class FakeGateway:
+        def __init__(self):
+            self.state = {
+                "mattress-001": {
+                    "bedOccupancy": False,
+                    "sleepQuality": "unknown",
+                    "observedAt": "",
+                }
+            }
+
+        async def control_device(self, device_id, action, parameters, **_kwargs):
+            assert action == "updateSleepState"
+            self.state[device_id].update(parameters)
+            return {"success": True}
+
+        async def query_state(self, device_id):
+            return dict(self.state[device_id])
+
+    gateway = FakeGateway()
+    runtime = EldercareRuntime(
+        store,
+        trace_store=InMemoryTraceStore(),
+        environment_gateway=gateway,
+    )
     monkeypatch.setattr(app_module, "_eldercare_store", store)
     monkeypatch.setattr(app_module, "_eldercare_runtime", runtime)
 
@@ -69,11 +100,17 @@ def test_eldercare_manual_reading_and_summary(monkeypatch, tmp_path) -> None:
         "value": "poor",
         "source": "web-console",
     })
+    import asyncio
+
+    asyncio.run(EldercareMonitorService(store, gateway).collect_once())
     summary = client.get("/api/v2/eldercare/residents/elderly-001/summary")
 
     assert ingested.status_code == 202
     assert ingested.json()["tasks"] == []
+    assert ingested.json()["device_id"] == "mattress-001"
+    assert ingested.json()["delivery"] == "monitor_pending"
     assert summary.json()["latest"]["sleep_quality"]["value"] == "poor"
+    assert summary.json()["latest"]["sleep_quality"]["source"] == "wot-mcp:mattress-001"
 
 
 def test_main_chat_task_routes_eldercare_request_and_persists_response(
@@ -134,6 +171,9 @@ def test_device_inventory_and_alert_acknowledgement(monkeypatch, tmp_path) -> No
         name="张爷爷",
         room="A-101",
         environment_device_id="ac-002",
+        wristband_device_id="wristband-001",
+        mattress_device_id="mattress-001",
+        environment_sensor_device_id="environment-sensor-001",
     ))
     risk = store.create_risk(RiskEvent(
         resident_id="elderly-001",
@@ -145,14 +185,27 @@ def test_device_inventory_and_alert_acknowledgement(monkeypatch, tmp_path) -> No
 
     class FakeGateway:
         async def list_devices(self):
-            return [{
-                "id": "ac-002",
-                "title": "A-101 房间空调",
-                "actions": [{"name": "setTemperature"}],
-            }]
+            return [
+                {
+                    "id": device_id,
+                    "title": device_id,
+                    "actions": [{"name": action}],
+                }
+                for device_id, action in (
+                    ("wristband-001", "updateVitals"),
+                    ("mattress-001", "updateSleepState"),
+                    ("environment-sensor-001", "updateEnvironment"),
+                    ("ac-002", "setTemperature"),
+                )
+            ]
 
         async def query_state(self, device_id):
-            return {"device_id": device_id, "targetTemp": 24}
+            if device_id == "ac-002":
+                return {"device_id": device_id, "targetTemp": 24}
+            return {
+                "device_id": device_id,
+                "observedAt": "2026-07-16T10:00:00+00:00",
+            }
 
     monkeypatch.setattr(app_module, "_eldercare_store", store)
     monkeypatch.setattr(app_module, "_v2_gateway", FakeGateway())
@@ -167,7 +220,9 @@ def test_device_inventory_and_alert_acknowledgement(monkeypatch, tmp_path) -> No
 
     assert inventory.status_code == 200
     assert len(inventory.json()["devices"]) == 4
-    assert inventory.json()["devices"][-1]["transport"] == "WoT TD / MCP"
+    assert {item["transport"] for item in inventory.json()["devices"]} == {
+        "WoT TD / MCP"
+    }
     assert inventory.json()["devices"][-1]["state"]["targetTemp"] == 24
     assert acknowledged.status_code == 200
     assert acknowledged.json()["status"] == "handled"

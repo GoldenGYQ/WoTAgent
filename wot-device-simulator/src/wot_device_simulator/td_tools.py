@@ -24,6 +24,16 @@ class TDToolDefinition:
     title: str
     location: str
     properties: tuple[str, ...] = ()
+    capabilities: tuple[str, ...] = ()
+    mcp_scopes: tuple[str, ...] = ()
+
+
+def _domain_scope(td: ThingDescription) -> str:
+    capabilities = set(td.capabilities)
+    for domain in ("health", "security", "energy", "housekeeping", "device_ops"):
+        if domain in capabilities:
+            return f"wot.{domain}"
+    return "wot.environment"
 
 
 def _identifier(value: str) -> str:
@@ -62,6 +72,7 @@ def compile_td_tools(td: ThingDescription) -> list[TDToolDefinition]:
 
     definitions: list[TDToolDefinition] = []
     readable = [prop.name for prop in td.properties if prop.readable]
+    domain_scope = _domain_scope(td)
     if readable:
         definitions.append(TDToolDefinition(
             name=state_tool_name(td.device_id),
@@ -76,6 +87,8 @@ def compile_td_tools(td: ThingDescription) -> list[TDToolDefinition]:
             title=td.title,
             location=td.location,
             properties=tuple(readable),
+            capabilities=tuple(td.capabilities),
+            mcp_scopes=(domain_scope, "wot.device_ops"),
         ))
 
     for action in td.actions:
@@ -94,6 +107,8 @@ def compile_td_tools(td: ThingDescription) -> list[TDToolDefinition]:
             affordance=action.name,
             title=td.title,
             location=td.location,
+            capabilities=tuple(td.capabilities),
+            mcp_scopes=(domain_scope,),
         ))
     return definitions
 

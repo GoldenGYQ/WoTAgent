@@ -89,6 +89,24 @@ class PlanStep(BaseModel):
             inferred = {"property": "volume", "value": self.input["volume"]}
         elif self.action == "setMistLevel" and "level" in self.input:
             inferred = {"property": "mistLevel", "value": self.input["level"]}
+        elif self.action == "lock":
+            inferred = {"property": "locked", "value": True}
+        elif self.action == "unlock":
+            inferred = {"property": "locked", "value": False}
+        elif self.action == "startRecording":
+            inferred = {"property": "recording", "value": True}
+        elif self.action == "stopRecording":
+            inferred = {"property": "recording", "value": False}
+        elif self.action == "startCharging":
+            inferred = {"property": "charging", "value": True}
+        elif self.action == "stopCharging":
+            inferred = {"property": "charging", "value": False}
+        elif self.action == "setChargingLimit" and "limitAmps" in self.input:
+            inferred = {"property": "limitAmps", "value": self.input["limitAmps"]}
+        elif self.action == "startCleaning":
+            inferred = {"property": "cleaning", "value": True}
+        elif self.action in {"stopCleaning", "returnToDock"}:
+            inferred = {"property": "cleaning", "value": False}
         if inferred is not None:
             # Standard action semantics are authoritative. The LLM cannot
             # redefine turnOn as on=false or verify a different parameter.

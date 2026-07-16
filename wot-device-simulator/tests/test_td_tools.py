@@ -59,3 +59,50 @@ async def test_fastmcp_registers_generated_schema_and_executes_it() -> None:
     result = await mcp.call_tool(tool_name, {"brightness": 37})
     assert result.structured_content["success"] is True
     assert result.structured_content["new_state"]["brightness"] == 37
+
+
+@pytest.mark.asyncio
+async def test_health_sensor_td_is_exposed_and_updates_readable_state() -> None:
+    mcp = _build_server()
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+    tool_name = action_tool_name("wristband-001", "updateVitals")
+
+    assert state_tool_name("wristband-001") in tools
+    assert tool_name in tools
+    assert tools[tool_name].meta["wot"]["capabilities"] == [
+        "health",
+        "heart_rate",
+        "spo2",
+        "fall_detection",
+    ]
+
+    result = await mcp.call_tool(tool_name, {
+        "heartRate": 108,
+        "spo2": 96,
+        "fallDetected": False,
+        "observedAt": "2026-07-16T10:00:00+00:00",
+    })
+
+    assert result.structured_content["success"] is True
+    assert result.structured_content["new_state"]["heartRate"] == 108
+    assert result.structured_content["new_state"]["observedAt"] == "2026-07-16T10:00:00+00:00"
+
+
+@pytest.mark.asyncio
+async def test_professional_domain_tools_have_scopes_and_execute() -> None:
+    mcp = _build_server()
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+    unlock = tools[action_tool_name("door-lock-001", "unlock")]
+    meter = tools[state_tool_name("smart-meter-001")]
+
+    assert unlock.meta["wot"]["mcp_scopes"] == ["wot.security"]
+    assert meter.meta["wot"]["mcp_scopes"] == ["wot.energy", "wot.device_ops"]
+
+    result = await mcp.call_tool(unlock.name, {})
+    assert result.structured_content["new_state"]["locked"] is False
+
+    cleaning = await mcp.call_tool(
+        action_tool_name("robot-vacuum-001", "startCleaning"),
+        {"zone": "living_room"},
+    )
+    assert cleaning.structured_content["new_state"]["cleaning"] is True

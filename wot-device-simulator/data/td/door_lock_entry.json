@@ -1,0 +1,19 @@
+{
+  "@context": "https://www.w3.org/2022/wot/td/v1.1",
+  "id": "urn:dev:wot:door-lock-001",
+  "title": "Main Entrance Lock",
+  "location": "entrance",
+  "capabilities": ["security", "access_control"],
+  "actions": {
+    "lock": {
+      "input": {"type": "object", "properties": {}, "additionalProperties": false}
+    },
+    "unlock": {
+      "input": {"type": "object", "properties": {}, "additionalProperties": false}
+    }
+  },
+  "properties": {
+    "locked": {"type": "boolean"},
+    "tamperAlarm": {"type": "boolean"}
+  }
+}

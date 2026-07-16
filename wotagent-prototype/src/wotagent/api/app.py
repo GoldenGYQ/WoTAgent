@@ -41,7 +41,14 @@ from ..gateway import MCPDeviceGateway
 from ..logging import configure_logging
 from ..orchestration import TaskOrchestrator
 from ..policy import PolicyEngine
+from ..prompting import (
+    AGENT_PROMPT_PROFILES,
+    CONTEXT_PACK_VERSION,
+    PROMPT_KERNEL_VERSION,
+    profile_for,
+)
 from ..telemetry import InMemoryTraceStore
+from ..supervisor import AGENT_REGISTRY, select_supervisor_route
 
 _env_path = Path(__file__).resolve().parents[3] / ".env"
 load_dotenv(_env_path, encoding="utf-8")
@@ -60,7 +67,6 @@ _pipeline = create_wot_pipeline(
     reasoning_effort=os.getenv("REASONING_EFFORT", "high"),
     enable_streaming=_bool_env("ENABLE_STREAMING", default=True),
 )
-_v2_policy = PolicyEngine()
 _v2_gateway = MCPDeviceGateway()
 _v2_trace_store = InMemoryTraceStore()
 _v2_conversation_store = ConversationStore(os.getenv("WOTAGENT_CONVERSATION_DB"))
@@ -89,16 +95,24 @@ _eldercare_chat_agent = EldercareChatAgent(
 )
 
 
-def _build_v2_graph(checkpointer: Any):
+def _build_v2_graph(
+    checkpointer: Any,
+    *,
+    agent_id: str = "environment_agent",
+):
+    allowed_scopes = set(AGENT_REGISTRY[agent_id].mcp_scopes)
+    gateway = MCPDeviceGateway(allowed_scopes=allowed_scopes)
+    policy = PolicyEngine()
     dependencies = AgentGraphDependencies(
         planner=LangChainTaskPlanner(
             _pipeline.planner,
             trace_store=_v2_trace_store,
-            capability_provider=_v2_gateway.capabilities,
+            capability_provider=gateway.capabilities,
             thinking_runnable=_pipeline.thinking_planner,
+            agent_profile=profile_for(agent_id),
         ),
-        policy=_v2_policy,
-        orchestrator=TaskOrchestrator(_v2_gateway, _v2_policy),
+        policy=policy,
+        orchestrator=TaskOrchestrator(gateway, policy),
         responder=LangChainResponseComposer(
             _pipeline.response_model,
             trace_store=_v2_trace_store,
@@ -109,17 +123,39 @@ def _build_v2_graph(checkpointer: Any):
     return build_agent_graph(dependencies, checkpointer=checkpointer)
 
 
-_v2_graph = _build_v2_graph(InMemorySaver())
+_DOMAIN_GRAPH_AGENTS = (
+    "environment_agent",
+    "security_agent",
+    "energy_agent",
+    "housekeeping_agent",
+    "device_ops_agent",
+)
+
+
+def _build_domain_graphs(checkpointer: Any) -> dict[str, Any]:
+    return {
+        agent_id: _build_v2_graph(
+            checkpointer,
+            agent_id=agent_id,
+        )
+        for agent_id in _DOMAIN_GRAPH_AGENTS
+    }
+
+
+_domain_graphs = _build_domain_graphs(InMemorySaver())
+_v2_graph = _domain_graphs["environment_agent"]
 _bootstrap_v2_graph = _v2_graph
+_task_graphs: dict[str, Any] = {}
 
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
-    global _v2_graph
+    global _v2_graph, _domain_graphs
     checkpoint_context = None
-    monitor_task = None
-    monitor_stop = asyncio.Event()
+    consumer_task = None
+    runtime_stop = asyncio.Event()
     previous_graph = _v2_graph
+    previous_domain_graphs = _domain_graphs
     if _v2_graph is _bootstrap_v2_graph:
         checkpoint_path = Path(os.getenv(
             "WOTAGENT_CHECKPOINT_DB",
@@ -129,19 +165,21 @@ async def _lifespan(_app: FastAPI):
         checkpoint_context = AsyncSqliteSaver.from_conn_string(str(checkpoint_path))
         checkpointer = await checkpoint_context.__aenter__()
         await checkpointer.setup()
-        _v2_graph = _build_v2_graph(checkpointer)
-    if _bool_env("ELDERCARE_MONITOR_ENABLED", default=True):
-        monitor_task = asyncio.create_task(_eldercare_runtime.monitor_forever(
-            monitor_stop,
-            interval_seconds=float(os.getenv("ELDERCARE_MONITOR_INTERVAL_SECONDS", "5")),
+        _domain_graphs = _build_domain_graphs(checkpointer)
+        _v2_graph = _domain_graphs["environment_agent"]
+    if _bool_env("ELDERCARE_EVENT_CONSUMER_ENABLED", default=True):
+        consumer_task = asyncio.create_task(_eldercare_runtime.consume_outbox_forever(
+            runtime_stop,
+            interval_seconds=float(os.getenv("ELDERCARE_EVENT_CONSUMER_INTERVAL_SECONDS", "1")),
         ))
     try:
         yield
     finally:
-        monitor_stop.set()
-        if monitor_task is not None:
-            await monitor_task
+        runtime_stop.set()
+        if consumer_task is not None:
+            await consumer_task
         _v2_graph = previous_graph
+        _domain_graphs = previous_domain_graphs
         if checkpoint_context is not None:
             await checkpoint_context.__aexit__(None, None, None)
 
@@ -255,10 +293,33 @@ async def get_v2_capabilities() -> dict[str, Any]:
         "streaming": _bool_env("ENABLE_STREAMING", default=True),
         "eldercare": {
             "event_driven": True,
-            "scheduled_monitor": _bool_env("ELDERCARE_MONITOR_ENABLED", default=True),
+            "monitor_process": "wotagent monitor",
+            "embedded_monitor": False,
+            "event_outbox": True,
+            "event_consumer": _bool_env("ELDERCARE_EVENT_CONSUMER_ENABLED", default=True),
             "mcp_resources": True,
-            "subagents": ["environment_agent", "care_agent"],
+            "subagents": ["health_agent", "care_agent", "environment_agent"],
         },
+        "agents": [spec.model_dump() for spec in AGENT_REGISTRY.values()],
+    }
+
+
+@app.get("/api/v2/agents")
+async def list_domain_agents() -> dict[str, Any]:
+    return {"agents": [spec.model_dump() for spec in AGENT_REGISTRY.values()]}
+
+
+@app.get("/api/v2/prompts")
+async def list_prompt_profiles() -> dict[str, Any]:
+    return {
+        "kernel_version": PROMPT_KERNEL_VERSION,
+        "context_pack_version": CONTEXT_PACK_VERSION,
+        "profiles": [
+            profile.model_dump()
+            for profile in AGENT_PROMPT_PROFILES.values()
+        ],
+        "dynamic_context_in_system_prompt": False,
+        "response_history_replayed": False,
     }
 
 
@@ -285,7 +346,7 @@ async def get_eldercare_summary(resident_id: str) -> dict[str, Any]:
 @app.post("/api/v2/eldercare/readings", status_code=202)
 async def ingest_eldercare_reading(reading: SensorReading) -> dict[str, Any]:
     try:
-        return await _eldercare_runtime.ingest(reading)
+        return await _eldercare_runtime.publish_reading(reading)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -320,6 +381,24 @@ async def list_eldercare_actions(resident_id: str | None = None, limit: int = 10
     }
 
 
+@app.get("/api/v2/eldercare/outbox")
+async def list_eldercare_outbox(limit: int = 100) -> dict[str, Any]:
+    return {"events": _eldercare_store.list_outbox(limit=limit)}
+
+
+@app.get("/api/v2/eldercare/monitor/status")
+async def get_eldercare_monitor_status() -> dict[str, Any]:
+    status = _eldercare_store.service_status("eldercare-monitor")
+    return status or {
+        "service_id": "eldercare-monitor",
+        "status": "offline",
+        "reported_status": "unknown",
+        "details": {},
+        "updated_at": None,
+        "age_seconds": None,
+    }
+
+
 @app.post("/api/v2/eldercare/events/{event_id}/acknowledge")
 async def acknowledge_eldercare_event(event_id: str) -> dict[str, Any]:
     event = _eldercare_store.handle_risk(event_id)
@@ -333,45 +412,32 @@ async def list_eldercare_devices(resident_id: str) -> dict[str, Any]:
     resident = _eldercare_store.get_resident(resident_id)
     if resident is None:
         raise HTTPException(status_code=404, detail="resident not found")
-    latest = _eldercare_store.latest(resident_id)
-    sensor_groups = [
-        ("wristband", "健康手环", "HTTP 模拟接入", ["heart_rate", "spo2", "fall_detected"]),
-        ("mattress", "智能床垫", "HTTP 模拟接入", ["bed_occupancy", "sleep_quality"]),
-        ("environment", "温湿度传感器", "HTTP 模拟接入", ["room_temperature", "room_humidity"]),
+    mapped_devices = [
+        (resident.wristband_device_id, "sensor"),
+        (resident.mattress_device_id, "sensor"),
+        (resident.environment_sensor_device_id, "sensor"),
+        (resident.environment_device_id, "actuator"),
     ]
     devices = []
-    for suffix, name, transport, sensor_types in sensor_groups:
-        readings = [latest[item] for item in sensor_types if item in latest]
-        last_seen = max((str(item["observed_at"]) for item in readings), default=None)
-        devices.append({
-            "device_id": f"{resident_id}-{suffix}",
-            "name": name,
-            "kind": "sensor",
-            "transport": transport,
-            "status": _reading_status(last_seen),
-            "last_seen": last_seen,
-            "capabilities": sensor_types,
-            "state": {item: latest[item] for item in sensor_types if item in latest},
-        })
-
-    if resident.environment_device_id:
+    try:
+        capabilities = await _v2_gateway.list_devices()
+    except Exception:
+        capabilities = []
+    by_id = {str(item.get("id")): item for item in capabilities}
+    for device_id, kind in mapped_devices:
+        if not device_id:
+            continue
+        capability = by_id.get(device_id, {})
         try:
-            capabilities = await _v2_gateway.list_devices()
-            capability = next(
-                (
-                    item for item in capabilities
-                    if item.get("id") == resident.environment_device_id
-                ),
-                {},
-            )
-            state = await _v2_gateway.query_state(resident.environment_device_id)
+            state = await _v2_gateway.query_state(device_id)
+            observed_at = state.get("observedAt") or datetime.now(UTC).isoformat()
             devices.append({
-                "device_id": resident.environment_device_id,
-                "name": capability.get("title") or "房间空调",
-                "kind": "actuator",
+                "device_id": device_id,
+                "name": capability.get("title") or device_id,
+                "kind": kind,
                 "transport": "WoT TD / MCP",
-                "status": "online",
-                "last_seen": datetime.now(UTC).isoformat(),
+                "status": _reading_status(str(observed_at)),
+                "last_seen": observed_at,
                 "capabilities": [
                     item.get("name") for item in capability.get("actions", [])
                 ],
@@ -379,9 +445,9 @@ async def list_eldercare_devices(resident_id: str) -> dict[str, Any]:
             })
         except Exception as exc:
             devices.append({
-                "device_id": resident.environment_device_id,
-                "name": "房间空调",
-                "kind": "actuator",
+                "device_id": device_id,
+                "name": capability.get("title") or device_id,
+                "kind": kind,
                 "transport": "WoT TD / MCP",
                 "status": "offline",
                 "last_seen": None,
@@ -513,10 +579,11 @@ async def confirm_task_v2(task_id: str, req: TaskConfirmV2Request) -> TaskCreate
     else:
         conversation_id = record.session_id
 
-    snapshot = await _v2_graph.aget_state({"configurable": {"thread_id": task_id}})
+    graph = _task_graphs.get(task_id, _v2_graph)
+    snapshot = await graph.aget_state({"configurable": {"thread_id": task_id}})
     if not snapshot.values or not snapshot.interrupts:
         raise HTTPException(status_code=409, detail="task is not waiting for confirmation")
-    result = await _v2_graph.ainvoke(
+    result = await graph.ainvoke(
         Command(resume={"approved": req.approved}),
         config={"configurable": {"thread_id": task_id}},
     )
@@ -557,11 +624,22 @@ async def _run_v2_task(
                 "thinking": thinking,
             },
         )
-        if is_eldercare_request(
+        supervisor_route = select_supervisor_route(
             message,
             history,
             _eldercare_store.list_residents(),
-        ):
+        )
+        await _v2_trace_store.record(
+            task_id=task_id,
+            type="agent.delegation.created",
+            node="butler_supervisor",
+            data={
+                "agent_id": supervisor_route.agent_id,
+                "runtime": supervisor_route.runtime,
+                "reason": supervisor_route.reason,
+            },
+        )
+        if supervisor_route.runtime == "eldercare":
             eldercare_result = await _eldercare_chat_agent.run(
                 task_id=task_id,
                 message=message,
@@ -589,7 +667,9 @@ async def _run_v2_task(
             )
             await _finish_v2_trace(response)
             return
-        result = await _v2_graph.ainvoke({
+        graph = _selected_domain_graph(supervisor_route.agent_id)
+        _task_graphs[task_id] = graph
+        result = await graph.ainvoke({
             "request_id": request_id,
             "task_id": task_id,
             "session_id": conversation_id,
@@ -598,7 +678,10 @@ async def _run_v2_task(
             "message": message,
             "thinking": thinking,
             "conversation_history": history,
-            "context": {"runtime": runtime_context},
+            "context": {
+                "runtime": runtime_context,
+                "delegated_agent": supervisor_route.agent_id,
+            },
         }, config={"configurable": {"thread_id": task_id}})
         response = _task_v2_response(result, conversation_id)
         if response.status == "waiting_confirmation":
@@ -631,6 +714,13 @@ async def _run_v2_task(
             status="failed",
             result={"status": "failed", "error": str(exc)},
         )
+
+
+def _selected_domain_graph(agent_id: str):
+    environment_graph = _domain_graphs.get("environment_agent")
+    if environment_graph is not None and _v2_graph is not environment_graph:
+        return _v2_graph
+    return _domain_graphs.get(agent_id, _v2_graph)
 
 
 @app.get("/api/v2/tasks/{task_id}")

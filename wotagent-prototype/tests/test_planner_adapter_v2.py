@@ -9,6 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from wotagent.agent_graph import LangChainTaskPlanner, capability_context
+from wotagent.prompting import profile_for
 from wotagent.telemetry import InMemoryTraceStore
 
 
@@ -63,7 +64,9 @@ def test_parses_valid_function_call_into_typed_plan() -> None:
     assert plan.intent == "control"
     assert plan.steps[0].device_id == "light-001"
     assert plan.steps[0].postconditions[0].value is True
-    assert "Available devices" in runnable.messages[0][1]
+    assert "Assigned agent: environment_agent" in runnable.messages[0][1]
+    assert "light-001" not in runnable.messages[0][1]
+    assert "light-001" in runnable.messages[2][1]
 
 
 def test_thinking_request_uses_dedicated_planner_and_marks_trace() -> None:
@@ -85,7 +88,8 @@ def test_thinking_request_uses_dedicated_planner_and_marks_trace() -> None:
     assert "Private planning analysis" in direct.messages[-1][1]
     assert "Classify this request as chat." in direct.messages[-1][1]
     assert deep.messages is not None
-    assert "Available devices" in deep.messages[0][1]
+    assert "Assigned agent: environment_agent" in deep.messages[0][1]
+    assert "light-001" in deep.messages[2][1]
     completed = [event for event in events if event.type == "model.request.completed"]
     assert [event.data["purpose"] for event in completed] == ["task_analysis", "task_planning"]
     assert completed[0].data["model_thinking"] is True
@@ -176,8 +180,24 @@ def test_planner_uses_injected_mcp_capability_provider_as_source_of_truth() -> N
     )({"message": "打开客厅灯"}))
 
     system_prompt = runnable.messages[0][1]
-    assert "remote-esp32-1" in system_prompt
-    assert "light-001" not in system_prompt
+    capability_prompt = runnable.messages[2][1]
+    assert "remote-esp32-1" not in system_prompt
+    assert "remote-esp32-1" in capability_prompt
+    assert "light-001" not in capability_prompt
+
+
+def test_planner_uses_the_assigned_professional_agent_profile() -> None:
+    runnable = FakeRunnable({"intent": "chat", "summary": "ok", "steps": []})
+
+    asyncio.run(LangChainTaskPlanner(
+        runnable,
+        agent_profile=profile_for("security_agent"),
+    )({"message": "检查门锁"}))
+
+    system_prompt = runnable.messages[0][1]
+    assert "Assigned agent: security_agent" in system_prompt
+    assert "wot.security" in system_prompt
+    assert "wot.energy" not in system_prompt
 
 
 def test_planner_records_usage_and_safe_reasoning_summary() -> None:
@@ -206,6 +226,10 @@ def test_planner_records_usage_and_safe_reasoning_summary() -> None:
     assert record.usage.total_tokens == 120
     completed = next(event for event in events if event.type == "model.request.completed")
     assert completed.data["reasoning_tokens"] == 8
+    started = next(event for event in events if event.type == "model.request.started")
+    assert started.data["agent_id"] == "environment_agent"
+    assert started.data["system_characters"] > 0
+    assert started.data["capability_context_characters"] > 0
     summary = next(event for event in events if event.type == "model.reasoning.summary")
     assert summary.data == {"summary": "打开客厅灯", "intent": "control", "step_count": 1}
     assert all("reasoning_content" not in event.data for event in events)
@@ -347,8 +371,8 @@ def test_runtime_role_is_exposed_as_fact_but_not_decided_by_planner() -> None:
         "context": {"runtime": {"current_role": "operator"}},
     }))
 
-    assert '"current_role": "operator"' in runnable.messages[0][1]
-    assert "Never ask the user whether their role changed" in runnable.messages[0][1]
+    assert '"current_role":"operator"' in runnable.messages[1][1]
+    assert "Planning does not grant permission" in runnable.messages[0][1]
 
 
 def test_elliptical_followup_inherits_recent_device_scope_for_capability_selection() -> None:
@@ -362,10 +386,10 @@ def test_elliptical_followup_inherits_recent_device_scope_for_capability_selecti
         ],
     }))
 
-    system = runnable.messages[0][1]
-    assert "light-001" in system
-    assert "light-007" in system
-    assert "ac-001" not in system
+    capability_prompt = runnable.messages[2][1]
+    assert "light-001" in capability_prompt
+    assert "light-007" in capability_prompt
+    assert "ac-001" not in capability_prompt
 
 
 def test_plan_repair_cannot_reverse_power_off_intent() -> None:

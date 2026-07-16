@@ -2,10 +2,10 @@
 setlocal
 
 cd /d "%~dp0.."
-set "PROJECT_DIR=%CD%\frontend\wot-vue"
+set "PROJECT_DIR=%CD%\frontend\wotagent-v2-console"
 
 if not exist "%PROJECT_DIR%" (
-  echo [ERROR] Cannot find frontend\wot-vue directory.
+  echo [ERROR] Cannot find frontend\wotagent-v2-console directory.
   exit /b 1
 )
 

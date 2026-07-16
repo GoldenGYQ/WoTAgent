@@ -219,6 +219,8 @@ class MCPToolClient:
                 "actions": [],
                 "properties": [],
                 "device_type": str(binding.get("device_type", "")),
+                "capabilities": list(binding.get("capabilities") or []),
+                "read_scopes": [],
                 "aliases": list(binding.get("aliases") or []),
                 "location_aliases": list(binding.get("location_aliases") or []),
             })
@@ -226,9 +228,13 @@ class MCPToolClient:
                 device["actions"].append({
                     "name": str(binding.get("affordance", "")),
                     "input_schema": tool.get("input_schema") or {},
+                    "mcp_scopes": list(binding.get("mcp_scopes") or []),
                 })
             elif binding.get("operation") == "read":
                 device["properties"] = list(binding.get("properties") or [])
+                device["read_scopes"] = list(binding.get("mcp_scopes") or [])
+            if not device["device_type"] and device["capabilities"]:
+                device["device_type"] = str(device["capabilities"][0])
         for device in devices.values():
             device["actions"].sort(key=lambda item: item["name"])
         return sorted(devices.values(), key=lambda item: item["device_id"])
