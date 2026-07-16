@@ -36,6 +36,7 @@ class EldercareStore:
                     name TEXT NOT NULL,
                     room TEXT NOT NULL,
                     caregiver TEXT NOT NULL,
+                    environment_device_id TEXT,
                     active INTEGER NOT NULL DEFAULT 1
                 );
                 CREATE TABLE IF NOT EXISTS sensor_readings (
@@ -75,40 +76,62 @@ class EldercareStore:
                 );
                 """
             )
+            columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(residents)")
+            }
+            if "environment_device_id" not in columns:
+                connection.execute(
+                    "ALTER TABLE residents ADD COLUMN environment_device_id TEXT"
+                )
 
     def upsert_resident(self, resident: Resident) -> Resident:
         with self._lock, self._connect() as connection:
             connection.execute(
-                """INSERT INTO residents(resident_id, name, room, caregiver, active)
-                   VALUES (?, ?, ?, ?, ?)
+                """INSERT INTO residents(
+                     resident_id, name, room, caregiver, environment_device_id, active
+                   ) VALUES (?, ?, ?, ?, ?, ?)
                    ON CONFLICT(resident_id) DO UPDATE SET
                      name=excluded.name, room=excluded.room,
-                     caregiver=excluded.caregiver, active=excluded.active""",
+                     caregiver=excluded.caregiver,
+                     environment_device_id=excluded.environment_device_id,
+                     active=excluded.active""",
                 (
                     resident.resident_id,
                     resident.name,
                     resident.room,
                     resident.caregiver,
+                    resident.environment_device_id,
                     int(resident.active),
                 ),
             )
         return resident
 
     def seed_demo(self) -> None:
-        if self.list_residents():
-            return
-        self.upsert_resident(Resident(
-            resident_id="elderly-001",
-            name="张爷爷",
-            room="A-101",
-            caregiver="王护理员",
-        ))
-        self.upsert_resident(Resident(
-            resident_id="elderly-002",
-            name="李奶奶",
-            room="A-102",
-            caregiver="赵护理员",
-        ))
+        defaults = [
+            Resident(
+                resident_id="elderly-001",
+                name="张爷爷",
+                room="A-101",
+                caregiver="王护理员",
+                environment_device_id="ac-002",
+            ),
+            Resident(
+                resident_id="elderly-002",
+                name="李奶奶",
+                room="A-102",
+                caregiver="赵护理员",
+                environment_device_id="ac-003",
+            ),
+        ]
+        existing = {item.resident_id: item for item in self.list_residents()}
+        for resident in defaults:
+            current = existing.get(resident.resident_id)
+            if current is None:
+                self.upsert_resident(resident)
+            elif current.environment_device_id is None:
+                self.upsert_resident(current.model_copy(update={
+                    "environment_device_id": resident.environment_device_id,
+                }))
 
     def list_residents(self) -> list[Resident]:
         with self._lock, self._connect() as connection:
@@ -226,6 +249,20 @@ class EldercareStore:
             rows = connection.execute(query, params).fetchall()
         return [self._risk(row) for row in rows]
 
+    def handle_risk(self, event_id: str) -> RiskEvent | None:
+        with self._lock, self._connect() as connection:
+            cursor = connection.execute(
+                "UPDATE risk_events SET status = 'handled' WHERE event_id = ?",
+                (event_id,),
+            )
+            if cursor.rowcount == 0:
+                return None
+            row = connection.execute(
+                "SELECT * FROM risk_events WHERE event_id = ?",
+                (event_id,),
+            ).fetchone()
+        return self._risk(row) if row else None
+
     def summary(self, resident_id: str) -> HealthSummary:
         resident = self.get_resident(resident_id)
         if resident is None:
@@ -294,6 +331,7 @@ class EldercareStore:
             name=row["name"],
             room=row["room"],
             caregiver=row["caregiver"],
+            environment_device_id=row["environment_device_id"],
             active=bool(row["active"]),
         )
 

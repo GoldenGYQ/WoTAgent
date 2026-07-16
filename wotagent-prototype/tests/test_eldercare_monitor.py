@@ -86,3 +86,25 @@ def test_health_summary_uses_latest_resources_and_24h_average(tmp_path) -> None:
 
     assert summary.heart_rate_avg == 80.0
     assert summary.latest["sleep_quality"]["value"] == "poor"
+
+
+def test_stale_fall_and_environment_readings_do_not_retrigger(tmp_path) -> None:
+    store = make_store(tmp_path)
+    now = datetime.now(UTC)
+    store.add_reading(SensorReading(
+        resident_id="elderly-001",
+        sensor_type="fall_detected",
+        value=True,
+        observed_at=now - timedelta(minutes=2),
+    ))
+    store.add_reading(SensorReading(
+        resident_id="elderly-001",
+        sensor_type="room_temperature",
+        value=31,
+        unit="C",
+        observed_at=now - timedelta(minutes=11),
+    ))
+
+    events = HealthMonitor(store).evaluate_resident("elderly-001", now=now)
+
+    assert events == []

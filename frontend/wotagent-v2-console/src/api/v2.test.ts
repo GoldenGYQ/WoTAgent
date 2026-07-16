@@ -61,4 +61,16 @@ describe('agentV2Api', () => {
 
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v2/conversations/conv-1/turns')
   })
+
+  it('scopes conversation listing to the login account', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ conversations: [] }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await agentV2Api.listConversations('JH-2')
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v2/conversations?user_id=JH-2')
+  })
 })

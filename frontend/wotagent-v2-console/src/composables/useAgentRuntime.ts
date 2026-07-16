@@ -16,6 +16,7 @@ const conversations = reactive<RuntimeConversation[]>([])
 const activeConversationId = ref<string | null>(null)
 const activeTaskId = ref<string | null>(null)
 const role = ref<AgentRole>('operator')
+const userId = ref('local-user')
 const thinking = ref(localStorage.getItem('wotagent-v2-console.thinking') === 'true')
 const thinkingSupported = ref(false)
 const backendState = ref<'checking' | 'online' | 'offline'>('checking')
@@ -46,7 +47,7 @@ function conversationById(conversationId: string): RuntimeConversation | undefin
 
 function readStoredTasks(): StoredTask[] {
   try {
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]')
+    const parsed = JSON.parse(localStorage.getItem(`${STORAGE_KEY}.${userId.value}`) ?? '[]')
     return Array.isArray(parsed) ? parsed.slice(0, 30) : []
   } catch {
     return []
@@ -64,11 +65,11 @@ function persistState(): void {
     thinking: task.thinking,
     createdAt: task.createdAt,
   }))
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot))
+  localStorage.setItem(`${STORAGE_KEY}.${userId.value}`, JSON.stringify(snapshot))
   if (activeConversationId.value) {
-    localStorage.setItem(ACTIVE_CONVERSATION_KEY, activeConversationId.value)
+    localStorage.setItem(`${ACTIVE_CONVERSATION_KEY}.${userId.value}`, activeConversationId.value)
   } else {
-    localStorage.removeItem(ACTIVE_CONVERSATION_KEY)
+    localStorage.removeItem(`${ACTIVE_CONVERSATION_KEY}.${userId.value}`)
   }
 }
 
@@ -265,14 +266,14 @@ async function restoreTask(stored: StoredTask): Promise<void> {
 async function hydrateRuntime(): Promise<void> {
   if (hydrated) return
   hydrated = true
-  const response = await agentV2Api.listConversations()
+  const response = await agentV2Api.listConversations(userId.value)
   conversations.splice(0, conversations.length, ...response.conversations.map((item) => ({
     ...item,
     turns: [],
     loading: false,
   })))
   await Promise.all(readStoredTasks().map(restoreTask))
-  const storedConversation = localStorage.getItem(ACTIVE_CONVERSATION_KEY)
+  const storedConversation = localStorage.getItem(`${ACTIVE_CONVERSATION_KEY}.${userId.value}`)
   activeConversationId.value = conversationById(storedConversation ?? '')?.conversation_id
     ?? conversations[0]?.conversation_id
     ?? null
@@ -285,7 +286,7 @@ async function hydrateRuntime(): Promise<void> {
 async function ensureConversation(): Promise<RuntimeConversation> {
   const current = conversationById(activeConversationId.value ?? '')
   if (current) return current
-  const created = await agentV2Api.createConversation(role.value)
+  const created = await agentV2Api.createConversation(role.value, userId.value)
   const conversation: RuntimeConversation = { ...created, turns: [], loading: false }
   conversations.unshift(conversation)
   activeConversationId.value = conversation.conversation_id
@@ -299,6 +300,7 @@ async function submit(message: string): Promise<RuntimeTask> {
     conversation.conversation_id,
     role.value,
     thinking.value && thinkingSupported.value,
+    userId.value,
   )
   if (!response.task_id) throw new Error('后端未返回 task_id')
   const now = new Date().toISOString()
@@ -396,6 +398,32 @@ async function checkBackend(): Promise<void> {
   }
 }
 
+function resetRuntimeState(): void {
+  subscriptions.forEach((subscription) => subscription.close())
+  subscriptions.clear()
+  pollers.forEach((poller) => clearInterval(poller))
+  pollers.clear()
+  tasks.splice(0)
+  conversations.splice(0)
+  activeConversationId.value = null
+  activeTaskId.value = null
+  hydrated = false
+}
+
+async function switchIdentity(nextUserId: string, nextRole: AgentRole): Promise<void> {
+  if (hydrated && userId.value === nextUserId && role.value === nextRole) return
+  resetRuntimeState()
+  userId.value = nextUserId
+  role.value = nextRole
+  await hydrateRuntime()
+}
+
+function clearIdentity(): void {
+  resetRuntimeState()
+  userId.value = 'local-user'
+  role.value = 'operator'
+}
+
 export function useAgentRuntime() {
   const activeConversation = computed(() => conversationById(activeConversationId.value ?? '') ?? null)
   const activeTask = computed(() => taskById(activeTaskId.value ?? '') ?? null)
@@ -416,6 +444,7 @@ export function useAgentRuntime() {
     activeTaskId,
     activeTask,
     role,
+    userId,
     thinking,
     thinkingSupported,
     backendState,
@@ -427,5 +456,7 @@ export function useAgentRuntime() {
     refreshTask,
     checkBackend,
     hydrateRuntime,
+    switchIdentity,
+    clearIdentity,
   }
 }

@@ -19,6 +19,9 @@ describe('EldercareDashboard', () => {
     })
     vi.spyOn(agentV2Api, 'listRiskEvents').mockResolvedValue({ events: [] })
     vi.spyOn(agentV2Api, 'listCareActions').mockResolvedValue({ actions: [] })
+    vi.spyOn(agentV2Api, 'listEldercareDevices').mockResolvedValue({
+      resident_id: 'elderly-001', devices: [],
+    })
     const simulate = vi.spyOn(agentV2Api, 'simulateEldercare').mockResolvedValue({
       scenario: 'fall', resident_id: 'elderly-001', events: [],
       tasks: [{ task_id: 'eldercare-1', status: 'succeeded', response: '已处置' }],
@@ -34,9 +37,13 @@ describe('EldercareDashboard', () => {
 
     const wrapper = mount(EldercareDashboard)
     await flushPromises()
+    const collectionTab = wrapper.findAll('button').find((button) => button.text().includes('数据采集'))
+    await collectionTab!.trigger('click')
     const fallButton = wrapper.findAll('button').find((button) => button.text().includes('模拟跌倒'))
     await fallButton!.trigger('click')
     await flushPromises()
+    const alertsTab = wrapper.findAll('button').find((button) => button.text().includes('异常告警'))
+    await alertsTab!.trigger('click')
 
     expect(simulate).toHaveBeenCalledWith('elderly-001', 'fall')
     expect(wrapper.text()).toContain('eldercare-1')

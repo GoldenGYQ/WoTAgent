@@ -6,6 +6,7 @@ import asyncio
 import os
 import uuid
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +27,16 @@ from ..agent_graph import (
 )
 from ..conversation import ConversationStore
 from ..core import create_wot_pipeline
-from ..eldercare import EldercareRuntime, EldercareStore, Resident, SensorReading
+from ..eldercare import (
+    ELDERCARE_PLAN_SCHEMA,
+    EldercareChatAgent,
+    EldercareCommandPlanner,
+    EldercareRuntime,
+    EldercareStore,
+    Resident,
+    SensorReading,
+    is_eldercare_request,
+)
 from ..gateway import MCPDeviceGateway
 from ..logging import configure_logging
 from ..orchestration import TaskOrchestrator
@@ -56,7 +66,27 @@ _v2_trace_store = InMemoryTraceStore()
 _v2_conversation_store = ConversationStore(os.getenv("WOTAGENT_CONVERSATION_DB"))
 _eldercare_store = EldercareStore(os.getenv("ELDERCARE_DB"))
 _eldercare_store.seed_demo()
-_eldercare_runtime = EldercareRuntime(_eldercare_store, trace_store=_v2_trace_store)
+_eldercare_runtime = EldercareRuntime(
+    _eldercare_store,
+    trace_store=_v2_trace_store,
+    environment_gateway=_v2_gateway,
+)
+_eldercare_command_runnable = _pipeline.response_model.bind(
+    tools=[ELDERCARE_PLAN_SCHEMA],
+    tool_choice={
+        "type": "function",
+        "function": {"name": "generate_eldercare_plan"},
+    },
+)
+_eldercare_chat_agent = EldercareChatAgent(
+    _eldercare_runtime,
+    EldercareCommandPlanner(
+        _eldercare_command_runnable,
+        trace_store=_v2_trace_store,
+        thinking_runnable=_pipeline.thinking_planner,
+    ),
+    trace_store=_v2_trace_store,
+)
 
 
 def _build_v2_graph(checkpointer: Any):
@@ -290,6 +320,86 @@ async def list_eldercare_actions(resident_id: str | None = None, limit: int = 10
     }
 
 
+@app.post("/api/v2/eldercare/events/{event_id}/acknowledge")
+async def acknowledge_eldercare_event(event_id: str) -> dict[str, Any]:
+    event = _eldercare_store.handle_risk(event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="risk event not found")
+    return event.model_dump(mode="json")
+
+
+@app.get("/api/v2/eldercare/residents/{resident_id}/devices")
+async def list_eldercare_devices(resident_id: str) -> dict[str, Any]:
+    resident = _eldercare_store.get_resident(resident_id)
+    if resident is None:
+        raise HTTPException(status_code=404, detail="resident not found")
+    latest = _eldercare_store.latest(resident_id)
+    sensor_groups = [
+        ("wristband", "健康手环", "HTTP 模拟接入", ["heart_rate", "spo2", "fall_detected"]),
+        ("mattress", "智能床垫", "HTTP 模拟接入", ["bed_occupancy", "sleep_quality"]),
+        ("environment", "温湿度传感器", "HTTP 模拟接入", ["room_temperature", "room_humidity"]),
+    ]
+    devices = []
+    for suffix, name, transport, sensor_types in sensor_groups:
+        readings = [latest[item] for item in sensor_types if item in latest]
+        last_seen = max((str(item["observed_at"]) for item in readings), default=None)
+        devices.append({
+            "device_id": f"{resident_id}-{suffix}",
+            "name": name,
+            "kind": "sensor",
+            "transport": transport,
+            "status": _reading_status(last_seen),
+            "last_seen": last_seen,
+            "capabilities": sensor_types,
+            "state": {item: latest[item] for item in sensor_types if item in latest},
+        })
+
+    if resident.environment_device_id:
+        try:
+            capabilities = await _v2_gateway.list_devices()
+            capability = next(
+                (
+                    item for item in capabilities
+                    if item.get("id") == resident.environment_device_id
+                ),
+                {},
+            )
+            state = await _v2_gateway.query_state(resident.environment_device_id)
+            devices.append({
+                "device_id": resident.environment_device_id,
+                "name": capability.get("title") or "房间空调",
+                "kind": "actuator",
+                "transport": "WoT TD / MCP",
+                "status": "online",
+                "last_seen": datetime.now(UTC).isoformat(),
+                "capabilities": [
+                    item.get("name") for item in capability.get("actions", [])
+                ],
+                "state": state,
+            })
+        except Exception as exc:
+            devices.append({
+                "device_id": resident.environment_device_id,
+                "name": "房间空调",
+                "kind": "actuator",
+                "transport": "WoT TD / MCP",
+                "status": "offline",
+                "last_seen": None,
+                "capabilities": [],
+                "state": {"error": str(exc)},
+            })
+    return {"resident_id": resident_id, "devices": devices}
+
+
+def _reading_status(last_seen: str | None) -> str:
+    if not last_seen:
+        return "no_data"
+    observed_at = datetime.fromisoformat(last_seen)
+    if observed_at.tzinfo is None:
+        observed_at = observed_at.replace(tzinfo=UTC)
+    return "online" if (datetime.now(UTC) - observed_at).total_seconds() <= 600 else "stale"
+
+
 @app.post("/api/v2/conversations", response_model=ConversationV2Response, status_code=201)
 async def create_conversation_v2(req: ConversationCreateV2Request) -> dict[str, Any]:
     return _v2_conversation_store.create(
@@ -447,6 +557,38 @@ async def _run_v2_task(
                 "thinking": thinking,
             },
         )
+        if is_eldercare_request(
+            message,
+            history,
+            _eldercare_store.list_residents(),
+        ):
+            eldercare_result = await _eldercare_chat_agent.run(
+                task_id=task_id,
+                message=message,
+                history=history,
+                role=role,
+                thinking=thinking,
+            )
+            if eldercare_result.get("plan") is not None:
+                await _v2_trace_store.record(
+                    task_id=task_id,
+                    type="agent.plan.completed",
+                    node="eldercare_planner",
+                    data={"plan": eldercare_result["plan"]},
+                )
+            response = TaskCreateV2Response(
+                task_id=task_id,
+                turn_id=(
+                    _v2_conversation_store.turn_for_task(task_id) or {}
+                ).get("turn_id"),
+                conversation_id=conversation_id,
+                session_id=conversation_id,
+                status=str(eldercare_result["status"]),
+                response=str(eldercare_result["response"]),
+                thinking=thinking,
+            )
+            await _finish_v2_trace(response)
+            return
         result = await _v2_graph.ainvoke({
             "request_id": request_id,
             "task_id": task_id,

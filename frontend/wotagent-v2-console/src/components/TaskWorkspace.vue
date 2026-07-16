@@ -124,13 +124,19 @@ function currentNode(task: RuntimeTask): string {
     <div v-else class="workspace-empty">
       <div class="empty-mark"><Cpu :size="27" /></div>
       <h1>WoTAgent 2.0</h1>
-      <p>开始一段设备协作会话</p>
+      <p>开始一段设备或养老照护协作会话</p>
       <div class="example-grid">
         <button type="button" @click="emit('example', '把客厅灯打开并调到 45% 亮度')">
           <MessageSquareText :size="16" />把客厅灯调到 45%
         </button>
         <button type="button" @click="emit('example', '查询书房风扇当前状态')">
           <MessageSquareText :size="16" />查询书房风扇状态
+        </button>
+        <button type="button" @click="emit('example', '查看张爷爷今天的健康状态')">
+          <MessageSquareText :size="16" />查看张爷爷健康状态
+        </button>
+        <button type="button" @click="emit('example', '把张爷爷房间温度调到 24 度')">
+          <MessageSquareText :size="16" />调节张爷爷房间温度
         </button>
       </div>
     </div>

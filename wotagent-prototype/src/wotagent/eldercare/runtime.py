@@ -21,11 +21,12 @@ class EldercareRuntime:
         store: EldercareStore,
         *,
         trace_store: InMemoryTraceStore | None = None,
+        environment_gateway: Any | None = None,
     ) -> None:
         self.store = store
         self.trace_store = trace_store or InMemoryTraceStore()
         self.monitor = HealthMonitor(store)
-        self.actions = EldercareActionService(store)
+        self.actions = EldercareActionService(store, environment_gateway=environment_gateway)
         self.graph = build_eldercare_butler_graph(
             self.actions,
             trace_store=self.trace_store,
@@ -91,6 +92,31 @@ class EldercareRuntime:
             )
             await self.trace_store.finish(task_id, status="failed", result=payload)
             return payload
+
+    async def execute_user_delegations(
+        self,
+        *,
+        task_id: str,
+        resident_id: str,
+        message: str,
+        delegations: list[dict[str, Any]],
+        role: str = "operator",
+    ) -> dict[str, Any]:
+        event = RiskEvent(
+            resident_id=resident_id,
+            event_type="user_request",
+            severity="medium",
+            value=True,
+            message=message,
+            source="user-command",
+            context={"requested_delegations": delegations},
+        )
+        return await self.graph.ainvoke({
+            "task_id": task_id,
+            "user_role": role,
+            "event": event.model_dump(mode="json"),
+            "child_results": [],
+        })
 
     async def scan(self) -> list[dict[str, Any]]:
         return [await self.process_event(event) for event in self.monitor.evaluate_all()]

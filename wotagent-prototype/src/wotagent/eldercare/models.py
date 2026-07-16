@@ -29,6 +29,7 @@ class Resident(BaseModel):
     name: str = Field(min_length=1)
     room: str = Field(min_length=1)
     caregiver: str = "值班护理员"
+    environment_device_id: str | None = None
     active: bool = True
 
 
@@ -46,7 +47,9 @@ class SensorReading(BaseModel):
 class RiskEvent(BaseModel):
     event_id: str = Field(default_factory=lambda: f"risk_{uuid4().hex[:12]}")
     resident_id: str
-    event_type: Literal["high_heart_rate", "low_spo2", "fall_detected", "room_overheat"]
+    event_type: Literal[
+        "high_heart_rate", "low_spo2", "fall_detected", "room_overheat", "user_request"
+    ]
     severity: Literal["medium", "high", "critical"]
     value: float | bool
     message: str

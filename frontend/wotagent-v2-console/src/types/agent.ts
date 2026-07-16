@@ -1,5 +1,13 @@
 export type AgentRole = 'viewer' | 'operator' | 'admin'
 
+export interface LoginAccount {
+  accountId: 'JH-1' | 'JH-2'
+  displayName: string
+  role: AgentRole
+  residentId: string
+  residentName: string
+}
+
 export interface UsageSummary {
   model_calls: number
   tool_calls: number
@@ -98,6 +106,17 @@ export interface EldercareSimulationResult {
   resident_id: string
   events: RiskEvent[]
   tasks: Array<{ task_id: string; status: string; response: string }>
+}
+
+export interface EldercareDevice {
+  device_id: string
+  name: string
+  kind: 'sensor' | 'actuator'
+  transport: string
+  status: 'online' | 'stale' | 'no_data' | 'offline'
+  last_seen: string | null
+  capabilities: string[]
+  state: Record<string, unknown>
 }
 
 export interface TaskRecord {

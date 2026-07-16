@@ -46,7 +46,9 @@ class HealthMonitor:
                 latest,
             ))
 
-        spo2 = self._latest_value(latest, "spo2")
+        spo2 = self._fresh_value(
+            latest, "spo2", observed_at, max_age=timedelta(minutes=5)
+        )
         if isinstance(spo2, (int, float)) and float(spo2) < 92:
             candidates.append(self._event(
                 resident_id,
@@ -58,7 +60,9 @@ class HealthMonitor:
                 latest,
             ))
 
-        fall = self._latest_value(latest, "fall_detected")
+        fall = self._fresh_value(
+            latest, "fall_detected", observed_at, max_age=timedelta(minutes=1)
+        )
         if fall is True:
             candidates.append(self._event(
                 resident_id,
@@ -70,7 +74,9 @@ class HealthMonitor:
                 latest,
             ))
 
-        temperature = self._latest_value(latest, "room_temperature")
+        temperature = self._fresh_value(
+            latest, "room_temperature", observed_at, max_age=timedelta(minutes=10)
+        )
         if isinstance(temperature, (int, float)) and float(temperature) > 28:
             candidates.append(self._event(
                 resident_id,
@@ -90,9 +96,21 @@ class HealthMonitor:
         return created
 
     @staticmethod
-    def _latest_value(latest: dict[str, Any], sensor_type: str) -> Any:
+    def _fresh_value(
+        latest: dict[str, Any],
+        sensor_type: str,
+        now: datetime,
+        *,
+        max_age: timedelta,
+    ) -> Any:
         item = latest.get(sensor_type, {})
-        return item.get("value") if isinstance(item, dict) else None
+        if not isinstance(item, dict) or not item.get("observed_at"):
+            return None
+        observed_at = datetime.fromisoformat(str(item["observed_at"]))
+        if observed_at.tzinfo is None:
+            observed_at = observed_at.replace(tzinfo=UTC)
+        age = now - observed_at.astimezone(UTC)
+        return item.get("value") if timedelta(0) <= age <= max_age else None
 
     @staticmethod
     def _event(

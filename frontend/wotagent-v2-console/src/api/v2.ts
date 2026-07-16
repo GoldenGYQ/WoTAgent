@@ -12,6 +12,7 @@ import type {
   CareAction,
   EldercareSimulationResult,
   SensorType,
+  EldercareDevice,
 } from '../types/agent'
 
 export interface TraceSubscription {
@@ -44,15 +45,15 @@ export const agentV2Api = {
     return request('/api/v2/capabilities')
   },
 
-  createConversation(role: AgentRole): Promise<ConversationRecord> {
+  createConversation(role: AgentRole, userId = 'local-user'): Promise<ConversationRecord> {
     return request('/api/v2/conversations', {
       method: 'POST',
-      body: JSON.stringify({ role, user_id: 'local-user' }),
+      body: JSON.stringify({ role, user_id: userId }),
     })
   },
 
-  listConversations(): Promise<{ conversations: ConversationRecord[] }> {
-    return request('/api/v2/conversations?user_id=local-user')
+  listConversations(userId = 'local-user'): Promise<{ conversations: ConversationRecord[] }> {
+    return request(`/api/v2/conversations?user_id=${encodeURIComponent(userId)}`)
   },
 
   getConversationTurns(conversationId: string): Promise<{ conversation_id: string; turns: ConversationTurn[] }> {
@@ -63,10 +64,10 @@ export const agentV2Api = {
     return request(`/api/v2/conversations/${encodeURIComponent(conversationId)}`, { method: 'DELETE' })
   },
 
-  createTask(message: string, conversationId: string, role: AgentRole, thinking: boolean): Promise<TaskCreateResponse> {
+  createTask(message: string, conversationId: string, role: AgentRole, thinking: boolean, userId = 'local-user'): Promise<TaskCreateResponse> {
     return request('/api/v2/tasks', {
       method: 'POST',
-      body: JSON.stringify({ message, conversation_id: conversationId, role, thinking, user_id: 'local-user' }),
+      body: JSON.stringify({ message, conversation_id: conversationId, role, thinking, user_id: userId }),
     })
   },
 
@@ -115,6 +116,16 @@ export const agentV2Api = {
   listCareActions(residentId?: string): Promise<{ actions: CareAction[] }> {
     const query = residentId ? `?resident_id=${encodeURIComponent(residentId)}` : ''
     return request(`/api/v2/eldercare/actions${query}`)
+  },
+
+  listEldercareDevices(residentId: string): Promise<{ resident_id: string; devices: EldercareDevice[] }> {
+    return request(`/api/v2/eldercare/residents/${encodeURIComponent(residentId)}/devices`)
+  },
+
+  acknowledgeRisk(eventId: string): Promise<RiskEvent> {
+    return request(`/api/v2/eldercare/events/${encodeURIComponent(eventId)}/acknowledge`, {
+      method: 'POST',
+    })
   },
 
   subscribe(

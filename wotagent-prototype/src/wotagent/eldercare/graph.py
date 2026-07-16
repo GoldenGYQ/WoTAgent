@@ -16,6 +16,7 @@ from .models import ChildAgentResult, DelegatedAction, DelegatedTask, RiskEvent
 
 class EldercareState(TypedDict, total=False):
     task_id: str
+    user_role: str
     event: dict[str, Any]
     delegations: list[dict[str, Any]]
     delegation: dict[str, Any]
@@ -45,6 +46,9 @@ AGENT_SPECS: dict[str, dict[str, Any]] = {
 
 
 def default_delegation_plan(event: RiskEvent) -> list[DelegatedTask]:
+    requested = event.context.get("requested_delegations")
+    if isinstance(requested, list):
+        return [DelegatedTask.model_validate(item) for item in requested]
     resident_id = event.resident_id
     care_actions = [DelegatedAction(
         name="notify_caregiver",
@@ -120,6 +124,7 @@ def build_eldercare_butler_graph(
 
     async def authorize(state: EldercareState) -> dict[str, Any]:
         resident_id = str(state["event"]["resident_id"])
+        user_role = state.get("user_role", "system")
         allowed: list[dict[str, Any]] = []
         denied: list[dict[str, Any]] = []
         for raw in state.get("delegations", []):
@@ -128,6 +133,8 @@ def build_eldercare_butler_graph(
             reason = ""
             if spec is None:
                 reason = "agent is not registered"
+            elif user_role == "viewer" and task.actions:
+                reason = "viewer role cannot execute eldercare actions"
             elif task.allowed_mcp != spec["allowed_mcp"]:
                 reason = "MCP scope does not match agent identity"
             elif resident_id not in task.resident_scope:
@@ -152,6 +159,7 @@ def build_eldercare_butler_graph(
         return [
             Send(task["agent_id"], {
                 "task_id": state.get("task_id", ""),
+                "user_role": state.get("user_role", "system"),
                 "event": state["event"],
                 "delegation": task,
             })

@@ -4,6 +4,7 @@ import {
   Activity,
   BrainCircuit,
   HeartPulse,
+  LogOut,
   MessageSquare,
   PanelLeft,
   RefreshCw,
@@ -13,9 +14,22 @@ import {
 } from 'lucide-vue-next'
 import TaskSidebar from './components/TaskSidebar.vue'
 import EldercareDashboard from './components/EldercareDashboard.vue'
+import LoginScreen from './components/LoginScreen.vue'
 import TaskWorkspace from './components/TaskWorkspace.vue'
 import TraceInspector from './components/TraceInspector.vue'
 import { useAgentRuntime } from './composables/useAgentRuntime'
+import type { LoginAccount } from './types/agent'
+
+const LOGIN_KEY = 'wotagent-v2-console.account'
+const accounts: LoginAccount[] = [
+  { accountId: 'JH-1', displayName: '王护理员', role: 'operator', residentId: 'elderly-001', residentName: '张爷爷' },
+  { accountId: 'JH-2', displayName: '赵观察员', role: 'viewer', residentId: 'elderly-002', residentName: '李奶奶' },
+]
+
+function savedAccount(): LoginAccount | null {
+  const accountId = localStorage.getItem(LOGIN_KEY)
+  return accounts.find((item) => item.accountId === accountId) ?? null
+}
 
 const {
   tasks,
@@ -31,10 +45,11 @@ const {
   submit,
   confirm,
   checkBackend,
-  hydrateRuntime,
   selectConversation,
   newConversation: resetConversation,
   deleteConversation,
+  switchIdentity,
+  clearIdentity,
 } = useAgentRuntime()
 
 const draft = ref('')
@@ -43,6 +58,7 @@ const submitError = ref('')
 const mobileView = ref<'workspace' | 'trace'>('workspace')
 const drawerOpen = ref(false)
 const appView = ref<'agent' | 'eldercare'>('agent')
+const currentAccount = ref<LoginAccount | null>(savedAccount())
 const composer = ref<HTMLTextAreaElement | null>(null)
 const conversationTasks = computed(() => tasks.filter(
   (task) => task.conversationId === activeConversationId.value,
@@ -93,18 +109,34 @@ function newTask(): void {
   void nextTick(() => composer.value?.focus())
 }
 
+async function login(account: LoginAccount): Promise<void> {
+  currentAccount.value = account
+  localStorage.setItem(LOGIN_KEY, account.accountId)
+  await switchIdentity(account.accountId, account.role)
+}
+
+function logout(): void {
+  clearIdentity()
+  currentAccount.value = null
+  localStorage.removeItem(LOGIN_KEY)
+}
+
 async function removeConversation(conversationId: string): Promise<void> {
   if (!window.confirm('删除该会话及其历史消息？')) return
   await deleteConversation(conversationId)
 }
 
 onMounted(async () => {
-  await Promise.all([checkBackend(), hydrateRuntime()])
+  await checkBackend()
+  if (currentAccount.value) {
+    await switchIdentity(currentAccount.value.accountId, currentAccount.value.role)
+  }
 })
 </script>
 
 <template>
-  <div class="app-shell">
+  <LoginScreen v-if="!currentAccount" :accounts="accounts" @login="login" />
+  <div v-else class="app-shell">
     <header class="app-header">
       <div class="brand-block">
         <button v-if="appView === 'agent'" class="mobile-icon-button" type="button" title="任务列表" @click="drawerOpen = true">
@@ -125,6 +157,8 @@ onMounted(async () => {
         <button v-if="backendState === 'offline'" class="icon-button" type="button" title="重新检测" @click="checkBackend">
           <RefreshCw :size="16" />
         </button>
+        <span class="account-badge"><strong>{{ currentAccount.accountId }}</strong>{{ currentAccount.displayName }}</span>
+        <button class="icon-button" type="button" title="退出登录" @click="logout"><LogOut :size="15" /></button>
       </div>
     </header>
 
@@ -160,7 +194,7 @@ onMounted(async () => {
             />
             <div class="composer-controls">
               <div class="role-control" aria-label="执行角色">
-                <button v-for="item in ['viewer', 'operator', 'admin'] as const" :key="item" type="button" :class="{ active: role === item }" @click="role = item">
+                <button v-for="item in ['viewer', 'operator', 'admin'] as const" :key="item" type="button" :class="{ active: role === item }" disabled title="角色由登录账号决定">
                   {{ item }}
                 </button>
               </div>
@@ -192,7 +226,7 @@ onMounted(async () => {
       </div>
     </div>
 
-    <EldercareDashboard v-else />
+    <EldercareDashboard v-else :initial-resident-id="currentAccount.residentId" />
 
     <nav v-if="appView === 'agent'" class="mobile-nav" aria-label="移动端视图">
       <button type="button" :class="{ active: mobileView === 'workspace' }" @click="mobileView = 'workspace'">任务</button>

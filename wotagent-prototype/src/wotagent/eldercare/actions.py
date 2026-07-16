@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import uuid4
 
 from .store import EldercareStore
 
 
 class EldercareActionService:
-    def __init__(self, store: EldercareStore) -> None:
+    def __init__(self, store: EldercareStore, environment_gateway: Any | None = None) -> None:
         self.store = store
+        self.environment_gateway = environment_gateway
 
     async def adjust_temperature(
         self,
@@ -18,12 +20,34 @@ class EldercareActionService:
         reason: str,
     ) -> dict[str, Any]:
         resident = self._resident(resident_id)
-        result = {
-            "success": True,
-            "room": resident.room,
-            "target_temperature": target_temperature,
-            "reason": reason,
-        }
+        if self.environment_gateway is not None and resident.environment_device_id:
+            device_id = resident.environment_device_id
+            raw = await self.environment_gateway.control_device(
+                device_id,
+                "setTemperature",
+                {"temperature": target_temperature},
+                idempotency_key=f"eldercare:{resident_id}:{uuid4().hex[:10]}",
+            )
+            state = await self.environment_gateway.query_state(device_id)
+            actual = state.get("targetTemp")
+            verified = isinstance(actual, (int, float)) and abs(float(actual) - target_temperature) < 0.1
+            result = {
+                "success": bool(raw.get("success", raw.get("accepted", True))) and verified,
+                "execution_mode": "wot_mcp",
+                "device_id": device_id,
+                "room": resident.room,
+                "target_temperature": target_temperature,
+                "verified_state": state,
+                "reason": reason,
+            }
+        else:
+            result = {
+                "success": True,
+                "execution_mode": "simulated",
+                "room": resident.room,
+                "target_temperature": target_temperature,
+                "reason": reason,
+            }
         return self.store.record_action(
             resident_id=resident_id,
             agent_id="environment_agent",
