@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 from contextlib import asynccontextmanager
@@ -25,6 +26,7 @@ from ..agent_graph import (
 )
 from ..conversation import ConversationStore
 from ..core import create_wot_pipeline
+from ..eldercare import EldercareRuntime, EldercareStore, Resident, SensorReading
 from ..gateway import MCPDeviceGateway
 from ..logging import configure_logging
 from ..orchestration import TaskOrchestrator
@@ -52,6 +54,9 @@ _v2_policy = PolicyEngine()
 _v2_gateway = MCPDeviceGateway()
 _v2_trace_store = InMemoryTraceStore()
 _v2_conversation_store = ConversationStore(os.getenv("WOTAGENT_CONVERSATION_DB"))
+_eldercare_store = EldercareStore(os.getenv("ELDERCARE_DB"))
+_eldercare_store.seed_demo()
+_eldercare_runtime = EldercareRuntime(_eldercare_store, trace_store=_v2_trace_store)
 
 
 def _build_v2_graph(checkpointer: Any):
@@ -82,6 +87,8 @@ _bootstrap_v2_graph = _v2_graph
 async def _lifespan(_app: FastAPI):
     global _v2_graph
     checkpoint_context = None
+    monitor_task = None
+    monitor_stop = asyncio.Event()
     previous_graph = _v2_graph
     if _v2_graph is _bootstrap_v2_graph:
         checkpoint_path = Path(os.getenv(
@@ -93,9 +100,17 @@ async def _lifespan(_app: FastAPI):
         checkpointer = await checkpoint_context.__aenter__()
         await checkpointer.setup()
         _v2_graph = _build_v2_graph(checkpointer)
+    if _bool_env("ELDERCARE_MONITOR_ENABLED", default=True):
+        monitor_task = asyncio.create_task(_eldercare_runtime.monitor_forever(
+            monitor_stop,
+            interval_seconds=float(os.getenv("ELDERCARE_MONITOR_INTERVAL_SECONDS", "5")),
+        ))
     try:
         yield
     finally:
+        monitor_stop.set()
+        if monitor_task is not None:
+            await monitor_task
         _v2_graph = previous_graph
         if checkpoint_context is not None:
             await checkpoint_context.__aexit__(None, None, None)
@@ -183,6 +198,11 @@ class ConversationTurnsV2Response(BaseModel):
     turns: list[dict[str, Any]]
 
 
+class EldercareScenarioRequest(BaseModel):
+    resident_id: str = "elderly-001"
+    scenario: str
+
+
 @app.get("/")
 async def root() -> dict[str, str]:
     return {"name": "WoTAgent 2.0", "status": "ok", "docs": "/docs"}
@@ -203,6 +223,70 @@ async def get_v2_capabilities() -> dict[str, Any]:
             "private_reasoning_exposed": False,
         },
         "streaming": _bool_env("ENABLE_STREAMING", default=True),
+        "eldercare": {
+            "event_driven": True,
+            "scheduled_monitor": _bool_env("ELDERCARE_MONITOR_ENABLED", default=True),
+            "mcp_resources": True,
+            "subagents": ["environment_agent", "care_agent"],
+        },
+    }
+
+
+@app.get("/api/v2/eldercare/residents")
+async def list_eldercare_residents() -> dict[str, Any]:
+    return {
+        "residents": [item.model_dump(mode="json") for item in _eldercare_store.list_residents()]
+    }
+
+
+@app.post("/api/v2/eldercare/residents", status_code=201)
+async def upsert_eldercare_resident(resident: Resident) -> dict[str, Any]:
+    return _eldercare_store.upsert_resident(resident).model_dump(mode="json")
+
+
+@app.get("/api/v2/eldercare/residents/{resident_id}/summary")
+async def get_eldercare_summary(resident_id: str) -> dict[str, Any]:
+    try:
+        return _eldercare_store.summary(resident_id).model_dump(mode="json")
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/v2/eldercare/readings", status_code=202)
+async def ingest_eldercare_reading(reading: SensorReading) -> dict[str, Any]:
+    try:
+        return await _eldercare_runtime.ingest(reading)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/v2/eldercare/simulate", status_code=202)
+async def simulate_eldercare_scenario(req: EldercareScenarioRequest) -> dict[str, Any]:
+    try:
+        return await _eldercare_runtime.simulate(req.scenario, req.resident_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/v2/eldercare/events")
+async def list_eldercare_events(resident_id: str | None = None, limit: int = 100) -> dict[str, Any]:
+    return {
+        "events": [
+            item.model_dump(mode="json")
+            for item in _eldercare_store.list_risks(resident_id, limit=min(max(limit, 1), 500))
+        ]
+    }
+
+
+@app.get("/api/v2/eldercare/actions")
+async def list_eldercare_actions(resident_id: str | None = None, limit: int = 100) -> dict[str, Any]:
+    return {
+        "actions": _eldercare_store.list_actions(
+            resident_id,
+            limit=min(max(limit, 1), 500),
+        )
     }
 
 

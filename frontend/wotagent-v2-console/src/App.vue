@@ -3,6 +3,8 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import {
   Activity,
   BrainCircuit,
+  HeartPulse,
+  MessageSquare,
   PanelLeft,
   RefreshCw,
   SendHorizontal,
@@ -10,6 +12,7 @@ import {
   X,
 } from 'lucide-vue-next'
 import TaskSidebar from './components/TaskSidebar.vue'
+import EldercareDashboard from './components/EldercareDashboard.vue'
 import TaskWorkspace from './components/TaskWorkspace.vue'
 import TraceInspector from './components/TraceInspector.vue'
 import { useAgentRuntime } from './composables/useAgentRuntime'
@@ -39,6 +42,7 @@ const submitting = ref(false)
 const submitError = ref('')
 const mobileView = ref<'workspace' | 'trace'>('workspace')
 const drawerOpen = ref(false)
+const appView = ref<'agent' | 'eldercare'>('agent')
 const composer = ref<HTMLTextAreaElement | null>(null)
 const conversationTasks = computed(() => tasks.filter(
   (task) => task.conversationId === activeConversationId.value,
@@ -103,13 +107,17 @@ onMounted(async () => {
   <div class="app-shell">
     <header class="app-header">
       <div class="brand-block">
-        <button class="mobile-icon-button" type="button" title="任务列表" @click="drawerOpen = true">
+        <button v-if="appView === 'agent'" class="mobile-icon-button" type="button" title="任务列表" @click="drawerOpen = true">
           <PanelLeft :size="18" />
         </button>
         <span class="brand-mark"><SquareTerminal :size="18" /></span>
         <strong>WoTAgent</strong>
         <span class="version-tag">2.0</span>
       </div>
+      <nav class="app-view-switch" aria-label="工作视图">
+        <button type="button" :class="{ active: appView === 'agent' }" @click="appView = 'agent'"><MessageSquare :size="14" />Agent 会话</button>
+        <button type="button" :class="{ active: appView === 'eldercare' }" @click="appView = 'eldercare'"><HeartPulse :size="14" />养老监测</button>
+      </nav>
       <div class="header-status">
         <span class="backend-status" :data-state="backendState">
           <span />{{ backendState === 'online' ? '后端在线' : backendState === 'offline' ? '后端离线' : '检测中' }}
@@ -120,7 +128,7 @@ onMounted(async () => {
       </div>
     </header>
 
-    <div class="desktop-layout">
+    <div v-if="appView === 'agent'" class="desktop-layout">
       <TaskSidebar
         :conversations="conversations"
         :active-conversation-id="activeConversationId"
@@ -184,12 +192,14 @@ onMounted(async () => {
       </div>
     </div>
 
-    <nav class="mobile-nav" aria-label="移动端视图">
+    <EldercareDashboard v-else />
+
+    <nav v-if="appView === 'agent'" class="mobile-nav" aria-label="移动端视图">
       <button type="button" :class="{ active: mobileView === 'workspace' }" @click="mobileView = 'workspace'">任务</button>
       <button type="button" :class="{ active: mobileView === 'trace' }" @click="mobileView = 'trace'">Trace</button>
     </nav>
 
-    <div v-if="drawerOpen" class="drawer-backdrop" @click="drawerOpen = false">
+    <div v-if="drawerOpen && appView === 'agent'" class="drawer-backdrop" @click="drawerOpen = false">
       <div class="mobile-drawer" @click.stop>
         <div class="drawer-header">
           <strong>任务</strong>

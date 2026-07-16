@@ -54,6 +54,52 @@ export interface ApiCapabilities {
   streaming: boolean
 }
 
+export type SensorType = 'heart_rate' | 'spo2' | 'fall_detected' | 'bed_occupancy' | 'sleep_quality' | 'room_temperature' | 'room_humidity'
+
+export interface Resident {
+  resident_id: string
+  name: string
+  room: string
+  caregiver: string
+  active: boolean
+}
+
+export interface HealthSummary {
+  resident: Resident
+  latest: Record<string, { value: number | boolean | string; unit: string; observed_at: string; source: string }>
+  heart_rate_avg: number | null
+  open_risks: RiskEvent[]
+  generated_at: string
+}
+
+export interface RiskEvent {
+  event_id: string
+  resident_id: string
+  event_type: string
+  severity: 'medium' | 'high' | 'critical'
+  value: number | boolean
+  message: string
+  status: string
+  occurred_at: string
+}
+
+export interface CareAction {
+  action_id: string
+  resident_id: string
+  agent_id: string
+  action: string
+  arguments: Record<string, unknown>
+  result: Record<string, unknown>
+  created_at: string
+}
+
+export interface EldercareSimulationResult {
+  scenario: string
+  resident_id: string
+  events: RiskEvent[]
+  tasks: Array<{ task_id: string; status: string; response: string }>
+}
+
 export interface TaskRecord {
   trace_id: string
   task_id: string

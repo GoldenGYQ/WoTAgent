@@ -6,6 +6,12 @@ import type {
   TaskCreateResponse,
   TaskRecord,
   TraceEvent,
+  Resident,
+  HealthSummary,
+  RiskEvent,
+  CareAction,
+  EldercareSimulationResult,
+  SensorType,
 } from '../types/agent'
 
 export interface TraceSubscription {
@@ -77,6 +83,38 @@ export const agentV2Api = {
       method: 'POST',
       body: JSON.stringify({ approved }),
     })
+  },
+
+  listResidents(): Promise<{ residents: Resident[] }> {
+    return request('/api/v2/eldercare/residents')
+  },
+
+  getHealthSummary(residentId: string): Promise<HealthSummary> {
+    return request(`/api/v2/eldercare/residents/${encodeURIComponent(residentId)}/summary`)
+  },
+
+  ingestReading(payload: { resident_id: string; sensor_type: SensorType; value: number | boolean | string; unit?: string; source?: string }): Promise<{ events: RiskEvent[]; tasks: Array<{ task_id: string; status: string }> }> {
+    return request('/api/v2/eldercare/readings', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+
+  simulateEldercare(residentId: string, scenario: string): Promise<EldercareSimulationResult> {
+    return request('/api/v2/eldercare/simulate', {
+      method: 'POST',
+      body: JSON.stringify({ resident_id: residentId, scenario }),
+    })
+  },
+
+  listRiskEvents(residentId?: string): Promise<{ events: RiskEvent[] }> {
+    const query = residentId ? `?resident_id=${encodeURIComponent(residentId)}` : ''
+    return request(`/api/v2/eldercare/events${query}`)
+  },
+
+  listCareActions(residentId?: string): Promise<{ actions: CareAction[] }> {
+    const query = residentId ? `?resident_id=${encodeURIComponent(residentId)}` : ''
+    return request(`/api/v2/eldercare/actions${query}`)
   },
 
   subscribe(
