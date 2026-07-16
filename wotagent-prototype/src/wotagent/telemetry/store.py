@@ -133,7 +133,7 @@ class InMemoryTraceStore:
                 if event.data.get("ttft_ms") is not None:
                     record.usage.ttft_ms_total += float(event.data["ttft_ms"])
                     record.usage.ttft_measurements += 1
-            elif type == "agent.tool.completed":
+            elif type in {"agent.tool.completed", "agent.resource.completed"}:
                 record.usage.tool_calls += 1
             elif type == "agent.loop.completed":
                 record.loop_count = max(record.loop_count, iteration)

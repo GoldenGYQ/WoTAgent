@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import UTC, datetime, timedelta
 
 from fastmcp import FastMCP
 
@@ -13,7 +14,8 @@ from .store import EldercareStore
 
 def build_eldercare_mcp(store: EldercareStore | None = None) -> FastMCP:
     eldercare_store = store or EldercareStore()
-    eldercare_store.seed_demo()
+    if store is None:
+        eldercare_store.seed_demo()
     actions = EldercareActionService(eldercare_store)
     mcp = FastMCP("eldercare-health")
 
@@ -37,6 +39,46 @@ def build_eldercare_mcp(store: EldercareStore | None = None) -> FastMCP:
     def health_summary(resident_id: str) -> str:
         return eldercare_store.summary(resident_id).model_dump_json()
 
+    @mcp.resource("elderly://{resident_id}/vitals/trend", mime_type="application/json")
+    def vital_trend(resident_id: str) -> str:
+        since = datetime.now(UTC) - timedelta(minutes=30)
+        return json.dumps({
+            sensor_type: [
+                item.model_dump(mode="json")
+                for item in eldercare_store.readings_since(resident_id, sensor_type, since)
+            ]
+            for sensor_type in ("heart_rate", "spo2")
+        }, ensure_ascii=False, default=str)
+
+    @mcp.resource("elderly://{resident_id}/data-quality", mime_type="application/json")
+    def data_quality(resident_id: str) -> str:
+        now = datetime.now(UTC)
+        latest = eldercare_store.latest(resident_id)
+        quality: dict[str, dict] = {}
+        for sensor_type, item in latest.items():
+            observed_at = datetime.fromisoformat(str(item["observed_at"]))
+            if observed_at.tzinfo is None:
+                observed_at = observed_at.replace(tzinfo=UTC)
+            age_seconds = max(0.0, (now - observed_at.astimezone(UTC)).total_seconds())
+            quality[sensor_type] = {
+                "observed_at": item["observed_at"],
+                "age_seconds": age_seconds,
+                "fresh": age_seconds <= 300,
+                "source": item.get("source", ""),
+            }
+        return json.dumps({
+            "resident_id": resident_id,
+            "checked_at": now.isoformat(),
+            "sensors": quality,
+        }, ensure_ascii=False)
+
+    @mcp.resource("elderly://{resident_id}/profile", mime_type="application/json")
+    def resident_profile(resident_id: str) -> str:
+        resident = eldercare_store.get_resident(resident_id)
+        if resident is None:
+            raise KeyError(f"resident '{resident_id}' not found")
+        return resident.model_dump_json()
+
     @mcp.tool(tags={"eldercare-environment"})
     async def adjust_temperature(
         resident_id: str,
@@ -50,6 +92,11 @@ def build_eldercare_mcp(store: EldercareStore | None = None) -> FastMCP:
     async def notify_caregiver(resident_id: str, message: str, urgency: str) -> dict:
         """Notify the caregiver assigned to a resident."""
         return await actions.notify_caregiver(resident_id, message, urgency)
+
+    @mcp.tool(tags={"eldercare-care"})
+    async def notify_duty_caregiver(resident_id: str, message: str, urgency: str) -> dict:
+        """Notify the currently assigned duty caregiver as a bounded fallback."""
+        return await actions.notify_duty_caregiver(resident_id, message, urgency)
 
     @mcp.tool(tags={"eldercare-care"})
     async def create_care_task(resident_id: str, title: str, priority: str) -> dict:

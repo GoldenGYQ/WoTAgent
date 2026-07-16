@@ -11,7 +11,8 @@ from langgraph.types import Send
 
 from ..telemetry import InMemoryTraceStore
 from .actions import EldercareActionService
-from .models import ChildAgentResult, DelegatedAction, DelegatedTask, RiskEvent
+from .models import ChildAgentResult, DelegatedTask, RiskEvent
+from .strategies.rule_based import legacy_delegation_plan
 
 
 class EldercareState(TypedDict, total=False):
@@ -46,58 +47,7 @@ AGENT_SPECS: dict[str, dict[str, Any]] = {
 
 
 def default_delegation_plan(event: RiskEvent) -> list[DelegatedTask]:
-    requested = event.context.get("requested_delegations")
-    if isinstance(requested, list):
-        return [DelegatedTask.model_validate(item) for item in requested]
-    resident_id = event.resident_id
-    care_actions = [DelegatedAction(
-        name="notify_caregiver",
-        arguments={
-            "resident_id": resident_id,
-            "message": event.message,
-            "urgency": event.severity,
-        },
-    )]
-    if event.event_type in {"high_heart_rate", "low_spo2", "fall_detected"}:
-        care_actions.append(DelegatedAction(
-            name="create_care_task",
-            arguments={
-                "resident_id": resident_id,
-                "title": f"处置：{event.message}",
-                "priority": event.severity,
-            },
-        ))
-
-    delegations = [DelegatedTask(
-        agent_id="care_agent",
-        objective=f"通知护理员并记录风险：{event.message}",
-        resident_scope=[resident_id],
-        allowed_mcp="eldercare-care",
-        actions=care_actions,
-    )]
-    temperature = (
-        event.context.get("latest", {})
-        .get("room_temperature", {})
-        .get("value")
-    )
-    if event.event_type == "room_overheat" or (
-        isinstance(temperature, (int, float)) and float(temperature) > 28
-    ):
-        delegations.append(DelegatedTask(
-            agent_id="environment_agent",
-            objective="将老人房间温度调整到舒适范围",
-            resident_scope=[resident_id],
-            allowed_mcp="eldercare-environment",
-            actions=[DelegatedAction(
-                name="adjust_temperature",
-                arguments={
-                    "resident_id": resident_id,
-                    "target_temperature": 24.0,
-                    "reason": event.message,
-                },
-            )],
-        ))
-    return delegations
+    return legacy_delegation_plan(event)
 
 
 def build_eldercare_butler_graph(

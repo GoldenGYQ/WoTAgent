@@ -9,6 +9,9 @@ from .chat import (
 )
 from .collector import EldercareDeviceCollector
 from .graph import AGENT_SPECS, build_eldercare_butler_graph
+from .goal_graph import AVAILABLE_AGENTS, build_goal_driven_butler_graph
+from .health_agent import HealthAgentLoop
+from .health_gateway import ScopedHealthMCPClient
 from .mcp_server import build_eldercare_mcp
 from .models import HealthSummary, Resident, RiskEvent, SensorReading
 from .monitor import HealthMonitor
@@ -33,5 +36,9 @@ __all__ = [
     "RiskEvent",
     "SensorReading",
     "build_eldercare_butler_graph",
+    "build_goal_driven_butler_graph",
+    "AVAILABLE_AGENTS",
+    "HealthAgentLoop",
+    "ScopedHealthMCPClient",
     "is_eldercare_request",
 ]

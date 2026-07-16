@@ -21,10 +21,12 @@ from pydantic import BaseModel, Field
 
 from ..agent_graph import (
     AgentGraphDependencies,
+    DecisionModeTaskPlanner,
     LangChainResponseComposer,
     LangChainTaskPlanner,
     build_agent_graph,
 )
+from ..agentic_config import AgenticSettings
 from ..conversation import ConversationStore
 from ..core import create_wot_pipeline
 from ..eldercare import (
@@ -36,6 +38,14 @@ from ..eldercare import (
     Resident,
     SensorReading,
     is_eldercare_request,
+)
+from ..eldercare.strategies import (
+    GOAL_EVALUATION_SCHEMA,
+    GOAL_PLAN_SCHEMA,
+    HEALTH_DECISION_SCHEMA,
+    StructuredGoalEvaluator,
+    StructuredGoalPlanner,
+    StructuredHealthDecisionMaker,
 )
 from ..gateway import MCPDeviceGateway
 from ..logging import configure_logging
@@ -72,10 +82,39 @@ _v2_trace_store = InMemoryTraceStore()
 _v2_conversation_store = ConversationStore(os.getenv("WOTAGENT_CONVERSATION_DB"))
 _eldercare_store = EldercareStore(os.getenv("ELDERCARE_DB"))
 _eldercare_store.seed_demo()
+_agentic_settings = AgenticSettings.from_env()
+_goal_plan_runnable = _pipeline.response_model.bind(
+    tools=[GOAL_PLAN_SCHEMA],
+    tool_choice={"type": "function", "function": {"name": "generate_goal_plan"}},
+)
+_goal_evaluation_runnable = _pipeline.response_model.bind(
+    tools=[GOAL_EVALUATION_SCHEMA],
+    tool_choice={"type": "function", "function": {"name": "evaluate_goal"}},
+)
+_health_decision_runnable = _pipeline.response_model.bind(
+    tools=[HEALTH_DECISION_SCHEMA],
+    tool_choice={"type": "function", "function": {"name": "decide_health_step"}},
+)
 _eldercare_runtime = EldercareRuntime(
     _eldercare_store,
     trace_store=_v2_trace_store,
     environment_gateway=_v2_gateway,
+    settings=_agentic_settings,
+    goal_planner=StructuredGoalPlanner(
+        _goal_plan_runnable,
+        timeout_seconds=_agentic_settings.llm_timeout_seconds,
+        trace_store=_v2_trace_store,
+    ),
+    goal_evaluator=StructuredGoalEvaluator(
+        _goal_evaluation_runnable,
+        timeout_seconds=_agentic_settings.llm_timeout_seconds,
+        trace_store=_v2_trace_store,
+    ),
+    health_decision_maker=StructuredHealthDecisionMaker(
+        _health_decision_runnable,
+        timeout_seconds=_agentic_settings.llm_timeout_seconds,
+        trace_store=_v2_trace_store,
+    ),
 )
 _eldercare_command_runnable = _pipeline.response_model.bind(
     tools=[ELDERCARE_PLAN_SCHEMA],
@@ -104,12 +143,16 @@ def _build_v2_graph(
     gateway = MCPDeviceGateway(allowed_scopes=allowed_scopes)
     policy = PolicyEngine()
     dependencies = AgentGraphDependencies(
-        planner=LangChainTaskPlanner(
-            _pipeline.planner,
+        planner=DecisionModeTaskPlanner(
+            LangChainTaskPlanner(
+                _pipeline.planner,
+                trace_store=_v2_trace_store,
+                capability_provider=gateway.capabilities,
+                thinking_runnable=_pipeline.thinking_planner,
+                agent_profile=profile_for(agent_id),
+            ),
+            mode=_agentic_settings.decision_mode,
             trace_store=_v2_trace_store,
-            capability_provider=gateway.capabilities,
-            thinking_runnable=_pipeline.thinking_planner,
-            agent_profile=profile_for(agent_id),
         ),
         policy=policy,
         orchestrator=TaskOrchestrator(gateway, policy),
@@ -299,6 +342,18 @@ async def get_v2_capabilities() -> dict[str, Any]:
             "event_consumer": _bool_env("ELDERCARE_EVENT_CONSUMER_ENABLED", default=True),
             "mcp_resources": True,
             "subagents": ["health_agent", "care_agent", "environment_agent"],
+            "decision_mode": _agentic_settings.decision_mode,
+            "shadow_mode": _agentic_settings.shadow_mode,
+            "health_agent_loop": {
+                "enabled": _agentic_settings.decision_mode in {"hybrid", "agentic"},
+                "max_iterations": _agentic_settings.health_max_iterations,
+                "max_tool_calls": _agentic_settings.max_tool_calls,
+            },
+            "butler_goal_loop": {
+                "enabled": _agentic_settings.decision_mode in {"hybrid", "agentic"},
+                "max_iterations": _agentic_settings.butler_max_iterations,
+                "fallback": "rule",
+            },
         },
         "agents": [spec.model_dump() for spec in AGENT_REGISTRY.values()],
     }

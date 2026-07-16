@@ -33,6 +33,7 @@ class EldercareActionService:
             verified = isinstance(actual, (int, float)) and abs(float(actual) - target_temperature) < 0.1
             result = {
                 "success": bool(raw.get("success", raw.get("accepted", True))) and verified,
+                "verified": verified,
                 "execution_mode": "wot_mcp",
                 "device_id": device_id,
                 "room": resident.room,
@@ -43,6 +44,7 @@ class EldercareActionService:
         else:
             result = {
                 "success": True,
+                "verified": True,
                 "execution_mode": "simulated",
                 "room": resident.room,
                 "target_temperature": target_temperature,
@@ -65,6 +67,7 @@ class EldercareActionService:
         resident = self._resident(resident_id)
         result = {
             "success": True,
+            "verified": True,
             "recipient": resident.caregiver,
             "message": message,
             "urgency": urgency,
@@ -78,6 +81,31 @@ class EldercareActionService:
             result=result,
         )
 
+    async def notify_duty_caregiver(
+        self,
+        resident_id: str,
+        message: str,
+        urgency: str,
+    ) -> dict[str, Any]:
+        resident = self._resident(resident_id)
+        result = {
+            "success": True,
+            "verified": True,
+            "recipient": "当前值班护理员",
+            "resident_caregiver": resident.caregiver,
+            "message": message,
+            "urgency": urgency,
+            "delivery": "simulated-duty-roster",
+            "compensation": True,
+        }
+        return self.store.record_action(
+            resident_id=resident_id,
+            agent_id="care_agent",
+            action="notify_duty_caregiver",
+            arguments={"message": message, "urgency": urgency},
+            result=result,
+        )
+
     async def create_care_task(
         self,
         resident_id: str,
@@ -87,6 +115,7 @@ class EldercareActionService:
         self._resident(resident_id)
         result = {
             "success": True,
+            "verified": True,
             "title": title,
             "priority": priority,
             "status": "open",
