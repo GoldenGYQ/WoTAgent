@@ -15,10 +15,12 @@ from wotagent.agents import (
     ToolExecutionResult,
     build_delegation_tool,
     build_health_tools,
+    build_run_supervisor_agent,
     build_specialist_agent,
     build_supervisor_agent,
     get_agent_spec,
 )
+from wotagent.orchestration import SupervisorDecision
 
 
 class ScriptedChatModel(BaseChatModel):
@@ -276,3 +278,77 @@ def test_health_tool_adapter_preserves_scoped_gateway_result() -> None:
     assert result["success"] is True
     assert result["verified"] is True
     assert result["observed_state"] == {"heart_rate": 82}
+
+
+def test_run_supervisor_creates_structured_parallel_task_dag() -> None:
+    decision = {
+        "action": "create_tasks",
+        "goal": "同时调查张爷爷健康和房间环境",
+        "context_summary": "用户要求综合状态",
+        "execution_strategy": "parallel_when_safe",
+        "tasks": [
+            {
+                "local_id": "health",
+                "agent_id": "health_agent",
+                "objective": "调查最新健康状态",
+                "reason": "需要健康证据",
+                "expected_evidence": ["最新生命体征"],
+                "success_criteria": ["获得最新健康数据"],
+                "depends_on": [],
+                "resource_claims": [{
+                    "key": "resident:elderly-001",
+                    "mode": "read",
+                }],
+            },
+            {
+                "local_id": "environment",
+                "agent_id": "environment_agent",
+                "objective": "调查房间环境",
+                "reason": "需要环境证据",
+                "expected_evidence": ["温度", "湿度"],
+                "success_criteria": ["获得房间环境状态"],
+                "depends_on": [],
+                "resource_claims": [{
+                    "key": "room:A-101",
+                    "mode": "read",
+                }],
+            },
+        ],
+        "success_criteria": ["健康与环境均有证据"],
+        "constraints": ["不得进行医疗诊断"],
+        "reason": "两个调查互不依赖，可建议并行",
+    }
+    model = ScriptedChatModel(responses=[
+        AIMessage(
+            content="",
+            tool_calls=[{
+                "name": "SupervisorDecision",
+                "args": decision,
+                "id": "supervisor-decision",
+                "type": "tool_call",
+            }],
+        ),
+    ])
+    supervisor = build_run_supervisor_agent(
+        model,
+        {
+            "health_agent": get_agent_spec("health_agent"),
+            "environment_agent": get_agent_spec("environment_agent"),
+        },
+    )
+
+    result = supervisor.invoke({
+        "messages": [{
+            "role": "user",
+            "content": "查看张爷爷现在怎么样，也检查房间环境",
+        }],
+    })
+
+    parsed = SupervisorDecision.model_validate(result["structured_response"])
+    assert parsed.action == "create_tasks"
+    assert parsed.execution_strategy == "parallel_when_safe"
+    assert [item.agent_id for item in parsed.tasks] == [
+        "health_agent",
+        "environment_agent",
+    ]
+    assert parsed.task_plan().tasks[0].local_id == "health"
