@@ -4,7 +4,7 @@ import asyncio
 
 from wotagent.agent_graph import DecisionModeTaskPlanner
 from wotagent.agentic_config import AgenticSettings
-from wotagent.eldercare import EldercareRuntime, EldercareStore, Resident, RiskEvent
+from wotagent.domains.eldercare import EldercareRuntime, EldercareStore, Resident, RiskEvent
 
 
 class ShouldNotRunPlanner:

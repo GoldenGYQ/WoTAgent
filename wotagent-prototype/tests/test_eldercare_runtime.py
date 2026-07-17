@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from wotagent.eldercare import EldercareRuntime, EldercareStore, Resident
+from wotagent.domains.eldercare import EldercareRuntime, EldercareStore, Resident
 from wotagent.telemetry import InMemoryTraceStore
 
 

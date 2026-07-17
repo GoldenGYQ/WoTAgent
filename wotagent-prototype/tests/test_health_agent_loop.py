@@ -3,10 +3,10 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from wotagent.eldercare.health_agent import HealthAgentLoop
-from wotagent.eldercare.health_gateway import ScopedHealthMCPClient
-from wotagent.eldercare import EldercareStore
-from wotagent.eldercare.models import (
+from wotagent.domains.eldercare.health_agent import HealthAgentLoop
+from wotagent.domains.eldercare.health_gateway import ScopedHealthMCPClient
+from wotagent.domains.eldercare import EldercareStore
+from wotagent.domains.eldercare.models import (
     Delegation,
     HealthAgentDecision,
     ToolExecutionResult,

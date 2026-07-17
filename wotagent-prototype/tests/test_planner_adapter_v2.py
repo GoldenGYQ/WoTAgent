@@ -65,7 +65,7 @@ def test_parses_valid_function_call_into_typed_plan() -> None:
     assert plan.intent == "control"
     assert plan.steps[0].device_id == "light-001"
     assert plan.steps[0].postconditions[0].value is True
-    assert "Assigned agent: environment_agent" in runnable.messages[0][1]
+    assert "分配的智能体：environment_agent" in runnable.messages[0][1]
     assert "light-001" not in runnable.messages[0][1]
     assert "light-001" in runnable.messages[2][1]
 
@@ -89,7 +89,7 @@ def test_thinking_request_uses_dedicated_planner_and_marks_trace() -> None:
     assert "Private planning analysis" in direct.messages[-1][1]
     assert "Classify this request as chat." in direct.messages[-1][1]
     assert deep.messages is not None
-    assert "Assigned agent: environment_agent" in deep.messages[0][1]
+    assert "分配的智能体：environment_agent" in deep.messages[0][1]
     assert "light-001" in deep.messages[2][1]
     completed = [event for event in events if event.type == "model.request.completed"]
     assert [event.data["purpose"] for event in completed] == ["task_analysis", "task_planning"]
@@ -244,7 +244,7 @@ def test_planner_uses_the_assigned_professional_agent_profile() -> None:
     )({"message": "检查门锁"}))
 
     system_prompt = runnable.messages[0][1]
-    assert "Assigned agent: security_agent" in system_prompt
+    assert "分配的智能体：security_agent" in system_prompt
     assert "wot.security" in system_prompt
     assert "wot.energy" not in system_prompt
 
@@ -570,7 +570,7 @@ def test_runtime_role_is_exposed_as_fact_but_not_decided_by_planner() -> None:
     }))
 
     assert '"current_role":"operator"' in runnable.messages[1][1]
-    assert "Planning does not grant permission" in runnable.messages[0][1]
+    assert "规划不等于授权" in runnable.messages[0][1]
 
 
 def test_elliptical_followup_inherits_recent_device_scope_for_capability_selection() -> None:

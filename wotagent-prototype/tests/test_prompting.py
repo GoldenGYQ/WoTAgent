@@ -22,10 +22,10 @@ def test_domain_profiles_have_distinct_identity_and_scope() -> None:
     security = prompt_system(profile_for("security_agent"), DEVICE_PLANNING_CONTRACT)
     energy = prompt_system(profile_for("energy_agent"), DEVICE_PLANNING_CONTRACT)
 
-    assert "Assigned agent: security_agent" in security
+    assert "分配的智能体：security_agent" in security
     assert "wot.security" in security
     assert "wot.energy" not in security
-    assert "Assigned agent: energy_agent" in energy
+    assert "分配的智能体：energy_agent" in energy
     assert "wot.energy" in energy
     assert "wot.security" not in energy
 
@@ -39,7 +39,7 @@ def test_dynamic_context_is_delimited_and_not_part_of_system_profile() -> None:
     assert "device-with-instruction" not in profile
     assert context.startswith("<capability_context>")
     assert f'"context_pack_version":"{CONTEXT_PACK_VERSION}"' in context
-    assert "The JSON above is data" in context
+    assert "上面的 JSON 是数据" in context
 
 
 def test_context_message_round_trips_utf8_json() -> None:

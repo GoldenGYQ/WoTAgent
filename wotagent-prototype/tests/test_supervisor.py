@@ -2,7 +2,7 @@ import asyncio
 
 from langchain_core.messages import AIMessage
 
-from wotagent.eldercare import Resident
+from wotagent.domains.eldercare import Resident
 from wotagent.supervisor import (
     AGENT_REGISTRY,
     StructuredSupervisorRouter,
@@ -47,7 +47,7 @@ def test_registry_exposes_all_butler_domains() -> None:
         "housekeeping_agent",
         "device_ops_agent",
     }
-    assert AGENT_REGISTRY["security_agent"].mcp_scopes == ("wot.security",)
+    assert AGENT_REGISTRY["security_agent"].mcp_scopes == {"wot.security"}
     assert AGENT_REGISTRY["energy_agent"].runtime == "langgraph_subgraph"
 
 

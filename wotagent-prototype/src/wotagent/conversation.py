@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .paths import data_path
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -19,8 +21,7 @@ class ConversationStore:
     """Small SQLite store that separates durable dialogue from task execution."""
 
     def __init__(self, path: str | Path | None = None, *, history_turns: int = 6) -> None:
-        root = Path(__file__).resolve().parents[2]
-        self.path = Path(path) if path is not None else root / "data" / "conversations.db"
+        self.path = Path(path) if path is not None else data_path("conversations.db")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.history_turns = history_turns
         self._lock = threading.RLock()

@@ -5,11 +5,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import signal
-from pathlib import Path
 
 from dotenv import load_dotenv
 
-_env_path = Path(__file__).resolve().parents[3] / ".env"
+from ..paths import project_root
+
+_env_path = project_root() / ".env"
 load_dotenv(_env_path, encoding="utf-8")
 
 _ENV_TEMPLATE = """# WoTAgent 2.0
@@ -55,7 +56,7 @@ def _run_log(args: argparse.Namespace) -> None:
 
     path = args.file
     if path == "wotagent.log":
-        path = str(Path(__file__).resolve().parents[3] / path)
+        path = str(project_root() / path)
     asyncio.run(run_log_viewer(log_file=path, follow=not args.no_follow))
 
 
@@ -76,7 +77,7 @@ def _run_api(args: argparse.Namespace) -> None:
 
 def _run_monitor(args: argparse.Namespace) -> None:
     _setup_env()
-    from wotagent.eldercare import EldercareMonitorService, EldercareStore
+    from wotagent.domains.eldercare import EldercareMonitorService, EldercareStore
     from wotagent.gateway import MCPDeviceGateway
 
     async def run() -> None:

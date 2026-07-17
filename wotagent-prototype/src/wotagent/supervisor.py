@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import asdict, dataclass
 from typing import Any, Literal
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field, model_validator
 
-from .eldercare.models import Resident
+from .agents import AGENT_SPECS, AgentSpec
+from .domains.eldercare.models import Resident
 from .prompting import compact_history, context_message
 from .telemetry import InMemoryTraceStore, extract_usage_with_cost
 
@@ -26,54 +26,8 @@ AgentId = Literal[
 ]
 
 
-@dataclass(frozen=True)
-class DomainAgentSpec:
-    agent_id: AgentId
-    domain: str
-    responsibility: str
-    runtime: Literal["eldercare_subgraph", "langgraph_subgraph"]
-    mcp_scopes: tuple[str, ...]
-
-    def model_dump(self) -> dict[str, Any]:
-        payload = asdict(self)
-        payload["mcp_scopes"] = list(self.mcp_scopes)
-        return payload
-
-
-AGENT_REGISTRY: dict[AgentId, DomainAgentSpec] = {
-    "health_agent": DomainAgentSpec(
-        "health_agent", "health",
-        "读取健康资源、调查生命体征、睡眠、趋势和数据质量",
-        "eldercare_subgraph", ("wot.health", "eldercare-health"),
-    ),
-    "care_agent": DomainAgentSpec(
-        "care_agent", "care", "通知护理员并创建照护任务",
-        "eldercare_subgraph", ("eldercare-care",),
-    ),
-    "environment_agent": DomainAgentSpec(
-        "environment_agent", "environment",
-        "控制灯光、空调、空气、窗帘和其他环境设备",
-        "langgraph_subgraph", ("wot.environment",),
-    ),
-    "security_agent": DomainAgentSpec(
-        "security_agent", "security",
-        "处理门禁、燃气、烟雾、摄像头和应急联动",
-        "langgraph_subgraph", ("wot.security",),
-    ),
-    "energy_agent": DomainAgentSpec(
-        "energy_agent", "energy", "读取能耗设备并执行受限负载调度",
-        "langgraph_subgraph", ("wot.energy",),
-    ),
-    "housekeeping_agent": DomainAgentSpec(
-        "housekeeping_agent", "housekeeping", "控制清洁和家务设备",
-        "langgraph_subgraph", ("wot.housekeeping",),
-    ),
-    "device_ops_agent": DomainAgentSpec(
-        "device_ops_agent", "device_ops",
-        "发现 TD、查询设备状态并诊断接入异常",
-        "langgraph_subgraph", ("wot.device_ops",),
-    ),
-}
+DomainAgentSpec = AgentSpec
+AGENT_REGISTRY: dict[str, AgentSpec] = AGENT_SPECS
 
 
 class RouteDecision(BaseModel):
@@ -139,7 +93,7 @@ class StructuredSupervisorRouter:
         attempted = attempted_agents or []
         context = {
             "available_agents": [
-                spec.model_dump() for spec in AGENT_REGISTRY.values()
+                spec.model_dump(mode="json") for spec in AGENT_REGISTRY.values()
                 if spec.agent_id not in attempted
             ],
             "residents": [item.model_dump(mode="json") for item in residents],

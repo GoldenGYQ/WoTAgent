@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 
-from wotagent.eldercare import EldercareStore, HealthMonitor, Resident, SensorReading
+from wotagent.domains.eldercare import EldercareStore, HealthMonitor, Resident, SensorReading
 
 
 def make_store(tmp_path) -> EldercareStore:

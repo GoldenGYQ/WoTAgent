@@ -10,14 +10,14 @@ from fastmcp import Client
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
-from ..prompting import (
+from ...prompting import (
     ELDERCARE_PLANNING_CONTRACT,
     compact_history,
     context_message,
     profile_for,
     prompt_system,
 )
-from ..telemetry import InMemoryTraceStore, extract_usage_with_cost
+from ...telemetry import InMemoryTraceStore, extract_usage_with_cost
 from .mcp_server import build_eldercare_mcp
 from .models import DelegatedAction, DelegatedTask, Resident
 from .models import Delegation

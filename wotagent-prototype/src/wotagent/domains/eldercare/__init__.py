@@ -8,7 +8,7 @@ from .chat import (
     is_eldercare_request,
 )
 from .collector import EldercareDeviceCollector
-from .graph import AGENT_SPECS, build_eldercare_butler_graph
+from .graph import LEGACY_DELEGATION_POLICIES, build_eldercare_butler_graph
 from .goal_graph import AVAILABLE_AGENTS, build_goal_driven_butler_graph
 from .health_agent import HealthAgentLoop
 from .health_gateway import ScopedHealthMCPClient
@@ -26,7 +26,7 @@ __all__ = [
     "EldercareCommandPlanner",
     "EldercareDeviceCollector",
     "ELDERCARE_PLAN_SCHEMA",
-    "AGENT_SPECS",
+    "LEGACY_DELEGATION_POLICIES",
     "HealthMonitor",
     "EldercareMonitorService",
     "EldercareRuntime",

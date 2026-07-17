@@ -9,7 +9,7 @@ from typing import Annotated, Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
-from ..telemetry import InMemoryTraceStore
+from ...telemetry import InMemoryTraceStore
 from .actions import EldercareActionService
 from .models import ChildAgentResult, DelegatedTask, RiskEvent
 from .strategies.rule_based import legacy_delegation_plan
@@ -34,7 +34,7 @@ class ChildOutput(TypedDict):
 DelegationPlanner = Callable[[RiskEvent], list[DelegatedTask] | Awaitable[list[DelegatedTask]]]
 
 
-AGENT_SPECS: dict[str, dict[str, Any]] = {
+LEGACY_DELEGATION_POLICIES: dict[str, dict[str, Any]] = {
     "environment_agent": {
         "allowed_mcp": "eldercare-environment",
         "allowed_actions": {"adjust_temperature"},
@@ -79,7 +79,7 @@ def build_eldercare_butler_graph(
         denied: list[dict[str, Any]] = []
         for raw in state.get("delegations", []):
             task = DelegatedTask.model_validate(raw)
-            spec = AGENT_SPECS.get(task.agent_id)
+            spec = LEGACY_DELEGATION_POLICIES.get(task.agent_id)
             reason = ""
             if spec is None:
                 reason = "agent is not registered"

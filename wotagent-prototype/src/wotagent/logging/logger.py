@@ -7,11 +7,13 @@ import os
 import sys
 from pathlib import Path
 
+from ..paths import project_root
+
 _LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
 
 
 def _project_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    return project_root()
 
 
 def configure_logging(

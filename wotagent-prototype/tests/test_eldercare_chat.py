@@ -4,7 +4,7 @@ import asyncio
 
 from langchain_core.messages import AIMessage
 
-from wotagent.eldercare import (
+from wotagent.domains.eldercare import (
     EldercareChatAgent,
     EldercareCommandPlanner,
     EldercareRuntime,
@@ -13,7 +13,7 @@ from wotagent.eldercare import (
     SensorReading,
     is_eldercare_request,
 )
-from wotagent.eldercare.models import AgentFinding, Evidence
+from wotagent.domains.eldercare.models import AgentFinding, Evidence
 from wotagent.telemetry import InMemoryTraceStore
 
 

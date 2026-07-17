@@ -5,7 +5,7 @@ import importlib
 from fastapi.testclient import TestClient
 
 from wotagent.conversation import ConversationStore
-from wotagent.eldercare import (
+from wotagent.domains.eldercare import (
     EldercareMonitorService,
     EldercareRuntime,
     EldercareStore,

@@ -2,14 +2,14 @@
 
 import asyncio
 
-from wotagent.eldercare import (
+from wotagent.domains.eldercare import (
     EldercareActionService,
     EldercareStore,
     Resident,
     RiskEvent,
     build_eldercare_butler_graph,
 )
-from wotagent.eldercare.models import DelegatedAction, DelegatedTask
+from wotagent.domains.eldercare.models import DelegatedAction, DelegatedTask
 
 
 def setup_graph(tmp_path):

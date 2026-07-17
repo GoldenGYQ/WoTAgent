@@ -10,13 +10,13 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from ...paths import data_path
 from .models import HealthSummary, Resident, RiskEvent, SensorReading
 
 
 class EldercareStore:
     def __init__(self, path: str | Path | None = None) -> None:
-        root = Path(__file__).resolve().parents[3]
-        self.path = Path(path) if path is not None else root / "data" / "eldercare.db"
+        self.path = Path(path) if path is not None else data_path("eldercare.db")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._initialize()

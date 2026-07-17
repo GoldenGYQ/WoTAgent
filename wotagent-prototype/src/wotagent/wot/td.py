@@ -13,6 +13,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from ..paths import project_root
+
 
 class TDAction(BaseModel):
     name: str
@@ -45,7 +47,7 @@ class ThingDescription(BaseModel):
 
 def _project_root() -> Path:
     """WoTAgent monorepo root (two levels up from ``wotagent/wot/``)."""
-    return Path(__file__).resolve().parents[3]
+    return project_root()
 
 
 def td_root() -> Path:

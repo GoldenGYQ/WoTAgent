@@ -5,7 +5,7 @@ import json
 
 from fastmcp import Client
 
-from wotagent.eldercare import EldercareStore, Resident, SensorReading, build_eldercare_mcp
+from wotagent.domains.eldercare import EldercareStore, Resident, SensorReading, build_eldercare_mcp
 
 
 def test_health_data_is_exposed_as_resources_and_actions_as_tools(tmp_path) -> None:

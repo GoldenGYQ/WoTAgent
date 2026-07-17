@@ -3,9 +3,9 @@ from __future__ import annotations
 import asyncio
 
 from wotagent.agentic_config import AgenticSettings
-from wotagent.eldercare import EldercareActionService, EldercareStore, Resident, RiskEvent
-from wotagent.eldercare.goal_graph import build_goal_driven_butler_graph
-from wotagent.eldercare.models import (
+from wotagent.domains.eldercare import EldercareActionService, EldercareStore, Resident, RiskEvent
+from wotagent.domains.eldercare.goal_graph import build_goal_driven_butler_graph
+from wotagent.domains.eldercare.models import (
     AgentFinding,
     Delegation,
     Evidence,

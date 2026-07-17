@@ -18,13 +18,15 @@ from typing import Any
 
 from fastmcp import Client
 
+from ..paths import project_root
+
 logger = logging.getLogger(__name__)
 
 _MCP_CALL_TIMEOUT = 10.0  # seconds per tool call
 
 
 def _get_project_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    return project_root()
 
 
 def _default_simulator_mcp_file() -> Path:

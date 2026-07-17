@@ -4,7 +4,7 @@ import asyncio
 import sqlite3
 from datetime import UTC, datetime, timedelta
 
-from wotagent.eldercare import (
+from wotagent.domains.eldercare import (
     EldercareMonitorService,
     EldercareRuntime,
     EldercareStore,

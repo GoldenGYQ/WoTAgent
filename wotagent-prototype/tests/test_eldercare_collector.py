@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from wotagent.eldercare import EldercareDeviceCollector, EldercareStore, Resident
+from wotagent.domains.eldercare import EldercareDeviceCollector, EldercareStore, Resident
 
 
 class FakeGateway:
