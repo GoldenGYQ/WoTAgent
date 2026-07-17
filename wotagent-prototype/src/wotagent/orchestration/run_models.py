@@ -180,6 +180,22 @@ class RunRecord(BaseModel):
     updated_at: datetime = Field(default_factory=utc_now)
 
 
+class RunEvent(BaseModel):
+    event_id: str
+    sequence: int
+    timestamp: datetime = Field(default_factory=utc_now)
+    run_id: str
+    turn_id: str
+    task_id: str | None = None
+    parent_task_id: str | None = None
+    agent_run_id: str | None = None
+    iteration: int = 0
+    tool_call_id: str | None = None
+    type: str
+    node: str = ""
+    data: dict[str, object] = Field(default_factory=dict)
+
+
 def _assert_acyclic(dependencies: dict[str, list[str]]) -> None:
     visiting: set[str] = set()
     visited: set[str] = set()
@@ -207,6 +223,7 @@ __all__ = [
     "ProposedTask",
     "ResourceClaim",
     "RunRecord",
+    "RunEvent",
     "RunStatus",
     "SupervisorDecision",
     "SupervisorTaskPlan",

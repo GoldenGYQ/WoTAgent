@@ -98,14 +98,33 @@ def test_coordinator_executes_independent_agents_concurrently() -> None:
             turn_id="turn-1",
             message="检查健康和环境",
         )
-        return run, await store.tasks_for_run(run.run_id), maximum
+        return (
+            run,
+            await store.tasks_for_run(run.run_id),
+            await store.events(run.run_id),
+            maximum,
+        )
 
-    run, tasks, maximum = asyncio.run(scenario())
+    run, tasks, events, maximum = asyncio.run(scenario())
 
     assert run.status == "completed"
     assert run.final_response == "综合检查完成"
     assert maximum == 2
     assert all(task.status == "completed" for task in tasks)
+    assert [event.type for event in events] == [
+        "run.started",
+        "supervisor.decision.completed",
+        "task.created",
+        "task.created",
+        "task.started",
+        "task.started",
+        "task.completed",
+        "task.completed",
+        "scheduler.parallel_batch.completed",
+        "supervisor.decision.completed",
+        "run.completed",
+    ]
+    assert events[2].task_id == "task-a"
 
 
 def test_coordinator_serializes_resource_conflicts() -> None:

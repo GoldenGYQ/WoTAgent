@@ -58,6 +58,12 @@ class RunCoordinator:
             root_goal=message,
             status="running",
         ))
+        await self.store.record_event(
+            run.run_id,
+            "run.started",
+            node="run_coordinator",
+            data={"root_goal": message},
+        )
         findings: list[AgentFinding] = []
         for supervisor_iteration in range(1, self.max_supervisor_iterations + 1):
             decision = await _resolve(self.supervisor({
@@ -70,6 +76,13 @@ class RunCoordinator:
                 "supervisor_iteration": supervisor_iteration,
             }))
             decision = SupervisorDecision.model_validate(decision)
+            await self.store.record_event(
+                run.run_id,
+                "supervisor.decision.completed",
+                node="butler_run_supervisor",
+                iteration=supervisor_iteration,
+                data=decision.model_dump(mode="json"),
+            )
             if decision.action == "clarify":
                 return await self._finish_run(
                     run.run_id,
@@ -86,6 +99,23 @@ class RunCoordinator:
             plan = decision.task_plan()
             tasks = self.scheduler.materialize(run.run_id, plan)
             await self.store.add_tasks(run.run_id, tasks)
+            for task in tasks:
+                await self.store.record_event(
+                    run.run_id,
+                    "task.created",
+                    task_id=task.task_id,
+                    parent_task_id=task.parent_task_id,
+                    node="task_scheduler",
+                    data={
+                        "agent_id": task.agent_id,
+                        "objective": task.objective,
+                        "depends_on": task.depends_on,
+                        "resource_claims": [
+                            item.model_dump(mode="json")
+                            for item in task.resource_claims
+                        ],
+                    },
+                )
             await self.store.update_run(
                 run.run_id,
                 lambda item: _apply_plan(item, plan),
@@ -129,12 +159,29 @@ class RunCoordinator:
             results = await asyncio.gather(*[
                 self._execute_task(task) for task in batch
             ])
+            await self.store.record_event(
+                run_id,
+                "scheduler.parallel_batch.completed",
+                node="task_scheduler",
+                data={
+                    "task_ids": [item.task_id for item in batch],
+                    "parallel": len(batch) > 1,
+                },
+            )
             findings.extend(results)
 
     async def _execute_task(self, task: AgentTask) -> AgentFinding:
         await self.store.update_task(
             task.task_id,
             lambda item: setattr(item, "status", "running"),
+        )
+        await self.store.record_event(
+            task.run_id,
+            "task.started",
+            task_id=task.task_id,
+            parent_task_id=task.parent_task_id,
+            node=task.agent_id,
+            data={"objective": task.objective},
         )
         executor = self.executors.get(task.agent_id)
         if executor is None:
@@ -156,6 +203,14 @@ class RunCoordinator:
             item.finding = finding
 
         await self.store.update_task(task.task_id, complete)
+        await self.store.record_event(
+            task.run_id,
+            f"task.{status}",
+            task_id=task.task_id,
+            parent_task_id=task.parent_task_id,
+            node=task.agent_id,
+            data={"finding": finding.model_dump(mode="json")},
+        )
         return finding
 
     async def _block_unreachable_tasks(
@@ -178,6 +233,13 @@ class RunCoordinator:
                     task.task_id,
                     lambda item: setattr(item, "status", "blocked"),
                 )
+                await self.store.record_event(
+                    task.run_id,
+                    "task.blocked",
+                    task_id=task.task_id,
+                    node="task_scheduler",
+                    data={"reason": "dependency failed or missing"},
+                )
 
     async def _finish_run(
         self,
@@ -190,7 +252,14 @@ class RunCoordinator:
             run.status = status  # type: ignore[assignment]
             run.final_response = response
 
-        return await self.store.update_run(run_id, finish)
+        run = await self.store.update_run(run_id, finish)
+        await self.store.record_event(
+            run_id,
+            f"run.{status}",
+            node="run_coordinator",
+            data={"response": response},
+        )
+        return run
 
 
 async def _resolve(value: Any) -> Any:
