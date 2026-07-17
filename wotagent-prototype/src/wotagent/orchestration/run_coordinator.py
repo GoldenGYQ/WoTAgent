@@ -8,7 +8,13 @@ from typing import Any
 from uuid import uuid4
 
 from ..agents.contracts import AgentFinding
-from .run_models import AgentTask, RunRecord, SupervisorDecision
+from .run_models import (
+    AgentRunRecord,
+    AgentTask,
+    RunRecord,
+    SupervisorDecision,
+    utc_now,
+)
 from .run_store import InMemoryRunStore
 from .scheduler import TaskScheduler
 
@@ -50,14 +56,25 @@ class RunCoordinator:
         turn_id: str,
         message: str,
         context: dict[str, Any] | None = None,
+        run_id: str | None = None,
     ) -> RunRecord:
-        run = await self.store.create_run(RunRecord(
-            run_id=self.run_id_factory(),
-            conversation_id=conversation_id,
-            turn_id=turn_id,
-            root_goal=message,
-            status="running",
-        ))
+        resolved_run_id = run_id or self.run_id_factory()
+        run = await self.store.get_run(resolved_run_id)
+        if run is None:
+            run = await self.store.create_run(RunRecord(
+                run_id=resolved_run_id,
+                conversation_id=conversation_id,
+                turn_id=turn_id,
+                root_goal=message,
+                status="running",
+            ))
+        else:
+            if run.conversation_id != conversation_id or run.turn_id != turn_id:
+                raise ValueError("existing run identity does not match request")
+            run = await self.store.update_run(
+                resolved_run_id,
+                lambda item: setattr(item, "status", "running"),
+            )
         await self.store.record_event(
             run.run_id,
             "run.started",
@@ -171,6 +188,12 @@ class RunCoordinator:
             findings.extend(results)
 
     async def _execute_task(self, task: AgentTask) -> AgentFinding:
+        agent_run = await self.store.add_agent_run(AgentRunRecord(
+            agent_run_id=f"agent_run_{uuid4().hex[:12]}",
+            run_id=task.run_id,
+            task_id=task.task_id,
+            agent_id=task.agent_id,
+        ))
         await self.store.update_task(
             task.task_id,
             lambda item: setattr(item, "status", "running"),
@@ -180,6 +203,7 @@ class RunCoordinator:
             "task.started",
             task_id=task.task_id,
             parent_task_id=task.parent_task_id,
+            agent_run_id=agent_run.agent_run_id,
             node=task.agent_id,
             data={"objective": task.objective},
         )
@@ -196,18 +220,28 @@ class RunCoordinator:
                 )
             except Exception as exc:
                 finding = _failed_finding(task, str(exc))
-        status = "completed" if finding.status == "completed" else "failed"
+        status = {
+            "completed": "completed",
+            "needs_more_information": "blocked",
+            "blocked": "blocked",
+            "failed": "failed",
+        }[finding.status]
 
         def complete(item: AgentTask) -> None:
             item.status = status
             item.finding = finding
 
         await self.store.update_task(task.task_id, complete)
+        await self.store.update_agent_run(
+            agent_run.agent_run_id,
+            lambda item: _finish_agent_run(item, status),
+        )
         await self.store.record_event(
             task.run_id,
             f"task.{status}",
             task_id=task.task_id,
             parent_task_id=task.parent_task_id,
+            agent_run_id=agent_run.agent_run_id,
             node=task.agent_id,
             data={"finding": finding.model_dump(mode="json")},
         )
@@ -289,6 +323,14 @@ def _failed_finding(task: AgentTask, error: str) -> AgentFinding:
         confidence=0,
         unresolved_questions=[task.objective],
     )
+
+
+def _finish_agent_run(record: AgentRunRecord, status: str) -> None:
+    record.status = (  # type: ignore[assignment]
+        "completed" if status == "completed" else "failed"
+    )
+    record.finished_at = utc_now()
+    record.iteration_count = 1
 
 
 __all__ = ["RunCoordinator", "SupervisorDecider", "TaskExecutor"]

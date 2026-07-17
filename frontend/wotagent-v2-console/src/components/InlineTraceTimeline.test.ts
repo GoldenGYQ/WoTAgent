@@ -1,84 +1,77 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import InlineTraceTimeline from './InlineTraceTimeline.vue'
-import type { RuntimeTask, TraceEvent } from '../types/agent'
-import { EMPTY_USAGE } from '../types/agent'
+import { EMPTY_USAGE, type RuntimeRun, type TraceEvent } from '../types/agent'
 
-function traceEvent(sequence: number, type: string, data: Record<string, unknown> = {}): TraceEvent {
+function event(sequence: number, type: string): TraceEvent {
   return {
-    event_id: `event-${sequence}`,
+    event_id: `run-1:${sequence}`,
     sequence,
     timestamp: `2026-07-16T08:00:0${sequence}Z`,
-    trace_id: 'task-1',
-    task_id: 'task-1',
-    session_id: 'conv-1',
+    run_id: 'run-1',
+    turn_id: 'turn-1',
+    task_id: sequence > 1 ? 'task-1' : null,
+    parent_task_id: null,
+    agent_run_id: sequence > 1 ? 'agent-run-1' : null,
+    tool_call_id: null,
     type,
-    node: type === 'agent.goal.created' ? 'butler_goal_planner' : 'health_agent',
-    iteration: sequence,
-    duration_ms: 12,
-    data,
+    node: 'environment_agent',
+    iteration: 1,
+    data: {},
   }
 }
 
-const task: RuntimeTask = {
-  id: 'task-1',
+const run: RuntimeRun = {
+  id: 'run-1',
   turnId: 'turn-1',
   conversationId: 'conv-1',
-  sessionId: 'conv-1',
-  message: '查看张爷爷今天的健康状态',
+  message: '查询客厅灯',
   role: 'operator',
   thinking: false,
   status: 'running',
   response: '',
-  plan: null,
-  confirmation: null,
-  events: [
-    traceEvent(3, 'agent.finding.completed', {
-      finding: { finding: '健康数据已完成核验' },
-    }),
-    traceEvent(1, 'agent.goal.created', {
-      goal_plan: { goal: '汇总并核验张爷爷今日健康状态' },
-    }),
-    traceEvent(2, 'agent.health.decision', {
-      action: 'call_tool',
-      tool: 'get_latest_vitals',
-    }),
-  ],
+  executionStrategy: 'parallel_when_safe',
+  successCriteria: ['获得灯状态'],
+  tasks: [{
+    task_id: 'task-1',
+    run_id: 'run-1',
+    parent_task_id: null,
+    local_id: 'inspect',
+    agent_id: 'environment_agent',
+    objective: '读取客厅灯状态',
+    reason: '需要状态证据',
+    status: 'completed',
+    expected_evidence: ['开关状态'],
+    success_criteria: ['获得开关状态'],
+    depends_on: [],
+    parallel_candidate: true,
+    priority: 1,
+    finding: null,
+    created_at: '',
+    updated_at: '',
+  }],
+  events: [event(2, 'task.completed'), event(1, 'run.started')],
   usage: { ...EMPTY_USAGE },
   loopCount: 1,
   recoveryCount: 0,
-  createdAt: '2026-07-16T08:00:00Z',
-  updatedAt: '2026-07-16T08:00:03Z',
+  createdAt: '',
+  updatedAt: '',
   error: '',
   streamState: 'live',
 }
 
 describe('InlineTraceTimeline', () => {
-  it('renders trace events by sequence and expands payload in place', async () => {
-    const wrapper = mount(InlineTraceTimeline, {
-      props: { task, selected: true },
-    })
-
-    const titles = wrapper.findAll('.inline-trace-title strong').map((item) => item.text())
-    expect(titles).toEqual([
-      'Butler 建立目标',
-      'Health Agent 决策',
-      'Health Agent提交发现',
-    ])
-
-    const events = wrapper.findAll('.inline-trace-event')
-    await events[1].trigger('click')
-    expect(events[1].find('.inline-trace-payload').text()).toContain('get_latest_vitals')
+  it('shows Run events and its child Task hierarchy', () => {
+    const wrapper = mount(InlineTraceTimeline, { props: { run, selected: true } })
+    expect(wrapper.text()).toContain('environment_agent')
+    expect(wrapper.text()).toContain('读取客厅灯状态')
+    expect(wrapper.findAll('.inline-trace-event')).toHaveLength(2)
   })
 
-  it('collapses a completed trace without removing it from the conversation', async () => {
+  it('keeps completed Run history collapsible', async () => {
     const wrapper = mount(InlineTraceTimeline, {
-      props: {
-        task: { ...task, status: 'succeeded', streamState: 'closed' },
-        selected: false,
-      },
+      props: { run: { ...run, status: 'completed', streamState: 'closed' }, selected: false },
     })
-
     expect(wrapper.find('.inline-trace-body').exists()).toBe(false)
     await wrapper.find('.inline-trace-header').trigger('click')
     expect(wrapper.find('.inline-trace-body').exists()).toBe(true)

@@ -11,11 +11,11 @@ from wotagent.prompting import (
     profile_for,
     prompt_system,
 )
-from wotagent.supervisor import AGENT_REGISTRY
+from wotagent.agents import AGENT_SPECS
 
 
 def test_every_registered_agent_has_a_prompt_profile() -> None:
-    assert set(AGENT_REGISTRY).issubset(AGENT_PROMPT_PROFILES)
+    assert set(AGENT_SPECS).issubset(AGENT_PROMPT_PROFILES)
 
 
 def test_domain_profiles_have_distinct_identity_and_scope() -> None:

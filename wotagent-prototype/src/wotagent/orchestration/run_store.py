@@ -111,6 +111,32 @@ class InMemoryRunStore:
             self._agent_runs[record.agent_run_id] = record.model_copy(deep=True)
             return record.model_copy(deep=True)
 
+    async def update_agent_run(
+        self,
+        agent_run_id: str,
+        update: Callable[[AgentRunRecord], None],
+    ) -> AgentRunRecord:
+        async with self._lock:
+            try:
+                record = self._agent_runs[agent_run_id]
+            except KeyError as exc:
+                raise LookupError(
+                    f"agent run not found: {agent_run_id}"
+                ) from exc
+            update(record)
+            return record.model_copy(deep=True)
+
+    async def agent_runs_for_task(
+        self,
+        task_id: str,
+    ) -> list[AgentRunRecord]:
+        async with self._lock:
+            return [
+                record.model_copy(deep=True)
+                for record in self._agent_runs.values()
+                if record.task_id == task_id
+            ]
+
     async def record_event(
         self,
         run_id: str,

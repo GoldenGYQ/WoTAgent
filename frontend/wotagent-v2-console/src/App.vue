@@ -31,18 +31,17 @@ function savedAccount(): LoginAccount | null {
 }
 
 const {
-  tasks,
+  runs,
   conversations,
   activeConversationId,
   activeConversation,
-  activeTaskId,
-  activeTask,
+  activeRunId,
+  activeRun,
   role,
   thinking,
   thinkingSupported,
   backendState,
   submit,
-  confirm,
   checkBackend,
   selectConversation,
   newConversation: resetConversation,
@@ -59,8 +58,8 @@ const sidebarCollapsed = ref(false)
 const appView = ref<'agent' | 'eldercare'>('agent')
 const currentAccount = ref<LoginAccount | null>(savedAccount())
 const composer = ref<HTMLTextAreaElement | null>(null)
-const conversationTasks = computed(() => tasks.filter(
-  (task) => task.conversationId === activeConversationId.value,
+const conversationRuns = computed(() => runs.filter(
+  (run) => run.conversationId === activeConversationId.value,
 ))
 
 async function send(): Promise<void> {
@@ -90,8 +89,8 @@ function useExample(message: string): void {
   void nextTick(() => composer.value?.focus())
 }
 
-function chooseTask(taskId: string): void {
-  activeTaskId.value = taskId
+function chooseRun(runId: string): void {
+  activeRunId.value = runId
   drawerOpen.value = false
 }
 
@@ -180,13 +179,12 @@ onMounted(async () => {
       <div class="workspace-column">
         <TaskWorkspace
           :conversation="activeConversation"
-          :tasks="conversationTasks"
-          :active-task="activeTask"
+          :runs="conversationRuns"
+          :active-run="activeRun"
           :current-account-id="currentAccount.accountId"
           :current-account-name="currentAccount.displayName"
           :sidebar-collapsed="sidebarCollapsed"
-          @confirm="confirm"
-          @select-task="chooseTask"
+          @select-run="chooseRun"
           @example="useExample"
           @toggle-sidebar="toggleSidebar"
         />

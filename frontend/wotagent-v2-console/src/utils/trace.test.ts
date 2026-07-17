@@ -7,14 +7,16 @@ function event(type: string, data: Record<string, unknown> = {}): TraceEvent {
     event_id: 'event-1',
     sequence: 1,
     timestamp: '2026-07-13T08:00:00Z',
-    trace_id: 'task-1',
+    run_id: 'run-1',
+    turn_id: 'turn-1',
     task_id: 'task-1',
-    session_id: 'session-1',
+    parent_task_id: null,
+    agent_run_id: null,
+    tool_call_id: null,
     type,
     node: 'executor',
     iteration: 1,
-    duration_ms: 1234,
-    data,
+    data: { duration_ms: 1234, ...data },
   }
 }
 

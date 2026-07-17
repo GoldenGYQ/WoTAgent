@@ -14,26 +14,26 @@ import {
   TriangleAlert,
   Wrench,
 } from 'lucide-vue-next'
-import type { RuntimeTask, TraceEvent } from '../types/agent'
+import type { RuntimeRun, TraceEvent } from '../types/agent'
 import { eventSummary, eventTitle, eventTone, formatTime } from '../utils/trace'
 
 const props = defineProps<{
-  task: RuntimeTask
+  run: RuntimeRun
   selected?: boolean
 }>()
 
 const expandedEvents = ref(new Set<number>())
 const expandedTimeline = ref(
-  props.selected || ['accepted', 'received', 'running', 'waiting_confirmation'].includes(props.task.status),
+  props.selected || ['accepted', 'received', 'running', 'waiting_confirmation'].includes(props.run.status),
 )
 
 const orderedEvents = computed(() => (
-  [...props.task.events].sort((a, b) => a.sequence - b.sequence)
+  [...props.run.events].sort((a, b) => a.sequence - b.sequence)
 ))
-const isLive = computed(() => ['accepted', 'received', 'running'].includes(props.task.status))
+const isLive = computed(() => ['accepted', 'received', 'running'].includes(props.run.status))
 
 watch(
-  () => [props.selected, props.task.status] as const,
+  () => [props.selected, props.run.status] as const,
   ([selected, status]) => {
     if (selected || ['accepted', 'received', 'running', 'waiting_confirmation'].includes(status)) {
       expandedTimeline.value = true
@@ -80,13 +80,20 @@ function pretty(value: unknown): string {
       </span>
       <span class="inline-trace-state">
         <i v-if="isLive" />
-        {{ isLive ? '实时更新' : task.streamState === 'polling' ? '轮询同步' : '执行记录' }}
+        {{ isLive ? '实时更新' : run.streamState === 'polling' ? '轮询同步' : '执行记录' }}
         <ChevronDown v-if="expandedTimeline" :size="15" />
         <ChevronRight v-else :size="15" />
       </span>
     </button>
 
     <div v-if="expandedTimeline" class="inline-trace-body">
+      <div v-if="run.tasks.length" class="run-task-list">
+        <div v-for="child in run.tasks" :key="child.task_id" class="run-task-item">
+          <span class="run-task-agent">{{ child.agent_id }}</span>
+          <strong>{{ child.objective }}</strong>
+          <span :data-status="child.status">{{ child.status }}</span>
+        </div>
+      </div>
       <button
         v-for="event in orderedEvents"
         :key="event.event_id"

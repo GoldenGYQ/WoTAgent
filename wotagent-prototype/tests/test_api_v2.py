@@ -1,196 +1,174 @@
-"""API contract tests for the side-by-side v2 task endpoint."""
+"""HTTP contract tests for the Run -> Task -> AgentRun API."""
 
 from __future__ import annotations
 
 import importlib
-from types import SimpleNamespace
-from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from langgraph.checkpoint.memory import InMemorySaver
 
-from wotagent.agent_graph import AgentGraphDependencies, build_agent_graph
+from wotagent.agents import AgentFinding, Evidence
+from wotagent.application import RunService
 from wotagent.conversation import ConversationStore
-from wotagent.domain import PlanStep, PolicyDecision, TaskPlan
-from wotagent.orchestration import TaskOrchestrator
-from wotagent.policy import PolicyEngine
-from wotagent.supervisor import RouteDecision
+from wotagent.orchestration import (
+    InMemoryRunStore,
+    RunCoordinator,
+    SupervisorDecision,
+    TaskScheduler,
+)
 
 app_module = importlib.import_module("wotagent.api.app")
 
 
-def test_professional_agents_use_distinct_compiled_langgraphs() -> None:
-    graphs = app_module._domain_graphs
+@pytest.fixture
+def run_client(monkeypatch, tmp_path):
+    store = InMemoryRunStore()
+    conversations = ConversationStore(tmp_path / "conversations.db")
 
-    assert set(graphs) == {
-        "environment_agent",
-        "security_agent",
-        "energy_agent",
-        "housekeeping_agent",
-        "device_ops_agent",
-    }
-    assert len({id(graph) for graph in graphs.values()}) == 5
+    async def execute(task):
+        return AgentFinding(
+            agent=task.agent_id,
+            objective=task.objective,
+            status="completed",
+            finding="客厅灯当前为开启状态。",
+            confidence=1,
+            evidence=[Evidence(
+                source="fake-device",
+                value={"on": True},
+                reliability=1,
+                description="可重复的测试设备状态",
+            )],
+        )
 
+    def coordinator_factory(_context):
+        decisions = iter([
+            SupervisorDecision(
+                action="create_tasks",
+                goal="查询客厅灯",
+                tasks=[{
+                    "local_id": "inspect-light",
+                    "agent_id": "environment_agent",
+                    "objective": "读取客厅灯当前状态",
+                    "reason": "需要设备状态证据",
+                    "expected_evidence": ["开关状态"],
+                    "success_criteria": ["获得客厅灯当前状态"],
+                    "resource_claims": [{
+                        "key": "device:light-001",
+                        "mode": "read",
+                    }],
+                }],
+                success_criteria=["获得客厅灯当前状态"],
+                reason="委派环境专业 Agent",
+            ),
+            SupervisorDecision(
+                action="finish",
+                goal="查询客厅灯",
+                final_response="客厅灯当前为开启状态。",
+                reason="成功条件已满足",
+            ),
+        ])
+        return RunCoordinator(
+            store,
+            TaskScheduler(available_agents={"environment_agent"}),
+            lambda _state: next(decisions),
+            {"environment_agent": execute},
+        )
 
-@pytest.fixture(autouse=True)
-def isolated_conversation_store(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(
-        app_module,
-        "_v2_conversation_store",
-        ConversationStore(tmp_path / "api-v2-conversations.db"),
+    service = RunService(
+        conversations,
+        store,
+        coordinator_factory,
+        thinking_supported=lambda: True,
     )
+    monkeypatch.setattr(app_module, "_run_store", store)
+    monkeypatch.setattr(app_module, "_run_service", service)
+    return TestClient(app_module.app), store, conversations
 
 
-class FakeGraph:
-    async def ainvoke(self, state, config=None):
-        return {
-            **state,
-            "phase": "responded",
-            "plan": TaskPlan(intent="chat", summary="你好"),
-            "response": "你好",
-        }
+def test_run_api_exposes_task_and_agent_run_hierarchy(run_client) -> None:
+    client, _store, _conversations = run_client
 
-
-def test_v2_task_endpoint_returns_real_graph_result(monkeypatch) -> None:
-    monkeypatch.setattr(app_module, "_v2_graph", FakeGraph())
-    client = TestClient(app_module.app)
-
-    response = client.post("/api/v2/tasks", json={
-        "message": "你好",
-        "session_id": "sess-api-test",
+    response = client.post("/api/v2/runs", json={
+        "message": "查询客厅灯",
+        "conversation_id": "conv-api-test",
         "role": "viewer",
-        "thinking": True,
     })
 
     assert response.status_code == 202
-    body = response.json()
-    assert body["session_id"] == "sess-api-test"
-    assert body["status"] == "accepted"
-    assert body["response"] == ""
-    assert body["plan"] is None
-    assert body["trace"] is None
-    assert body["confirmation"] is None
-    assert body["thinking"] is True
-    task_id = body["task_id"]
-    task = client.get(f"/api/v2/tasks/{task_id}")
-    assert task.status_code == 200
-    assert task.json()["status"] == "responded"
-    assert task.json()["result"]["thinking"] is True
+    created = response.json()
+    assert created["run_id"].startswith("run_")
+    assert created["conversation_id"] == "conv-api-test"
+    assert created["turn_id"].startswith("turn_")
 
-    events = client.get(f"/api/v2/tasks/{task_id}/events")
-    assert events.status_code == 200
-    assert events.json()["events"][0]["type"] == "task.started"
-    assert events.json()["next_cursor"] >= 2
+    run_id = created["run_id"]
+    run = client.get(f"/api/v2/runs/{run_id}")
+    assert run.status_code == 200
+    assert run.json()["status"] == "completed"
+    assert run.json()["final_response"] == "客厅灯当前为开启状态。"
 
-    with client.stream("GET", f"/api/v2/tasks/{task_id}/events/stream") as stream:
-        text = "".join(stream.iter_text())
-    assert "event: task.started" in text
-    assert f'"task_id":"{task_id}"' in text
+    tasks = client.get(f"/api/v2/runs/{run_id}/tasks").json()["tasks"]
+    assert len(tasks) == 1
+    assert tasks[0]["agent_id"] == "environment_agent"
+    assert tasks[0]["status"] == "completed"
+
+    task_id = tasks[0]["task_id"]
+    agent_runs = client.get(
+        f"/api/v2/runs/{run_id}/tasks/{task_id}/agent-runs"
+    ).json()["agent_runs"]
+    assert len(agent_runs) == 1
+    assert agent_runs[0]["agent_id"] == "environment_agent"
+    assert agent_runs[0]["status"] == "completed"
+
+    events = client.get(f"/api/v2/runs/{run_id}/events").json()
+    event_types = [item["type"] for item in events["events"]]
+    assert event_types[0] == "run.started"
+    assert "task.created" in event_types
+    assert "task.completed" in event_types
+    assert event_types[-1] == "run.completed"
+
+
+def test_run_websocket_replays_events_by_run_id(run_client) -> None:
+    client, _store, _conversations = run_client
+    run_id = client.post(
+        "/api/v2/runs",
+        json={"message": "查询客厅灯"},
+    ).json()["run_id"]
 
     with client.websocket_connect("/ws/v2") as websocket:
-        websocket.send_json({"task_id": task_id, "after": 1})
+        websocket.send_json({"run_id": run_id, "after": 0})
         messages = []
         while True:
             item = websocket.receive_json()
             messages.append(item)
             if item["type"] == "stream.completed":
                 break
-    assert messages[-1]["status"] == "responded"
-    assert all(item.get("sequence", 2) > 1 for item in messages[:-1])
+
+    assert messages[0]["run_id"] == run_id
+    assert messages[-1]["status"] == "completed"
+    assert messages[-1]["cursor"] == len(messages) - 1
 
 
-def test_specialist_clarify_returns_to_butler_for_one_reroute(monkeypatch) -> None:
-    class FakeRouter:
-        def __init__(self):
-            self.calls = 0
-
-        async def route(self, **kwargs):
-            self.calls += 1
-            if self.calls == 1:
-                return RouteDecision(
-                    agent_id="environment_agent",
-                    resolved_request="查询最近趋势",
-                    confidence=0.6,
-                    reason="first route",
-                )
-            assert kwargs["attempted_agents"] == ["environment_agent"]
-            assert kwargs["previous_outcome"]["plan"]["intent"] == "clarify"
-            return RouteDecision(
-                agent_id="health_agent",
-                resolved_request="查询张爷爷最近的健康趋势",
-                resident_id="elderly-001",
-                confidence=0.98,
-                reason="specialist returned out of scope",
-            )
-
-    class ClarifyGraph:
-        async def ainvoke(self, state, config=None):
-            return {
-                **state,
-                "phase": "responded",
-                "plan": TaskPlan(intent="clarify", summary="不属于环境领域"),
-                "response": "不属于环境领域",
-            }
-
-    class FakeEldercareChat:
-        async def run(self, **kwargs):
-            assert kwargs["routed_agent"] == "health_agent"
-            assert kwargs["message"] == "查询张爷爷最近的健康趋势"
-            return {
-                "status": "succeeded",
-                "response": "张爷爷最近血氧呈下降趋势。",
-                "plan": {"intent": "query", "summary": kwargs["message"], "steps": []},
-            }
-
-    router = FakeRouter()
-    monkeypatch.setattr(app_module, "_supervisor_router", router)
-    monkeypatch.setattr(app_module, "_v2_graph", ClarifyGraph())
-    monkeypatch.setattr(app_module, "_eldercare_chat_agent", FakeEldercareChat())
-
-    client = TestClient(app_module.app)
-    created = client.post("/api/v2/tasks", json={
-        "message": "那最近的趋势呢",
-        "role": "viewer",
-    })
-    task_id = created.json()["task_id"]
-    task = client.get(f"/api/v2/tasks/{task_id}").json()
-    events = client.get(f"/api/v2/tasks/{task_id}/events").json()["events"]
-
-    assert task["status"] == "succeeded"
-    assert task["result"]["response"] == "张爷爷最近血氧呈下降趋势。"
-    assert router.calls == 2
-    assert any(item["type"] == "agent.delegation.returned" for item in events)
-    assert any(item["type"] == "agent.reroute.selected" for item in events)
+def test_old_task_api_is_removed(run_client) -> None:
+    client, _store, _conversations = run_client
+    assert client.post("/api/v2/tasks", json={"message": "你好"}).status_code == 404
 
 
-def test_v2_capabilities_reports_thinking_without_exposing_private_reasoning(monkeypatch) -> None:
-    monkeypatch.setattr(app_module, "_pipeline", SimpleNamespace(thinking_planner=object()))
-    response = TestClient(app_module.app).get("/api/v2/capabilities")
+def test_thinking_request_is_rejected_when_model_does_not_support_it(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    store = InMemoryRunStore()
+    service = RunService(
+        ConversationStore(tmp_path / "thinking.db"),
+        store,
+        lambda _context: None,  # type: ignore[arg-type]
+        thinking_supported=lambda: False,
+    )
+    monkeypatch.setattr(app_module, "_run_store", store)
+    monkeypatch.setattr(app_module, "_run_service", service)
 
-    assert response.status_code == 200
-    assert response.json()["thinking"]["supported"] is True
-    assert response.json()["thinking"]["default"] is False
-    assert response.json()["thinking"]["private_reasoning_exposed"] is False
-
-
-def test_prompt_profile_api_exposes_layer_versions_and_domain_boundaries() -> None:
-    response = TestClient(app_module.app).get("/api/v2/prompts")
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["kernel_version"] == "prompt-kernel-v1"
-    assert body["context_pack_version"] == "context-pack-v1"
-    assert body["dynamic_context_in_system_prompt"] is False
-    profiles = {item["agent_id"]: item for item in body["profiles"]}
-    assert profiles["security_agent"]["tool_scopes"] == ["wot.security"]
-    assert profiles["energy_agent"]["tool_scopes"] == ["wot.energy"]
-
-
-def test_v2_task_rejects_thinking_when_server_capability_is_disabled(monkeypatch) -> None:
-    monkeypatch.setattr(app_module, "_pipeline", SimpleNamespace(thinking_planner=None))
-    response = TestClient(app_module.app).post("/api/v2/tasks", json={
-        "message": "分析一下",
+    response = TestClient(app_module.app).post("/api/v2/runs", json={
+        "message": "深入分析",
         "thinking": True,
     })
 
@@ -198,99 +176,14 @@ def test_v2_task_rejects_thinking_when_server_capability_is_disabled(monkeypatch
     assert "not available" in response.json()["detail"]
 
 
-def test_policy_denial_has_semantic_status_and_persists_pending_goal(monkeypatch) -> None:
-    class DeniedGraph:
-        async def ainvoke(self, state, config=None):
-            return {
-                **state,
-                "phase": "responded",
-                "plan": TaskPlan(intent="control", summary="关闭全部灯", steps=[PlanStep(
-                    id="off-1",
-                    kind="action",
-                    device_id="light-001",
-                    action="turnOff",
-                )]),
-                "policy_decisions": [PolicyDecision(
-                    effect="deny",
-                    reason_code="RBAC_ACTION_DENIED",
-                    reason="viewer cannot control",
-                )],
-                "response": "权限不足",
-            }
+def test_capabilities_report_run_task_scheduler() -> None:
+    response = TestClient(app_module.app).get("/api/v2/capabilities")
 
-    monkeypatch.setattr(app_module, "_v2_graph", DeniedGraph())
-    client = TestClient(app_module.app)
-    conversation = client.post("/api/v2/conversations", json={"role": "viewer"}).json()
-
-    created = client.post("/api/v2/tasks", json={
-        "conversation_id": conversation["conversation_id"],
-        "message": "全关掉",
-        "role": "viewer",
-    })
-    task = client.get(f"/api/v2/tasks/{created.json()['task_id']}").json()
-    runtime = app_module._v2_conversation_store.runtime_context(
-        conversation["conversation_id"],
-        current_role="operator",
-    )
-
-    assert task["status"] == "denied"
-    assert task["result"]["policy_decisions"][0]["reason_code"] == "RBAC_ACTION_DENIED"
-    assert runtime["pending_goal"]["plan"]["summary"] == "关闭全部灯"
-    assert runtime["current_role"] == "operator"
-
-
-def test_v2_confirmation_endpoint_resumes_same_checkpoint(monkeypatch) -> None:
-    class Gateway:
-        name = "api-test"
-        calls = 0
-
-        async def list_devices(self, location=None):
-            return []
-
-        async def query_state(self, device_id: str) -> dict[str, Any]:
-            return {"on": True}
-
-        async def control_device(self, *args, **kwargs):
-            self.calls += 1
-            return {"success": True}
-
-    gateway = Gateway()
-    plan = TaskPlan(intent="control", summary="高风险开灯", steps=[PlanStep(
-        id="s1", kind="action", device_id="light-001", action="turnOn"
-    )])
-
-    async def planner(_state):
-        return plan
-
-    policy = PolicyEngine(high_risk_actions={"turnOn"})
-    graph = build_agent_graph(
-        AgentGraphDependencies(
-            planner=planner,
-            policy=policy,
-            orchestrator=TaskOrchestrator(gateway, policy),
-        ),
-        checkpointer=InMemorySaver(),
-    )
-    monkeypatch.setattr(app_module, "_v2_graph", graph)
-    client = TestClient(app_module.app)
-
-    created = client.post("/api/v2/tasks", json={
-        "message": "打开灯",
-        "session_id": "sess-confirm-api",
-        "role": "operator",
-    })
-
-    assert created.status_code == 202
-    task_id = created.json()["task_id"]
-    waiting = client.get(f"/api/v2/tasks/{task_id}")
-    assert waiting.json()["status"] == "waiting_confirmation"
-    assert gateway.calls == 0
-
-    confirmed = client.post(
-        f"/api/v2/tasks/{task_id}/confirm",
-        json={"approved": True},
-    )
-
-    assert confirmed.status_code == 200
-    assert confirmed.json()["status"] == "succeeded"
-    assert gateway.calls == 1
+    assert response.status_code == 200
+    body = response.json()
+    assert body["thinking"]["private_reasoning_exposed"] is False
+    assert {item["agent_id"] for item in body["agents"]} >= {
+        "health_agent",
+        "environment_agent",
+        "care_agent",
+    }

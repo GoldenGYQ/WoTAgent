@@ -14,7 +14,11 @@ from ..agent_graph import (
     build_agent_graph,
 )
 from ..agentic_config import AgenticSettings
-from ..agents import build_health_react_agent
+from ..agents import (
+    AGENT_SPECS,
+    build_health_react_agent,
+    build_run_supervisor_agent,
+)
 from ..conversation import ConversationStore
 from ..core import create_wot_pipeline
 from ..domains.eldercare import (
@@ -38,11 +42,6 @@ from ..logging import configure_logging
 from ..orchestration import TaskOrchestrator
 from ..policy import PolicyEngine
 from ..prompting import profile_for
-from ..supervisor import (
-    AGENT_REGISTRY,
-    ROUTE_DECISION_SCHEMA,
-    StructuredSupervisorRouter,
-)
 from ..telemetry import InMemoryTraceStore
 
 
@@ -63,7 +62,7 @@ class RuntimeContainer:
     conversation_store: ConversationStore
     eldercare_store: EldercareStore
     settings: AgenticSettings
-    supervisor_router: StructuredSupervisorRouter
+    run_supervisor_agent: Any
     eldercare_runtime: EldercareRuntime
     eldercare_chat_agent: EldercareChatAgent
     health_react_agent: Any
@@ -75,7 +74,7 @@ class RuntimeContainer:
         *,
         agent_id: str = "environment_agent",
     ):
-        allowed_scopes = set(AGENT_REGISTRY[agent_id].mcp_scopes)
+        allowed_scopes = set(AGENT_SPECS[agent_id].mcp_scopes)
         gateway = MCPDeviceGateway(allowed_scopes=allowed_scopes)
         policy = PolicyEngine()
         dependencies = AgentGraphDependencies(
@@ -153,13 +152,6 @@ def create_runtime_container(
             "function": {"name": "decide_health_step"},
         },
     )
-    supervisor_route_runnable = pipeline.response_model.bind(
-        tools=[ROUTE_DECISION_SCHEMA],
-        tool_choice={
-            "type": "function",
-            "function": {"name": "select_agent_route"},
-        },
-    )
     conditional_plan_review_runnable = pipeline.response_model.bind(
         tools=[CONDITIONAL_PLAN_REVIEW_SCHEMA],
         tool_choice={
@@ -167,10 +159,9 @@ def create_runtime_container(
             "function": {"name": "review_conditional_plan"},
         },
     )
-    supervisor_router = StructuredSupervisorRouter(
-        supervisor_route_runnable,
-        timeout_seconds=settings.llm_timeout_seconds,
-        trace_store=trace_store,
+    run_supervisor_agent = build_run_supervisor_agent(
+        pipeline.response_model,
+        AGENT_SPECS,
     )
     eldercare_runtime = EldercareRuntime(
         eldercare_store,
@@ -220,7 +211,7 @@ def create_runtime_container(
         conversation_store=conversation_store,
         eldercare_store=eldercare_store,
         settings=settings,
-        supervisor_router=supervisor_router,
+        run_supervisor_agent=run_supervisor_agent,
         eldercare_runtime=eldercare_runtime,
         eldercare_chat_agent=eldercare_chat_agent,
         health_react_agent=health_react_agent,

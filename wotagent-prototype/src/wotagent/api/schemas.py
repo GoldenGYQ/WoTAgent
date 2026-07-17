@@ -1,33 +1,19 @@
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel
 
-from ..application import TaskCreateV2Response
 
 class HealthResponse(BaseModel):
     status: str
     pipeline: str
 
 
-class TaskCreateV2Request(BaseModel):
+class RunCreateRequest(BaseModel):
     message: str
     conversation_id: str | None = None
-    session_id: str | None = None
     role: str = "operator"
     user_id: str = "local-user"
     thinking: bool = False
-
-
-class TaskConfirmV2Request(BaseModel):
-    approved: bool
-
-
-class TraceEventsV2Response(BaseModel):
-    task_id: str
-    events: list[dict[str, Any]]
-    next_cursor: int
 
 
 class ConversationCreateV2Request(BaseModel):
@@ -52,7 +38,7 @@ class ConversationListV2Response(BaseModel):
 
 class ConversationTurnsV2Response(BaseModel):
     conversation_id: str
-    turns: list[dict[str, Any]]
+    turns: list[dict]
 
 
 class EldercareScenarioRequest(BaseModel):
@@ -67,8 +53,5 @@ __all__ = [
     "ConversationV2Response",
     "EldercareScenarioRequest",
     "HealthResponse",
-    "TaskConfirmV2Request",
-    "TaskCreateV2Request",
-    "TaskCreateV2Response",
-    "TraceEventsV2Response",
+    "RunCreateRequest",
 ]

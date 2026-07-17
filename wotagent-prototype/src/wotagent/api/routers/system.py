@@ -7,12 +7,12 @@ from typing import Any
 from fastapi import APIRouter
 
 from ...agentic_config import AgenticSettings
+from ...agents import AGENT_SPECS
 from ...prompting import (
     AGENT_PROMPT_PROFILES,
     CONTEXT_PACK_VERSION,
     PROMPT_KERNEL_VERSION,
 )
-from ...supervisor import AGENT_REGISTRY
 from ..schemas import HealthResponse
 
 
@@ -43,6 +43,14 @@ def create_system_router(
                 "private_reasoning_exposed": False,
             },
             "streaming": bool_env("ENABLE_STREAMING", True),
+            "orchestration": {
+                "root": "run",
+                "hierarchy": ["run", "task", "agent_run", "loop", "tool_call"],
+                "supervisor": "langchain_create_agent",
+                "scheduler": "deterministic_task_dag",
+                "parallel_when_safe": True,
+                "max_supervisor_iterations": settings.butler_max_iterations,
+            },
             "eldercare": {
                 "event_driven": True,
                 "monitor_process": "wotagent monitor",
@@ -70,23 +78,13 @@ def create_system_router(
                     "max_iterations": settings.butler_max_iterations,
                     "fallback": "rule",
                 },
-                "supervisor_routing": {
-                    "strategy": (
-                        "rule"
-                        if settings.decision_mode == "rule"
-                        else "structured_llm"
-                    ),
-                    "max_routes": settings.supervisor_max_routes,
-                    "out_of_scope_return": True,
-                    "fallback": "rule",
-                },
             },
-            "agents": [spec.model_dump() for spec in AGENT_REGISTRY.values()],
+            "agents": [spec.model_dump() for spec in AGENT_SPECS.values()],
         }
 
     @router.get("/api/v2/agents")
     async def list_domain_agents() -> dict[str, Any]:
-        return {"agents": [spec.model_dump() for spec in AGENT_REGISTRY.values()]}
+        return {"agents": [spec.model_dump() for spec in AGENT_SPECS.values()]}
 
     @router.get("/api/v2/prompts")
     async def list_prompt_profiles() -> dict[str, Any]:

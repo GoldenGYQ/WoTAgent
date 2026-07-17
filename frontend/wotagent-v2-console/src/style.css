@@ -234,6 +234,28 @@ button:focus-visible, textarea:focus-visible {
   animation: pulse 1.8s ease-in-out infinite;
 }
 .inline-trace-body { border-top: 1px solid #e4e9ec; padding: 5px 0; }
+.run-task-list {
+  display: grid;
+  gap: 5px;
+  margin: 5px 10px 9px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  background: #f7faf9;
+}
+.run-task-item {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.55fr) minmax(0, 1.6fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 3px 6px;
+  border-left: 2px solid var(--teal);
+  background: #fff;
+  font-size: 10px;
+}
+.run-task-agent { color: var(--teal); font-family: var(--mono); }
+.run-task-item strong { overflow-wrap: anywhere; font-weight: 600; }
+.run-task-item > span:last-child { color: var(--text-muted); font-family: var(--mono); }
 .inline-trace-event {
   width: 100%;
   display: grid;

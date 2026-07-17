@@ -6,7 +6,7 @@ import EldercareDashboard from './EldercareDashboard.vue'
 afterEach(() => vi.restoreAllMocks())
 
 describe('EldercareDashboard', () => {
-  it('runs a risk scenario and renders its multi-agent trace', async () => {
+  it('runs a risk scenario and refreshes the monitoring view', async () => {
     vi.spyOn(agentV2Api, 'listResidents').mockResolvedValue({ residents: [{
       resident_id: 'elderly-001', name: '张爷爷', room: 'A-101', caregiver: '王护理员', active: true,
     }] })
@@ -26,14 +26,6 @@ describe('EldercareDashboard', () => {
       scenario: 'fall', resident_id: 'elderly-001', events: [],
       tasks: [{ task_id: 'eldercare-1', status: 'succeeded', response: '已处置' }],
     })
-    vi.spyOn(agentV2Api, 'getEvents').mockResolvedValue({
-      next_cursor: 1,
-      events: [{
-        event_id: 'e1', sequence: 1, timestamp: '2026-07-16T08:00:00Z', trace_id: 'eldercare-1',
-        task_id: 'eldercare-1', session_id: 'resident:elderly-001', type: 'agent.subgraph.completed',
-        node: 'care_agent', iteration: 0, duration_ms: null, data: {},
-      }],
-    })
 
     const wrapper = mount(EldercareDashboard)
     await flushPromises()
@@ -42,13 +34,8 @@ describe('EldercareDashboard', () => {
     const fallButton = wrapper.findAll('button').find((button) => button.text().includes('模拟跌倒'))
     await fallButton!.trigger('click')
     await flushPromises()
-    const alertsTab = wrapper.findAll('button').find((button) => button.text().includes('异常告警'))
-    await alertsTab!.trigger('click')
-
     expect(simulate).toHaveBeenCalledWith('elderly-001', 'fall')
-    expect(wrapper.text()).toContain('eldercare-1')
-    expect(wrapper.text()).toContain('care_agent')
-    expect(wrapper.text()).toContain('agent.subgraph.completed')
+    expect(agentV2Api.getHealthSummary).toHaveBeenCalled()
     wrapper.unmount()
   })
 })

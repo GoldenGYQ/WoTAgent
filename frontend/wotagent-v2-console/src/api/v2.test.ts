@@ -20,28 +20,29 @@ describe('agentV2Api', () => {
     expect(result.thinking.supported).toBe(true)
   })
 
-  it('submits only to the Agent 2.0 task endpoint', async () => {
+  it('submits one user query as a Run', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
-        task_id: 'task-1',
+        run_id: 'run-1',
         turn_id: 'turn-1',
         conversation_id: 'conv-1',
-        session_id: 'conv-1',
+        root_goal: '打开客厅灯',
         status: 'accepted',
-        response: '',
-        plan: null,
-        trace: null,
-        confirmation: null,
-        thinking: true,
+        execution_strategy: 'parallel_when_safe',
+        success_criteria: [],
+        task_ids: [],
+        final_response: '',
+        created_at: '',
+        updated_at: '',
       }),
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    await agentV2Api.createTask('打开客厅灯', 'conv-1', 'operator', true)
+    await agentV2Api.createRun('打开客厅灯', 'conv-1', 'operator', true)
 
     expect(fetchMock).toHaveBeenCalledOnce()
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/v2/tasks')
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v2/runs')
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
       message: '打开客厅灯',
       conversation_id: 'conv-1',

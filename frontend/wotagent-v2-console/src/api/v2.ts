@@ -1,18 +1,19 @@
 import type {
   AgentRole,
+  AgentRunRecord,
+  AgentTaskRecord,
   ApiCapabilities,
+  CareAction,
   ConversationRecord,
   ConversationTurn,
-  TaskCreateResponse,
-  TaskRecord,
-  TraceEvent,
-  Resident,
-  HealthSummary,
-  RiskEvent,
-  CareAction,
-  EldercareSimulationResult,
-  SensorType,
   EldercareDevice,
+  EldercareSimulationResult,
+  HealthSummary,
+  Resident,
+  RiskEvent,
+  RunRecord,
+  SensorType,
+  TraceEvent,
 } from '../types/agent'
 
 export interface TraceSubscription {
@@ -37,13 +38,8 @@ function websocketUrl(path: string): string {
 }
 
 export const agentV2Api = {
-  health(): Promise<{ status: string; pipeline: string }> {
-    return request('/api/health')
-  },
-
-  capabilities(): Promise<ApiCapabilities> {
-    return request('/api/v2/capabilities')
-  },
+  health: (): Promise<{ status: string; pipeline: string }> => request('/api/health'),
+  capabilities: (): Promise<ApiCapabilities> => request('/api/v2/capabilities'),
 
   createConversation(role: AgentRole, userId = 'local-user'): Promise<ConversationRecord> {
     return request('/api/v2/conversations', {
@@ -51,85 +47,54 @@ export const agentV2Api = {
       body: JSON.stringify({ role, user_id: userId }),
     })
   },
-
   listConversations(userId = 'local-user'): Promise<{ conversations: ConversationRecord[] }> {
     return request(`/api/v2/conversations?user_id=${encodeURIComponent(userId)}`)
   },
-
   getConversationTurns(conversationId: string): Promise<{ conversation_id: string; turns: ConversationTurn[] }> {
     return request(`/api/v2/conversations/${encodeURIComponent(conversationId)}/turns`)
   },
-
   deleteConversation(conversationId: string): Promise<{ status: string; conversation_id: string }> {
     return request(`/api/v2/conversations/${encodeURIComponent(conversationId)}`, { method: 'DELETE' })
   },
 
-  createTask(message: string, conversationId: string, role: AgentRole, thinking: boolean, userId = 'local-user'): Promise<TaskCreateResponse> {
-    return request('/api/v2/tasks', {
+  createRun(message: string, conversationId: string, role: AgentRole, thinking: boolean, userId = 'local-user'): Promise<RunRecord> {
+    return request('/api/v2/runs', {
       method: 'POST',
       body: JSON.stringify({ message, conversation_id: conversationId, role, thinking, user_id: userId }),
     })
   },
-
-  getTask(taskId: string): Promise<TaskRecord> {
-    return request(`/api/v2/tasks/${encodeURIComponent(taskId)}`)
+  getRun(runId: string): Promise<RunRecord> {
+    return request(`/api/v2/runs/${encodeURIComponent(runId)}`)
+  },
+  getRunTasks(runId: string): Promise<{ run_id: string; tasks: AgentTaskRecord[] }> {
+    return request(`/api/v2/runs/${encodeURIComponent(runId)}/tasks`)
+  },
+  getTaskAgentRuns(runId: string, taskId: string): Promise<{ run_id: string; task_id: string; agent_runs: AgentRunRecord[] }> {
+    return request(`/api/v2/runs/${encodeURIComponent(runId)}/tasks/${encodeURIComponent(taskId)}/agent-runs`)
+  },
+  getEvents(runId: string, after = 0): Promise<{ run_id: string; events: TraceEvent[]; next_cursor: number }> {
+    return request(`/api/v2/runs/${encodeURIComponent(runId)}/events?after=${after}`)
   },
 
-  getEvents(taskId: string, after = 0): Promise<{ events: TraceEvent[]; next_cursor: number }> {
-    return request(`/api/v2/tasks/${encodeURIComponent(taskId)}/events?after=${after}`)
-  },
-
-  confirmTask(taskId: string, approved: boolean): Promise<TaskCreateResponse> {
-    return request(`/api/v2/tasks/${encodeURIComponent(taskId)}/confirm`, {
-      method: 'POST',
-      body: JSON.stringify({ approved }),
-    })
-  },
-
-  listResidents(): Promise<{ residents: Resident[] }> {
-    return request('/api/v2/eldercare/residents')
-  },
-
-  getHealthSummary(residentId: string): Promise<HealthSummary> {
-    return request(`/api/v2/eldercare/residents/${encodeURIComponent(residentId)}/summary`)
-  },
-
+  listResidents: (): Promise<{ residents: Resident[] }> => request('/api/v2/eldercare/residents'),
+  getHealthSummary: (residentId: string): Promise<HealthSummary> => request(`/api/v2/eldercare/residents/${encodeURIComponent(residentId)}/summary`),
   ingestReading(payload: { resident_id: string; sensor_type: SensorType; value: number | boolean | string; unit?: string; source?: string }): Promise<{ events: RiskEvent[]; tasks: Array<{ task_id: string; status: string }> }> {
-    return request('/api/v2/eldercare/readings', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    })
+    return request('/api/v2/eldercare/readings', { method: 'POST', body: JSON.stringify(payload) })
   },
-
   simulateEldercare(residentId: string, scenario: string): Promise<EldercareSimulationResult> {
-    return request('/api/v2/eldercare/simulate', {
-      method: 'POST',
-      body: JSON.stringify({ resident_id: residentId, scenario }),
-    })
+    return request('/api/v2/eldercare/simulate', { method: 'POST', body: JSON.stringify({ resident_id: residentId, scenario }) })
   },
-
   listRiskEvents(residentId?: string): Promise<{ events: RiskEvent[] }> {
-    const query = residentId ? `?resident_id=${encodeURIComponent(residentId)}` : ''
-    return request(`/api/v2/eldercare/events${query}`)
+    return request(`/api/v2/eldercare/events${residentId ? `?resident_id=${encodeURIComponent(residentId)}` : ''}`)
   },
-
   listCareActions(residentId?: string): Promise<{ actions: CareAction[] }> {
-    const query = residentId ? `?resident_id=${encodeURIComponent(residentId)}` : ''
-    return request(`/api/v2/eldercare/actions${query}`)
+    return request(`/api/v2/eldercare/actions${residentId ? `?resident_id=${encodeURIComponent(residentId)}` : ''}`)
   },
-
-  listEldercareDevices(residentId: string): Promise<{ resident_id: string; devices: EldercareDevice[] }> {
-    return request(`/api/v2/eldercare/residents/${encodeURIComponent(residentId)}/devices`)
-  },
-
-  acknowledgeRisk(eventId: string): Promise<RiskEvent> {
-    return request(`/api/v2/eldercare/events/${encodeURIComponent(eventId)}/acknowledge`, {
-      method: 'POST',
-    })
-  },
+  listEldercareDevices: (residentId: string): Promise<{ resident_id: string; devices: EldercareDevice[] }> => request(`/api/v2/eldercare/residents/${encodeURIComponent(residentId)}/devices`),
+  acknowledgeRisk: (eventId: string): Promise<RiskEvent> => request(`/api/v2/eldercare/events/${encodeURIComponent(eventId)}/acknowledge`, { method: 'POST' }),
 
   subscribe(
-    taskId: string,
+    runId: string,
     after: number,
     handlers: {
       onEvent: (event: TraceEvent) => void
@@ -140,26 +105,20 @@ export const agentV2Api = {
   ): TraceSubscription {
     const socket = new WebSocket(websocketUrl('/ws/v2'))
     let closedByClient = false
-
     socket.onopen = () => {
-      socket.send(JSON.stringify({ task_id: taskId, after }))
+      socket.send(JSON.stringify({ run_id: runId, after }))
       handlers.onOpen()
     }
     socket.onmessage = (message) => {
       const payload = JSON.parse(message.data) as TraceEvent | { type: string; status?: string }
-      if (payload.type === 'stream.completed') {
-        handlers.onComplete(('status' in payload ? payload.status : undefined) ?? 'completed')
-      } else if (payload.type === 'error') {
-        handlers.onError()
-      } else {
-        handlers.onEvent(payload as TraceEvent)
-      }
+      if (payload.type === 'stream.completed') handlers.onComplete(('status' in payload ? payload.status : undefined) ?? 'completed')
+      else if (payload.type === 'error') handlers.onError()
+      else handlers.onEvent(payload as TraceEvent)
     }
     socket.onerror = () => handlers.onError()
     socket.onclose = () => {
       if (!closedByClient) handlers.onError()
     }
-
     return {
       close() {
         closedByClient = true

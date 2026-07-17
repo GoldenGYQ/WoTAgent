@@ -4,6 +4,8 @@ import importlib
 
 from fastapi.testclient import TestClient
 
+from wotagent.agents import AgentFinding, Evidence
+from wotagent.application import RunService
 from wotagent.conversation import ConversationStore
 from wotagent.domains.eldercare import (
     EldercareMonitorService,
@@ -13,6 +15,12 @@ from wotagent.domains.eldercare import (
     RiskEvent,
 )
 from wotagent.telemetry import InMemoryTraceStore
+from wotagent.orchestration import (
+    InMemoryRunStore,
+    RunCoordinator,
+    SupervisorDecision,
+    TaskScheduler,
+)
 
 app_module = importlib.import_module("wotagent.api.app")
 
@@ -27,9 +35,8 @@ def test_eldercare_api_simulates_event_and_reuses_trace_api(monkeypatch, tmp_pat
     ))
     traces = InMemoryTraceStore()
     runtime = EldercareRuntime(store, trace_store=traces)
-    monkeypatch.setattr(app_module, "_eldercare_store", store)
-    monkeypatch.setattr(app_module, "_eldercare_runtime", runtime)
-    monkeypatch.setattr(app_module, "_v2_trace_store", traces)
+    monkeypatch.setattr(app_module._runtime, "eldercare_store", store)
+    monkeypatch.setattr(app_module._runtime, "eldercare_runtime", runtime)
     monkeypatch.setenv("ELDERCARE_MONITOR_ENABLED", "false")
 
     with TestClient(app_module.app) as client:
@@ -39,8 +46,6 @@ def test_eldercare_api_simulates_event_and_reuses_trace_api(monkeypatch, tmp_pat
             "scenario": "fall",
         })
         task_id = simulated.json()["tasks"][0]["task_id"]
-        task = client.get(f"/api/v2/tasks/{task_id}")
-        events = client.get(f"/api/v2/tasks/{task_id}/events")
         actions = client.get(
             "/api/v2/eldercare/actions",
             params={"resident_id": "elderly-001"},
@@ -49,8 +54,7 @@ def test_eldercare_api_simulates_event_and_reuses_trace_api(monkeypatch, tmp_pat
     assert residents.status_code == 200
     assert residents.json()["residents"][0]["name"] == "张爷爷"
     assert simulated.status_code == 202
-    assert task.status_code == 200 and task.json()["status"] == "succeeded"
-    assert any(item["type"] == "agent.subgraph.completed" for item in events.json()["events"])
+    assert simulated.json()["tasks"][0]["status"] == "succeeded"
     assert {item["action"] for item in actions.json()["actions"]} == {
         "notify_caregiver",
         "create_care_task",
@@ -90,8 +94,8 @@ def test_eldercare_manual_reading_and_summary(monkeypatch, tmp_path) -> None:
         trace_store=InMemoryTraceStore(),
         environment_gateway=gateway,
     )
-    monkeypatch.setattr(app_module, "_eldercare_store", store)
-    monkeypatch.setattr(app_module, "_eldercare_runtime", runtime)
+    monkeypatch.setattr(app_module._runtime, "eldercare_store", store)
+    monkeypatch.setattr(app_module._runtime, "eldercare_runtime", runtime)
 
     client = TestClient(app_module.app)
     ingested = client.post("/api/v2/eldercare/readings", json={
@@ -123,44 +127,77 @@ def test_main_chat_task_routes_eldercare_request_and_persists_response(
         name="张爷爷",
         room="A-101",
     ))
-    traces = InMemoryTraceStore()
     conversations = ConversationStore(tmp_path / "conversations.db")
+    run_store = InMemoryRunStore()
 
-    class FakeEldercareChatAgent:
-        async def run(self, **kwargs):
-            assert kwargs["message"] == "查看张爷爷今天的状态"
-            assert kwargs["role"] == "viewer"
-            return {
-                "status": "succeeded",
-                "response": "张爷爷当前心率82bpm。",
-                "plan": {
-                    "intent": "query",
-                    "resident_id": "elderly-001",
-                    "actions": [{"name": "read_health_summary"}],
-                },
-            }
+    async def execute_health(task):
+        return AgentFinding(
+            agent="health_agent",
+            objective=task.objective,
+            status="completed",
+            finding="张爷爷当前心率82bpm。",
+            confidence=1,
+            evidence=[Evidence(
+                source="eldercare-health",
+                value={"heart_rate": 82},
+                reliability=1,
+                description="最新手环读数",
+            )],
+        )
 
-    monkeypatch.setattr(app_module, "_eldercare_store", store)
-    monkeypatch.setattr(app_module, "_eldercare_chat_agent", FakeEldercareChatAgent())
-    monkeypatch.setattr(app_module, "_v2_trace_store", traces)
-    monkeypatch.setattr(app_module, "_v2_conversation_store", conversations)
+    def coordinator_factory(_context):
+        decisions = iter([
+            SupervisorDecision(
+                action="create_tasks",
+                goal="查看张爷爷今天的状态",
+                tasks=[{
+                    "local_id": "health",
+                    "agent_id": "health_agent",
+                    "objective": "读取张爷爷今天的健康状态",
+                    "reason": "需要健康证据",
+                    "success_criteria": ["获得最新健康状态"],
+                }],
+                success_criteria=["获得最新健康状态"],
+                reason="委派健康 Agent",
+            ),
+            SupervisorDecision(
+                action="finish",
+                goal="查看张爷爷今天的状态",
+                final_response="张爷爷当前心率82bpm。",
+                reason="证据充分",
+            ),
+        ])
+        return RunCoordinator(
+            run_store,
+            TaskScheduler(available_agents={"health_agent"}),
+            lambda _state: next(decisions),
+            {"health_agent": execute_health},
+        )
+
+    service = RunService(conversations, run_store, coordinator_factory)
+    monkeypatch.setattr(app_module._runtime, "eldercare_store", store)
+    monkeypatch.setattr(app_module._runtime, "conversation_store", conversations)
+    monkeypatch.setattr(app_module, "_run_store", run_store)
+    monkeypatch.setattr(app_module, "_run_service", service)
 
     client = TestClient(app_module.app)
-    created = client.post("/api/v2/tasks", json={
+    created = client.post("/api/v2/runs", json={
         "message": "查看张爷爷今天的状态",
         "role": "viewer",
     })
-    task_id = created.json()["task_id"]
-    task = client.get(f"/api/v2/tasks/{task_id}").json()
-    events = client.get(f"/api/v2/tasks/{task_id}/events").json()["events"]
+    run_id = created.json()["run_id"]
+    run = client.get(f"/api/v2/runs/{run_id}").json()
+    tasks = client.get(f"/api/v2/runs/{run_id}/tasks").json()["tasks"]
+    events = client.get(f"/api/v2/runs/{run_id}/events").json()["events"]
     turns = client.get(
         f"/api/v2/conversations/{created.json()['conversation_id']}/turns"
     ).json()["turns"]
 
     assert created.status_code == 202
-    assert task["status"] == "succeeded"
-    assert task["result"]["response"] == "张爷爷当前心率82bpm。"
-    assert any(event["type"] == "agent.plan.completed" for event in events)
+    assert run["status"] == "completed"
+    assert run["final_response"] == "张爷爷当前心率82bpm。"
+    assert tasks[0]["agent_id"] == "health_agent"
+    assert any(event["type"] == "supervisor.decision.completed" for event in events)
     assert turns[0]["assistant_message"] == "张爷爷当前心率82bpm。"
 
 
@@ -207,8 +244,8 @@ def test_device_inventory_and_alert_acknowledgement(monkeypatch, tmp_path) -> No
                 "observedAt": "2026-07-16T10:00:00+00:00",
             }
 
-    monkeypatch.setattr(app_module, "_eldercare_store", store)
-    monkeypatch.setattr(app_module, "_v2_gateway", FakeGateway())
+    monkeypatch.setattr(app_module._runtime, "eldercare_store", store)
+    monkeypatch.setattr(app_module._runtime, "gateway", FakeGateway())
     client = TestClient(app_module.app)
 
     inventory = client.get(

@@ -11,11 +11,11 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command
 
 from wotagent.agent_graph import AgentGraphDependencies, build_agent_graph
+from wotagent.application import RunService
 from wotagent.conversation import ConversationStore
 from wotagent.domain import PlanStep, TaskPlan
-from wotagent.orchestration import TaskOrchestrator
+from wotagent.orchestration import InMemoryRunStore, TaskOrchestrator
 from wotagent.policy import PolicyEngine
-from wotagent.telemetry import InMemoryTraceStore
 
 app_module = importlib.import_module("wotagent.api.app")
 
@@ -28,25 +28,25 @@ def test_conversation_store_persists_bounded_completed_history(tmp_path) -> None
 
     store.start_turn(
         conversation_id=conversation_id,
-        task_id="task-1",
+        run_id="run-1",
         user_message="查询客厅灯",
     )
-    store.finish_turn("task-1", response="客厅灯已开启", status="succeeded")
+    store.finish_turn("run-1", response="客厅灯已开启", status="completed")
     store.start_turn(
         conversation_id=conversation_id,
-        task_id="task-2",
+        run_id="run-2",
         user_message="把它关闭",
     )
     store.start_turn(
         conversation_id=conversation_id,
-        task_id="task-failed",
+        run_id="run-failed",
         user_message="一次失败请求",
     )
-    store.finish_turn("task-failed", response="不可信的失败结果", status="failed")
+    store.finish_turn("run-failed", response="不可信的失败结果", status="failed")
 
     reopened = ConversationStore(path, history_turns=1)
     assert reopened.get(conversation_id)["turn_count"] == 3
-    assert reopened.context(conversation_id, exclude_task_id="task-2") == [
+    assert reopened.context(conversation_id, exclude_run_id="run-2") == [
         {"role": "user", "content": "查询客厅灯"},
         {"role": "assistant", "content": "客厅灯已开启"},
     ]
@@ -64,12 +64,12 @@ def test_conversation_store_keeps_pending_goal_and_current_role_as_structured_fa
 
     store.start_turn(
         conversation_id=conversation_id,
-        task_id="task-denied",
+        run_id="run-denied",
         user_message="全关掉",
         role="viewer",
     )
     store.finish_turn(
-        "task-denied",
+        "run-denied",
         response="权限不足",
         status="denied",
         result={
@@ -99,12 +99,12 @@ def test_conversation_store_keeps_pending_goal_and_current_role_as_structured_fa
     )]).model_dump(mode="json")
     store.start_turn(
         conversation_id=conversation_id,
-        task_id="task-query",
+        run_id="run-query",
         user_message="现在灯是什么状态",
         role="operator",
     )
     store.finish_turn(
-        "task-query",
+        "run-query",
         response="灯已开启",
         status="succeeded",
         result={"status": "succeeded", "plan": query_plan},
@@ -115,12 +115,12 @@ def test_conversation_store_keeps_pending_goal_and_current_role_as_structured_fa
 
     store.start_turn(
         conversation_id=conversation_id,
-        task_id="task-succeeded",
+        run_id="run-succeeded",
         user_message="现在呢",
         role="operator",
     )
     store.finish_turn(
-        "task-succeeded",
+        "run-succeeded",
         response="已关闭",
         status="succeeded",
         result={"status": "succeeded", "plan": plan},
@@ -131,58 +131,68 @@ def test_conversation_store_keeps_pending_goal_and_current_role_as_structured_fa
     )["pending_goal"] is None
 
 
-def test_v2_reuses_conversation_context_but_isolates_graph_threads(monkeypatch, tmp_path) -> None:
-    class CapturingGraph:
-        def __init__(self) -> None:
-            self.calls = []
+def test_v2_reuses_conversation_context_but_isolates_runs(monkeypatch, tmp_path) -> None:
+    conversation_store = ConversationStore(tmp_path / "api-conversations.db")
+    run_store = InMemoryRunStore()
+    captured_contexts: list[dict[str, Any]] = []
 
-        async def ainvoke(self, state, config=None):
-            self.calls.append((state, config))
-            return {
-                **state,
-                "phase": "responded",
-                "plan": TaskPlan(intent="chat", summary="ok"),
-                "response": f"回复：{state['message']}",
-            }
+    class CapturingCoordinator:
+        def __init__(self, context):
+            captured_contexts.append(context)
 
-    graph = CapturingGraph()
-    store = ConversationStore(tmp_path / "api-conversations.db")
-    monkeypatch.setattr(app_module, "_v2_graph", graph)
-    monkeypatch.setattr(app_module, "_v2_conversation_store", store)
-    monkeypatch.setattr(app_module, "_v2_trace_store", InMemoryTraceStore())
+        async def execute(self, *, run_id, **_kwargs):
+            return await run_store.update_run(
+                run_id,
+                lambda run: _complete_run(run),
+            )
+
+    service = RunService(
+        conversation_store,
+        run_store,
+        CapturingCoordinator,
+    )
+    monkeypatch.setattr(
+        app_module._runtime,
+        "conversation_store",
+        conversation_store,
+    )
+    monkeypatch.setattr(app_module, "_run_store", run_store)
+    monkeypatch.setattr(app_module, "_run_service", service)
     client = TestClient(app_module.app)
 
     created = client.post("/api/v2/conversations", json={"role": "operator"})
     assert created.status_code == 201
     conversation_id = created.json()["conversation_id"]
 
-    first = client.post("/api/v2/tasks", json={
+    first = client.post("/api/v2/runs", json={
         "conversation_id": conversation_id,
         "message": "查询客厅灯",
         "role": "operator",
     })
-    second = client.post("/api/v2/tasks", json={
+    second = client.post("/api/v2/runs", json={
         "conversation_id": conversation_id,
         "message": "把它关闭",
         "role": "operator",
     })
 
     assert first.status_code == second.status_code == 202
-    assert graph.calls[0][0]["conversation_history"] == []
-    assert graph.calls[1][0]["conversation_history"] == [
+    assert captured_contexts[0]["history"] == []
+    assert captured_contexts[1]["history"] == [
         {"role": "user", "content": "查询客厅灯"},
         {"role": "assistant", "content": "回复：查询客厅灯"},
     ]
-    assert graph.calls[1][0]["context"]["runtime"]["current_role"] == "operator"
-    first_thread = graph.calls[0][1]["configurable"]["thread_id"]
-    second_thread = graph.calls[1][1]["configurable"]["thread_id"]
-    assert first_thread == first.json()["task_id"]
-    assert second_thread == second.json()["task_id"]
-    assert first_thread != second_thread
+    assert captured_contexts[1]["runtime"]["current_role"] == "operator"
+    assert first.json()["run_id"] != second.json()["run_id"]
+    assert first.json()["turn_id"] != second.json()["turn_id"]
 
     turns = client.get(f"/api/v2/conversations/{conversation_id}/turns")
     assert turns.status_code == 200
     assert len(turns.json()["turns"]) == 2
+
+
+def _complete_run(run) -> None:
+    run.status = "completed"
+    run.final_response = f"回复：{run.root_goal}"
 
 
 def test_sqlite_checkpoint_resumes_confirmation_after_graph_recreation(tmp_path) -> None:

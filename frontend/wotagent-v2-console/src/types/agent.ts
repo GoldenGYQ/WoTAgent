@@ -29,27 +29,62 @@ export interface TraceEvent {
   event_id: string
   sequence: number
   timestamp: string
-  trace_id: string
-  task_id: string
-  session_id: string
+  run_id: string
+  turn_id: string
+  task_id: string | null
+  parent_task_id: string | null
+  agent_run_id: string | null
+  tool_call_id: string | null
   type: string
   node: string
   iteration: number
-  duration_ms: number | null
   data: Record<string, unknown>
 }
 
-export interface TaskCreateResponse {
-  task_id: string | null
-  turn_id: string | null
+export interface RunRecord {
+  run_id: string
   conversation_id: string
-  session_id: string
+  turn_id: string
+  root_goal: string
   status: string
-  response: string
-  plan: TaskPlan | null
-  trace: Record<string, unknown> | null
-  confirmation: ConfirmationRequest | null
-  thinking: boolean
+  execution_strategy: 'sequential' | 'parallel_when_safe'
+  success_criteria: string[]
+  task_ids: string[]
+  final_response: string
+  created_at: string
+  updated_at: string
+}
+
+export interface AgentTaskRecord {
+  task_id: string
+  run_id: string
+  parent_task_id: string | null
+  local_id: string
+  agent_id: string
+  objective: string
+  reason: string
+  status: string
+  expected_evidence: string[]
+  success_criteria: string[]
+  depends_on: string[]
+  parallel_candidate: boolean
+  priority: number
+  finding: Record<string, unknown> | null
+  created_at: string
+  updated_at: string
+}
+
+export interface AgentRunRecord {
+  agent_run_id: string
+  run_id: string
+  task_id: string
+  agent_id: string
+  attempt: number
+  status: string
+  iteration_count: number
+  tool_call_count: number
+  started_at: string
+  finished_at: string | null
 }
 
 export interface ApiCapabilities {
@@ -119,20 +154,6 @@ export interface EldercareDevice {
   state: Record<string, unknown>
 }
 
-export interface TaskRecord {
-  trace_id: string
-  task_id: string
-  session_id: string
-  request_id: string
-  status: string
-  created_at: string
-  updated_at: string
-  loop_count: number
-  recovery_count: number
-  usage: UsageSummary
-  result: TaskCreateResponse | { error?: string } | null
-}
-
 export interface PlanCondition {
   property: string
   operator: string
@@ -166,18 +187,18 @@ export interface ConfirmationRequest {
 
 export type StreamState = 'idle' | 'connecting' | 'live' | 'polling' | 'closed'
 
-export interface RuntimeTask {
+export interface RuntimeRun {
   id: string
   turnId: string
   conversationId: string
-  sessionId: string
   message: string
   role: AgentRole
   thinking: boolean
   status: string
   response: string
-  plan: TaskPlan | null
-  confirmation: ConfirmationRequest | null
+  executionStrategy: 'sequential' | 'parallel_when_safe'
+  successCriteria: string[]
+  tasks: AgentTaskRecord[]
   events: TraceEvent[]
   usage: UsageSummary
   loopCount: number
@@ -191,7 +212,7 @@ export interface RuntimeTask {
 export interface ConversationTurn {
   turn_id: string
   conversation_id: string
-  task_id: string
+  run_id: string
   user_message: string
   assistant_message: string
   status: string

@@ -2,39 +2,33 @@
 import {
   Bot,
   BrainCircuit,
-  Check,
   CircleAlert,
   Cpu,
   MessageSquareText,
   PanelLeft,
   Route,
-  ShieldAlert,
-  X,
 } from 'lucide-vue-next'
-import type { ConversationTurn, RuntimeConversation, RuntimeTask } from '../types/agent'
+import type { ConversationTurn, RuntimeConversation, RuntimeRun } from '../types/agent'
 import InlineTraceTimeline from './InlineTraceTimeline.vue'
 import MetricStrip from './MetricStrip.vue'
 import StatusBadge from './StatusBadge.vue'
 
 const props = defineProps<{
   conversation: RuntimeConversation | null
-  tasks: RuntimeTask[]
-  activeTask: RuntimeTask | null
+  runs: RuntimeRun[]
+  activeRun: RuntimeRun | null
   currentAccountId: string | null
   currentAccountName: string | null
   sidebarCollapsed: boolean
 }>()
 const emit = defineEmits<{
-  confirm: [taskId: string, approved: boolean]
   example: [message: string]
-  selectTask: [taskId: string]
+  selectRun: [runId: string]
   toggleSidebar: []
 }>()
 
-function taskForTurn(turn: ConversationTurn): RuntimeTask | undefined {
-  return props.tasks
-    .filter((task) => task.id === turn.task_id)
-    .sort((left, right) => right.events.length - left.events.length)[0]
+function runForTurn(turn: ConversationTurn): RuntimeRun | undefined {
+  return props.runs.find((run) => run.id === turn.run_id)
 }
 
 </script>
@@ -53,26 +47,26 @@ function taskForTurn(turn: ConversationTurn): RuntimeTask | undefined {
       </button>
       <div class="task-identity workspace-title">
         <strong class="conversation-title">{{ conversation?.title ?? `欢迎${currentAccountName ?? '某某'}` }}</strong>
-        <StatusBadge v-if="activeTask" :status="activeTask.status" />
-        <span v-if="activeTask?.thinking" class="thinking-mode"><BrainCircuit :size="13" />深度思考</span>
+        <StatusBadge v-if="activeRun" :status="activeRun.status" />
+        <span v-if="activeRun?.thinking" class="thinking-mode"><BrainCircuit :size="13" />深度思考</span>
       </div>
-      <span v-if="activeTask" class="workspace-trace-status" :data-live="activeTask.streamState === 'live'">
+      <span v-if="activeRun" class="workspace-trace-status" :data-live="activeRun.streamState === 'live'">
         <i />
         <Route :size="14" />
-        {{ activeTask.events.length }} 个事件
+        {{ activeRun.tasks.length }} 个任务 · {{ activeRun.events.length }} 个事件
       </span>
       <Route v-else :size="15" class="workspace-header-mark" />
     </header>
 
     <template v-if="conversation">
-      <MetricStrip v-if="activeTask" :task="activeTask" />
+      <MetricStrip v-if="activeRun" :run="activeRun" />
 
       <div class="conversation-pane">
         <div
           v-for="turn in conversation.turns"
           :key="turn.turn_id"
           class="turn-group"
-          :class="{ selected: activeTask?.id === turn.task_id }"
+          :class="{ selected: activeRun?.id === turn.run_id }"
         >
           <section class="message-block user-message">
             <div class="message-avatar">你</div>
@@ -80,12 +74,12 @@ function taskForTurn(turn: ConversationTurn): RuntimeTask | undefined {
               <span class="message-role">
                 User
                 <button
-                  v-if="taskForTurn(turn)"
+                  v-if="runForTurn(turn)"
                   type="button"
                   class="turn-task-link"
-                  @click="emit('selectTask', turn.task_id)"
+                  @click="emit('selectRun', turn.run_id)"
                 >
-                  {{ turn.task_id }}
+                  {{ turn.run_id }}
                 </button>
               </span>
               <p>{{ turn.user_message }}</p>
@@ -93,27 +87,10 @@ function taskForTurn(turn: ConversationTurn): RuntimeTask | undefined {
           </section>
 
           <InlineTraceTimeline
-            v-if="taskForTurn(turn)"
-            :task="taskForTurn(turn)!"
-            :selected="activeTask?.id === turn.task_id"
+            v-if="runForTurn(turn)"
+            :run="runForTurn(turn)!"
+            :selected="activeRun?.id === turn.run_id"
           />
-
-          <section v-if="taskForTurn(turn)?.confirmation" class="confirmation-band">
-            <ShieldAlert :size="21" />
-            <div class="confirmation-copy">
-              <strong>需要执行确认</strong>
-              <p>{{ taskForTurn(turn)?.confirmation?.summary }}</p>
-              <span>{{ taskForTurn(turn)?.confirmation?.steps.length }} 个设备操作</span>
-            </div>
-            <div class="confirmation-actions">
-              <button class="icon-text-button secondary" type="button" @click="emit('confirm', turn.task_id, false)">
-                <X :size="16" />拒绝
-              </button>
-              <button class="icon-text-button primary" type="button" @click="emit('confirm', turn.task_id, true)">
-                <Check :size="16" />确认执行
-              </button>
-            </div>
-          </section>
 
           <section v-if="turn.assistant_message" class="message-block assistant-message">
             <div class="message-avatar"><Bot :size="17" /></div>
@@ -123,9 +100,9 @@ function taskForTurn(turn: ConversationTurn): RuntimeTask | undefined {
             </div>
           </section>
 
-          <section v-if="taskForTurn(turn)?.error" class="error-band">
+          <section v-if="runForTurn(turn)?.error" class="error-band">
             <CircleAlert :size="18" />
-            <div><strong>任务异常</strong><span>{{ taskForTurn(turn)?.error }}</span></div>
+            <div><strong>运行异常</strong><span>{{ runForTurn(turn)?.error }}</span></div>
           </section>
         </div>
         <div v-if="conversation.loading" class="conversation-loading">正在恢复会话</div>

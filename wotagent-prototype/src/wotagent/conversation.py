@@ -50,7 +50,7 @@ class ConversationStore:
                 CREATE TABLE IF NOT EXISTS conversation_turns (
                     turn_id TEXT PRIMARY KEY,
                     conversation_id TEXT NOT NULL,
-                    task_id TEXT NOT NULL UNIQUE,
+                    run_id TEXT NOT NULL UNIQUE,
                     user_message TEXT NOT NULL,
                     assistant_message TEXT NOT NULL DEFAULT '',
                     role TEXT NOT NULL DEFAULT 'operator',
@@ -65,6 +65,7 @@ class ConversationStore:
                     ON conversation_turns(conversation_id, created_at);
                 """
             )
+            self._migrate_task_turns(connection)
             self._ensure_column(
                 connection,
                 "conversations",
@@ -84,6 +85,48 @@ class ConversationStore:
                 "TEXT NOT NULL DEFAULT ''",
             )
 
+    @staticmethod
+    def _migrate_task_turns(connection: sqlite3.Connection) -> None:
+        columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(conversation_turns)"
+            ).fetchall()
+        }
+        if "task_id" not in columns or "run_id" in columns:
+            return
+        connection.executescript(
+            """
+            ALTER TABLE conversation_turns RENAME TO conversation_turns_legacy;
+            CREATE TABLE conversation_turns (
+                turn_id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL,
+                run_id TEXT NOT NULL UNIQUE,
+                user_message TEXT NOT NULL,
+                assistant_message TEXT NOT NULL DEFAULT '',
+                role TEXT NOT NULL DEFAULT 'operator',
+                result_json TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(conversation_id) REFERENCES conversations(conversation_id)
+                    ON DELETE CASCADE
+            );
+            INSERT INTO conversation_turns (
+                turn_id, conversation_id, run_id, user_message,
+                assistant_message, role, result_json, status,
+                created_at, updated_at
+            )
+            SELECT
+                turn_id, conversation_id, task_id, user_message,
+                assistant_message, role, result_json, status,
+                created_at, updated_at
+            FROM conversation_turns_legacy;
+            DROP TABLE conversation_turns_legacy;
+            CREATE INDEX IF NOT EXISTS idx_turns_conversation_created
+                ON conversation_turns(conversation_id, created_at);
+            """
+        )
     @staticmethod
     def _ensure_column(
         connection: sqlite3.Connection,
@@ -157,7 +200,7 @@ class ConversationStore:
         self,
         *,
         conversation_id: str,
-        task_id: str,
+        run_id: str,
         user_message: str,
         role: str = "operator",
     ) -> dict[str, Any]:
@@ -167,9 +210,9 @@ class ConversationStore:
         with self._lock, self._connect() as connection:
             connection.execute(
                 """INSERT INTO conversation_turns
-                   (turn_id, conversation_id, task_id, user_message, role, status, created_at, updated_at)
+                   (turn_id, conversation_id, run_id, user_message, role, status, created_at, updated_at)
                    VALUES (?, ?, ?, ?, ?, 'running', ?, ?)""",
-                (turn_id, conversation_id, task_id, user_message, role, now, now),
+                (turn_id, conversation_id, run_id, user_message, role, now, now),
             )
             connection.execute(
                 """UPDATE conversations
@@ -179,11 +222,11 @@ class ConversationStore:
                    WHERE conversation_id = ?""",
                 (title, role, now, conversation_id),
             )
-        return self.turn_for_task(task_id) or {}
+        return self.turn_for_run(run_id) or {}
 
     def finish_turn(
         self,
-        task_id: str,
+        run_id: str,
         *,
         response: str,
         status: str,
@@ -194,8 +237,8 @@ class ConversationStore:
         with self._lock, self._connect() as connection:
             row = connection.execute(
                 """SELECT conversation_id, user_message, role
-                   FROM conversation_turns WHERE task_id = ?""",
-                (task_id,),
+                   FROM conversation_turns WHERE run_id = ?""",
+                (run_id,),
             ).fetchone()
             if row is None:
                 return
@@ -210,11 +253,11 @@ class ConversationStore:
             connection.execute(
                 """UPDATE conversation_turns
                    SET assistant_message = ?, status = ?, result_json = ?, updated_at = ?
-                   WHERE task_id = ?""",
-                (response, status, result_json, now, task_id),
+                   WHERE run_id = ?""",
+                (response, status, result_json, now, run_id),
             )
             pending_goal = self._pending_goal(
-                task_id=task_id,
+                run_id=run_id,
                 user_message=row["user_message"],
                 role=row["role"],
                 status=status,
@@ -237,11 +280,11 @@ class ConversationStore:
                 (now, row["conversation_id"]),
             )
 
-    def turn_for_task(self, task_id: str) -> dict[str, Any] | None:
+    def turn_for_run(self, run_id: str) -> dict[str, Any] | None:
         with self._lock, self._connect() as connection:
             row = connection.execute(
-                "SELECT * FROM conversation_turns WHERE task_id = ?",
-                (task_id,),
+                "SELECT * FROM conversation_turns WHERE run_id = ?",
+                (run_id,),
             ).fetchone()
             return dict(row) if row else None
 
@@ -254,17 +297,25 @@ class ConversationStore:
             ).fetchall()
             return [dict(row) for row in rows]
 
-    def context(self, conversation_id: str, *, exclude_task_id: str = "") -> list[dict[str, str]]:
+    def context(
+        self,
+        conversation_id: str,
+        *,
+        exclude_run_id: str = "",
+    ) -> list[dict[str, str]]:
         """Return a bounded, completed dialogue window suitable for model input."""
         with self._lock, self._connect() as connection:
             rows = connection.execute(
                 """SELECT user_message, assistant_message
                    FROM conversation_turns
-                   WHERE conversation_id = ? AND task_id != ?
-                     AND status IN ('succeeded', 'partial_success', 'responded', 'denied')
+                   WHERE conversation_id = ? AND run_id != ?
+                     AND status IN (
+                         'completed', 'partial_success', 'succeeded',
+                         'responded', 'denied'
+                     )
                      AND assistant_message != ''
                    ORDER BY created_at DESC LIMIT ?""",
-                (conversation_id, exclude_task_id, self.history_turns),
+                (conversation_id, exclude_run_id, self.history_turns),
             ).fetchall()
         history: list[dict[str, str]] = []
         for row in reversed(rows):
@@ -277,7 +328,7 @@ class ConversationStore:
         conversation_id: str,
         *,
         current_role: str,
-        exclude_task_id: str = "",
+        exclude_run_id: str = "",
     ) -> dict[str, Any]:
         """Return structured facts that should not be inferred from chat prose."""
         with self._lock, self._connect() as connection:
@@ -287,21 +338,21 @@ class ConversationStore:
                 (conversation_id,),
             ).fetchone()
             latest = connection.execute(
-                """SELECT task_id, user_message, role, status, result_json
+                """SELECT run_id, user_message, role, status, result_json
                    FROM conversation_turns
-                   WHERE conversation_id = ? AND task_id != ? AND result_json != ''
+                   WHERE conversation_id = ? AND run_id != ? AND result_json != ''
                    ORDER BY created_at DESC LIMIT 1""",
-                (conversation_id, exclude_task_id),
+                (conversation_id, exclude_run_id),
             ).fetchone()
 
         pending_goal = self._load_json(
             conversation["pending_goal_json"] if conversation is not None else ""
         )
-        last_task: dict[str, Any] | None = None
+        last_run: dict[str, Any] | None = None
         if latest is not None:
             result = self._load_json(latest["result_json"])
-            last_task = {
-                "task_id": latest["task_id"],
+            last_run = {
+                "run_id": latest["run_id"],
                 "user_message": latest["user_message"],
                 "role": latest["role"],
                 "status": latest["status"],
@@ -311,7 +362,7 @@ class ConversationStore:
         return {
             "current_role": current_role,
             "pending_goal": pending_goal or None,
-            "last_task": last_task,
+            "last_run": last_run,
         }
 
     @staticmethod
@@ -326,7 +377,7 @@ class ConversationStore:
     def _pending_goal(
         cls,
         *,
-        task_id: str,
+        run_id: str,
         user_message: str,
         role: str,
         status: str,
@@ -338,7 +389,7 @@ class ConversationStore:
         if status not in {"denied", "failed", "partial_success", "waiting_confirmation"}:
             return None
         return {
-            "source_task_id": task_id,
+            "source_run_id": run_id,
             "user_message": user_message,
             "role": role,
             "status": status,
@@ -352,7 +403,7 @@ class ConversationStore:
         result: dict[str, Any],
         status: str,
     ) -> bool:
-        if status != "succeeded":
+        if status not in {"completed", "succeeded"}:
             return False
         pending_plan = pending.get("plan")
         completed_plan = result.get("plan")

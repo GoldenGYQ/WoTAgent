@@ -13,7 +13,7 @@ export function eventTone(event: TraceEvent): EventTone {
     || event.type === 'agent.finding.completed'
     || event.type === 'agent.goal.evaluated'
   ) return 'verify'
-  if (event.type.startsWith('task.succeeded')) return 'success'
+  if (event.type === 'task.completed' || event.type === 'run.completed') return 'success'
   return 'neutral'
 }
 
@@ -48,17 +48,37 @@ export function eventTitle(event: TraceEvent): string {
     'agent.fallback.activated': '启用规则回退',
     'agent.shadow.compared': 'Shadow 策略比较',
   }
-  return labels[event.type] ?? event.type
+  const runLabels: Record<string, string> = {
+    'run.started': 'Run 开始',
+    'run.completed': 'Run 完成',
+    'run.partial_success': 'Run 部分完成',
+    'run.failed': 'Run 失败',
+    'supervisor.decision.completed': 'Supervisor 决策',
+    'task.created': '创建专项 Task',
+    'task.started': '专业 Agent 开始',
+    'task.completed': '专项 Task 完成',
+    'task.blocked': '专项 Task 受阻',
+    'scheduler.parallel_batch.completed': '调度批次完成',
+  }
+  return runLabels[event.type] ?? labels[event.type] ?? event.type
 }
 
 export function eventSummary(event: TraceEvent): string {
   const data = event.data
+  if (event.type === 'task.created') return `${String(data.agent_id ?? event.node)} · ${String(data.objective ?? '')}`
+  if (event.type === 'task.started') return String(data.objective ?? '')
+  if (event.type === 'scheduler.parallel_batch.completed') {
+    const ids = Array.isArray(data.task_ids) ? data.task_ids : []
+    return `${ids.length} 个 Task · ${data.parallel === true ? '并行' : '串行'}`
+  }
+  if (event.type === 'supervisor.decision.completed') return String(data.reason ?? data.action ?? '')
+  if (event.type.startsWith('run.')) return String(data.response ?? data.root_goal ?? '')
   if (event.type === 'context.built') {
     return `${number(data.history_messages)} 条历史 · ${number(data.history_characters)} 字符`
   }
   if (event.type === 'model.request.started') return String(data.purpose ?? '调用模型')
   if (event.type === 'model.request.completed') {
-    return `${number(data.total_tokens)} tokens · ${duration(event.duration_ms)}`
+    return `${number(data.total_tokens)} tokens · ${duration(Number(data.duration_ms ?? 0))}`
   }
   if (event.type === 'model.reasoning.summary') return String(data.summary ?? data.intent ?? '')
   if (event.type === 'policy.evaluated') {
@@ -116,7 +136,7 @@ export function eventSummary(event: TraceEvent): string {
     return data.passed === true ? '后置条件通过' : '后置条件未满足'
   }
   if (event.type === 'agent.loop.completed') return `第 ${event.iteration || 1} 轮 · ${String(data.status ?? '')}`
-  if (event.type === 'agent.node.completed' && event.duration_ms) return duration(event.duration_ms)
+  if (event.type === 'agent.node.completed' && data.duration_ms) return duration(Number(data.duration_ms))
   if (event.type === 'task.failed') return String(data.error ?? '执行失败')
   if (event.type.startsWith('task.')) return String(data.response ?? '')
   return event.node ? nodeLabel(event.node) : ''

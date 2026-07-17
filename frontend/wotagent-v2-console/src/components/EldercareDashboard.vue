@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Activity, AlertTriangle, BedDouble, BellRing, Check, Database, HeartPulse, Play, RadioTower, RefreshCw, Send, Settings2, Thermometer, UserRoundCheck } from 'lucide-vue-next'
 import { agentV2Api } from '../api/v2'
-import type { CareAction, EldercareDevice, HealthSummary, Resident, RiskEvent, SensorType, TraceEvent } from '../types/agent'
+import type { CareAction, EldercareDevice, HealthSummary, Resident, RiskEvent, SensorType } from '../types/agent'
 
 const props = defineProps<{ initialResidentId?: string }>()
 
@@ -11,9 +11,7 @@ const selectedId = ref('')
 const summary = ref<HealthSummary | null>(null)
 const risks = ref<RiskEvent[]>([])
 const actions = ref<CareAction[]>([])
-const trace = ref<TraceEvent[]>([])
 const devices = ref<EldercareDevice[]>([])
-const activeTraceTask = ref('')
 const activeSection = ref<'devices' | 'collection' | 'health' | 'alerts'>('health')
 const loading = ref(false)
 const error = ref('')
@@ -121,14 +119,13 @@ async function submitReading(): Promise<void> {
   error.value = ''
   loading.value = true
   try {
-    const result = await agentV2Api.ingestReading({
+    await agentV2Api.ingestReading({
       resident_id: selectedId.value,
       sensor_type: sensorType.value,
       value: parseValue(),
       unit: unit.value,
       source: 'web-console',
     })
-    if (result.tasks[0]) await inspectTrace(result.tasks[0].task_id)
     await refresh()
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause)
@@ -141,19 +138,13 @@ async function runScenario(scenario: string): Promise<void> {
   error.value = ''
   loading.value = true
   try {
-    const result = await agentV2Api.simulateEldercare(selectedId.value, scenario)
-    if (result.tasks[0]) await inspectTrace(result.tasks[0].task_id)
+    await agentV2Api.simulateEldercare(selectedId.value, scenario)
     await refresh()
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause)
   } finally {
     loading.value = false
   }
-}
-
-async function inspectTrace(taskId: string): Promise<void> {
-  activeTraceTask.value = taskId
-  trace.value = (await agentV2Api.getEvents(taskId)).events
 }
 
 async function acknowledge(eventId: string): Promise<void> {
@@ -313,15 +304,6 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <section v-if="activeSection === 'alerts'" class="trace-section">
-      <h2>事件任务 Trace <code>{{ activeTraceTask || '尚未触发事件任务' }}</code></h2>
-      <div class="trace-lane">
-        <button v-for="event in trace" :key="event.event_id" type="button" :title="JSON.stringify(event.data)">
-          <span>{{ event.sequence }}</span><strong>{{ event.node || 'runtime' }}</strong><small>{{ event.type }}</small>
-        </button>
-        <p v-if="!trace.length">运行风险场景后，此处显示 Butler、授权、子图和 Tool 的完整执行轨迹。</p>
-      </div>
-    </section>
   </main>
 </template>
 

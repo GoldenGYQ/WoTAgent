@@ -16,7 +16,7 @@ const conversation: RuntimeConversation = {
     {
       turn_id: 'turn-1',
       conversation_id: 'conv-1',
-      task_id: 'task-1',
+      run_id: 'run-1',
       user_message: '查询客厅灯状态',
       assistant_message: '客厅灯已开启',
       status: 'succeeded',
@@ -26,7 +26,7 @@ const conversation: RuntimeConversation = {
     {
       turn_id: 'turn-2',
       conversation_id: 'conv-1',
-      task_id: 'task-2',
+      run_id: 'run-2',
       user_message: '把它关闭',
       assistant_message: '客厅灯已关闭',
       status: 'succeeded',
@@ -41,8 +41,8 @@ describe('TaskWorkspace', () => {
     const wrapper = mount(TaskWorkspace, {
       props: {
         conversation,
-        tasks: [],
-        activeTask: null,
+        runs: [],
+        activeRun: null,
         currentAccountId: 'JH-1',
         currentAccountName: '王护理员',
         sidebarCollapsed: false,
@@ -60,8 +60,8 @@ describe('TaskWorkspace', () => {
     const wrapper = mount(TaskWorkspace, {
       props: {
         conversation: null,
-        tasks: [],
-        activeTask: null,
+        runs: [],
+        activeRun: null,
         currentAccountId: 'JH-2',
         currentAccountName: '赵观察员',
         sidebarCollapsed: false,
