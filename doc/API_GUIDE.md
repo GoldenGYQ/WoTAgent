@@ -8,7 +8,7 @@ Base URL: `http://127.0.0.1:8000`.
 |---|---|---|
 | GET | `/` | Service metadata |
 | GET | `/api/health` | Health and active pipeline |
-| GET | `/api/v2/capabilities` | Thinking and streaming capability |
+| GET | `/api/v2/capabilities` | Thinking, streaming and Agent capabilities |
 
 ## Conversations
 
@@ -20,50 +20,80 @@ Base URL: `http://127.0.0.1:8000`.
 | GET | `/api/v2/conversations/{id}/turns` | Read persisted turns |
 | DELETE | `/api/v2/conversations/{id}` | Delete a conversation |
 
-## Tasks
+## Runs And Tasks
 
-Create a task:
+One user query creates one Run. The Supervisor may create multiple dependent or
+parallel Tasks under that Run; each professional Agent execution is recorded as
+an AgentRun.
 
 ```http
-POST /api/v2/tasks
+POST /api/v2/runs
 Content-Type: application/json
 
 {
   "conversation_id": "conv_123",
-  "message": "把客厅灯调到 45%",
+  "message": "检查照明，并在需要时调节客厅环境",
   "role": "operator",
+  "user_id": "local-user",
   "thinking": false
 }
 ```
 
-The API returns `202 Accepted` with a `task_id`. Processing continues through FastAPI `BackgroundTasks`.
+The API returns `202 Accepted` with a `run_id` and `turn_id`.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/v2/tasks/{task_id}` | Task status, result, usage and loop metrics |
-| POST | `/api/v2/tasks/{task_id}/confirm` | Resume a checkpoint with `{ "approved": true }` |
-| GET | `/api/v2/traces/{task_id}` | Trace record alias |
-| GET | `/api/v2/tasks/{task_id}/events?after=N` | Ordered event replay |
-| GET | `/api/v2/tasks/{task_id}/events/stream?after=N` | SSE trace stream |
+| GET | `/api/v2/runs/{run_id}` | Read Run status and final response |
+| GET | `/api/v2/runs/{run_id}/tasks` | List the Run's Task DAG |
+| GET | `/api/v2/runs/{run_id}/tasks/{task_id}/agent-runs` | List Agent attempts |
+| POST | `/api/v2/runs/{run_id}/tasks/{task_id}/confirm` | Resume a waiting Task |
+| GET | `/api/v2/runs/{run_id}/events?after=N` | Replay ordered Run events |
 
-## WebSocket Trace
+Confirmation body:
+
+```json
+{"approved": true}
+```
+
+Run metadata, Tasks, AgentRuns, ordered events and pending confirmation payloads
+are persisted in SQLite. Device subgraphs use the same `task_id` as their
+LangGraph `thread_id`, so confirmation can resume the original checkpoint after
+an application restart.
+
+## WebSocket Events
 
 Connect to `ws://127.0.0.1:8000/ws/v2`, then send:
 
 ```json
-{"task_id":"task_123","after":0}
+{"run_id":"run_123","after":0}
 ```
 
-The server replays ordered events and ends with `stream.completed`. Events expose model request metadata, node transitions, tool input/output, policy decisions, verification, loop/recovery counts, Token usage, TTFT and estimated cost. Private chain-of-thought is deliberately not exposed.
+The server replays events in sequence order. Events include Supervisor
+decisions, Task creation, Agent execution, confirmation and final Run state.
+The stream sends `stream.completed` after a terminal Run status. Private
+chain-of-thought is deliberately not exposed.
 
 ## Status Values
 
-- `accepted`, `running`
-- `waiting_confirmation`
-- `responded` for ordinary conversation
-- `succeeded`, `partial_success`
-- `denied`, `failed`, `cancelled`
+Run: `accepted`, `running`, `waiting_confirmation`, `completed`,
+`partial_success`, `failed`, `cancelled`.
 
-## Removed v1 Routes
+Task: `pending`, `ready`, `running`, `waiting_confirmation`, `completed`,
+`failed`, `blocked`, `cancelled`.
 
-`/api/chat`, `/api/session*`, `/api/perception/*`, `/api/devices`, and `/ws` belonged to the 1.0 runtime and are intentionally absent from 2.0.
+## Persistence Configuration
+
+```dotenv
+WOTAGENT_CONVERSATION_DB=./data/conversations.db
+WOTAGENT_RUN_DB=./data/agent_runs.db
+WOTAGENT_CHECKPOINT_DB=./data/agent_checkpoints.db
+```
+
+`WOTAGENT_RUN_DB` stores API orchestration state. `WOTAGENT_CHECKPOINT_DB`
+stores LangGraph node state and native interrupts. Both are required for
+restart-safe confirmation recovery.
+
+## Removed APIs
+
+The old `/api/v2/tasks`, `/api/v2/traces`, SSE Task stream and v1 routes are not
+part of the Run/Task runtime.

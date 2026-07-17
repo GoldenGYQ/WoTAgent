@@ -12,7 +12,7 @@ from .run_models import (
     SupervisorTaskPlan,
 )
 from .run_coordinator import PendingConfirmation, RunCoordinator
-from .run_store import InMemoryRunStore
+from .run_store import InMemoryRunStore, RunStore, SQLiteRunStore
 from .scheduler import TaskScheduler
 
 __all__ = [
@@ -24,7 +24,9 @@ __all__ = [
     "ResourceClaim",
     "RunEvent",
     "RunRecord",
+    "RunStore",
     "RunCoordinator",
+    "SQLiteRunStore",
     "SupervisorDecision",
     "SupervisorTaskPlan",
     "TaskOrchestrator",

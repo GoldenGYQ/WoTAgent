@@ -9,14 +9,14 @@ from uuid import uuid4
 from fastapi import BackgroundTasks, HTTPException
 
 from ..conversation import ConversationStore
-from ..orchestration import InMemoryRunStore, RunCoordinator, RunRecord
+from ..orchestration import RunCoordinator, RunRecord, RunStore
 
 
 class RunService:
     def __init__(
         self,
         conversation_store: ConversationStore,
-        run_store: InMemoryRunStore,
+        run_store: RunStore,
         coordinator_factory: Callable[[dict[str, Any]], RunCoordinator],
         thinking_supported: Callable[[], bool] | None = None,
     ) -> None:
@@ -24,7 +24,6 @@ class RunService:
         self.run_store = run_store
         self.coordinator_factory = coordinator_factory
         self.thinking_supported = thinking_supported or (lambda: True)
-        self._coordinators: dict[str, RunCoordinator] = {}
 
     async def create(
         self,
@@ -58,6 +57,9 @@ class RunService:
             conversation_id=conversation_id,
             turn_id=turn["turn_id"],
             root_goal=message,
+            role=role,
+            user_id=user_id,
+            thinking=thinking,
             status="accepted",
         ))
         background_tasks.add_task(
@@ -80,23 +82,9 @@ class RunService:
         thinking: bool,
     ) -> None:
         run = await self.require_run(run_id)
-        context = {
-            "role": role,
-            "user_id": user_id,
-            "thinking": thinking,
-            "history": self.conversation_store.context(
-                run.conversation_id,
-                exclude_run_id=run_id,
-            ),
-            "runtime": self.conversation_store.runtime_context(
-                run.conversation_id,
-                current_role=role,
-                exclude_run_id=run_id,
-            ),
-        }
+        context = self._build_context(run)
         try:
             coordinator = self.coordinator_factory(context)
-            self._coordinators[run_id] = coordinator
             completed = await coordinator.execute(
                 run_id=run_id,
                 conversation_id=run.conversation_id,
@@ -110,8 +98,6 @@ class RunService:
                 status=completed.status,
                 result=completed.model_dump(mode="json"),
             )
-            if completed.status != "waiting_confirmation":
-                self._coordinators.pop(run_id, None)
         except Exception as exc:
             failed = await self.run_store.update_run(
                 run_id,
@@ -129,7 +115,22 @@ class RunService:
                 status="failed",
                 result=failed.model_dump(mode="json"),
             )
-            self._coordinators.pop(run_id, None)
+
+    def _build_context(self, run: RunRecord) -> dict[str, Any]:
+        return {
+            "role": run.role,
+            "user_id": run.user_id,
+            "thinking": run.thinking,
+            "history": self.conversation_store.context(
+                run.conversation_id,
+                exclude_run_id=run.run_id,
+            ),
+            "runtime": self.conversation_store.runtime_context(
+                run.conversation_id,
+                current_role=run.role,
+                exclude_run_id=run.run_id,
+            ),
+        }
 
     async def confirm(
         self,
@@ -144,17 +145,15 @@ class RunService:
                 status_code=409,
                 detail="run is not waiting for confirmation",
             )
-        coordinator = self._coordinators.get(run_id)
-        if coordinator is None:
-            raise HTTPException(
-                status_code=409,
-                detail="confirmation continuation is not available",
-            )
+        context = self._build_context(run)
+        coordinator = self.coordinator_factory(context)
         try:
             completed = await coordinator.confirm(
                 run_id=run_id,
                 task_id=task_id,
                 approved=approved,
+                message=run.root_goal,
+                context=context,
             )
         except LookupError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -164,8 +163,6 @@ class RunService:
             status=completed.status,
             result=completed.model_dump(mode="json"),
         )
-        if completed.status != "waiting_confirmation":
-            self._coordinators.pop(run_id, None)
         return completed
 
     async def require_run(self, run_id: str) -> RunRecord:

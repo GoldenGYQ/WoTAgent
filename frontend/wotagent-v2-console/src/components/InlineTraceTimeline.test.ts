@@ -47,6 +47,7 @@ const run: RuntimeRun = {
     parallel_candidate: true,
     priority: 1,
     finding: null,
+    confirmation: null,
     created_at: '',
     updated_at: '',
   }],

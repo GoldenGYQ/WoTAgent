@@ -1,9 +1,12 @@
-"""In-memory Run/Task store with copy-on-read semantics."""
+"""Run/Task stores for tests and durable application execution."""
 
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from collections.abc import Callable
+from contextlib import asynccontextmanager
+from pathlib import Path
 
 from .run_models import (
     AgentRunRecord,
@@ -222,4 +225,348 @@ class InMemoryRunStore:
             raise LookupError(f"task not found: {task_id}") from exc
 
 
-__all__ = ["InMemoryRunStore"]
+class SQLiteRunStore:
+    """Durable Run store; asyncio conditions remain process-local notifications."""
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = asyncio.Lock()
+        self._conditions: dict[str, asyncio.Condition] = {}
+        with self._connect() as connection:
+            connection.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS runs (
+                    run_id TEXT PRIMARY KEY,
+                    payload TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS tasks (
+                    task_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL,
+                    position INTEGER NOT NULL,
+                    payload TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_tasks_run
+                    ON tasks(run_id, position);
+                CREATE TABLE IF NOT EXISTS agent_runs (
+                    agent_run_id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL,
+                    payload TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_agent_runs_task
+                    ON agent_runs(task_id);
+                CREATE TABLE IF NOT EXISTS run_events (
+                    run_id TEXT NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    task_id TEXT,
+                    payload TEXT NOT NULL,
+                    PRIMARY KEY(run_id, sequence)
+                );
+                CREATE INDEX IF NOT EXISTS idx_events_task
+                    ON run_events(run_id, task_id, sequence);
+                """
+            )
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.path, timeout=10)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA journal_mode=WAL")
+        return connection
+
+    @asynccontextmanager
+    async def _locked_connection(self):
+        async with self._lock:
+            with self._connect() as connection:
+                yield connection
+
+    async def create_run(self, run: RunRecord) -> RunRecord:
+        async with self._locked_connection() as connection:
+            try:
+                connection.execute(
+                    "INSERT INTO runs(run_id, payload) VALUES (?, ?)",
+                    (run.run_id, run.model_dump_json()),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise ValueError(f"run already exists: {run.run_id}") from exc
+            self._conditions.setdefault(run.run_id, asyncio.Condition())
+        return run.model_copy(deep=True)
+
+    async def add_tasks(
+        self,
+        run_id: str,
+        tasks: list[AgentTask],
+    ) -> list[AgentTask]:
+        async with self._locked_connection() as connection:
+            run = self._load_run(connection, run_id)
+            row = connection.execute(
+                "SELECT COALESCE(MAX(position), -1) AS value FROM tasks WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            position = int(row["value"]) + 1
+            try:
+                for offset, task in enumerate(tasks):
+                    if task.run_id != run_id:
+                        raise ValueError(
+                            f"task {task.task_id} belongs to {task.run_id}, not {run_id}"
+                        )
+                    connection.execute(
+                        """INSERT INTO tasks(task_id, run_id, position, payload)
+                           VALUES (?, ?, ?, ?)""",
+                        (
+                            task.task_id,
+                            run_id,
+                            position + offset,
+                            task.model_dump_json(),
+                        ),
+                    )
+                    run.task_ids.append(task.task_id)
+            except sqlite3.IntegrityError as exc:
+                raise ValueError("one or more tasks already exist") from exc
+            run.updated_at = utc_now()
+            self._save_run(connection, run)
+        return [task.model_copy(deep=True) for task in tasks]
+
+    async def get_run(self, run_id: str) -> RunRecord | None:
+        async with self._locked_connection() as connection:
+            row = connection.execute(
+                "SELECT payload FROM runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            return RunRecord.model_validate_json(row["payload"]) if row else None
+
+    async def get_task(self, task_id: str) -> AgentTask | None:
+        async with self._locked_connection() as connection:
+            row = connection.execute(
+                "SELECT payload FROM tasks WHERE task_id = ?",
+                (task_id,),
+            ).fetchone()
+            return AgentTask.model_validate_json(row["payload"]) if row else None
+
+    async def tasks_for_run(self, run_id: str) -> list[AgentTask]:
+        async with self._locked_connection() as connection:
+            rows = connection.execute(
+                "SELECT payload FROM tasks WHERE run_id = ? ORDER BY position",
+                (run_id,),
+            ).fetchall()
+            return [
+                AgentTask.model_validate_json(row["payload"])
+                for row in rows
+            ]
+
+    async def update_run(
+        self,
+        run_id: str,
+        update: Callable[[RunRecord], None],
+    ) -> RunRecord:
+        async with self._locked_connection() as connection:
+            run = self._load_run(connection, run_id)
+            update(run)
+            run.updated_at = utc_now()
+            self._save_run(connection, run)
+            return run.model_copy(deep=True)
+
+    async def update_task(
+        self,
+        task_id: str,
+        update: Callable[[AgentTask], None],
+    ) -> AgentTask:
+        async with self._locked_connection() as connection:
+            task = self._load_task(connection, task_id)
+            update(task)
+            task.updated_at = utc_now()
+            connection.execute(
+                "UPDATE tasks SET payload = ? WHERE task_id = ?",
+                (task.model_dump_json(), task_id),
+            )
+            run = self._load_run(connection, task.run_id)
+            run.updated_at = task.updated_at
+            self._save_run(connection, run)
+            return task.model_copy(deep=True)
+
+    async def add_agent_run(
+        self,
+        record: AgentRunRecord,
+    ) -> AgentRunRecord:
+        async with self._locked_connection() as connection:
+            self._load_task(connection, record.task_id)
+            try:
+                connection.execute(
+                    """INSERT INTO agent_runs(agent_run_id, task_id, payload)
+                       VALUES (?, ?, ?)""",
+                    (
+                        record.agent_run_id,
+                        record.task_id,
+                        record.model_dump_json(),
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise ValueError(
+                    f"agent run already exists: {record.agent_run_id}"
+                ) from exc
+            return record.model_copy(deep=True)
+
+    async def update_agent_run(
+        self,
+        agent_run_id: str,
+        update: Callable[[AgentRunRecord], None],
+    ) -> AgentRunRecord:
+        async with self._locked_connection() as connection:
+            row = connection.execute(
+                "SELECT payload FROM agent_runs WHERE agent_run_id = ?",
+                (agent_run_id,),
+            ).fetchone()
+            if row is None:
+                raise LookupError(f"agent run not found: {agent_run_id}")
+            record = AgentRunRecord.model_validate_json(row["payload"])
+            update(record)
+            connection.execute(
+                "UPDATE agent_runs SET payload = ? WHERE agent_run_id = ?",
+                (record.model_dump_json(), agent_run_id),
+            )
+            return record.model_copy(deep=True)
+
+    async def agent_runs_for_task(
+        self,
+        task_id: str,
+    ) -> list[AgentRunRecord]:
+        async with self._locked_connection() as connection:
+            rows = connection.execute(
+                "SELECT payload FROM agent_runs WHERE task_id = ?",
+                (task_id,),
+            ).fetchall()
+            return [
+                AgentRunRecord.model_validate_json(row["payload"])
+                for row in rows
+            ]
+
+    async def record_event(
+        self,
+        run_id: str,
+        event_type: str,
+        *,
+        task_id: str | None = None,
+        parent_task_id: str | None = None,
+        agent_run_id: str | None = None,
+        iteration: int = 0,
+        tool_call_id: str | None = None,
+        node: str = "",
+        data: dict[str, object] | None = None,
+    ) -> RunEvent:
+        async with self._locked_connection() as connection:
+            run = self._load_run(connection, run_id)
+            row = connection.execute(
+                """SELECT COALESCE(MAX(sequence), 0) AS value
+                   FROM run_events WHERE run_id = ?""",
+                (run_id,),
+            ).fetchone()
+            sequence = int(row["value"]) + 1
+            event = RunEvent(
+                event_id=f"{run_id}:{sequence}",
+                sequence=sequence,
+                run_id=run_id,
+                turn_id=run.turn_id,
+                task_id=task_id,
+                parent_task_id=parent_task_id,
+                agent_run_id=agent_run_id,
+                iteration=iteration,
+                tool_call_id=tool_call_id,
+                type=event_type,
+                node=node,
+                data=data or {},
+            )
+            connection.execute(
+                """INSERT INTO run_events(run_id, sequence, task_id, payload)
+                   VALUES (?, ?, ?, ?)""",
+                (run_id, sequence, task_id, event.model_dump_json()),
+            )
+            run.updated_at = event.timestamp
+            self._save_run(connection, run)
+            condition = self._conditions.setdefault(
+                run_id,
+                asyncio.Condition(),
+            )
+        async with condition:
+            condition.notify_all()
+        return event.model_copy(deep=True)
+
+    async def events(
+        self,
+        run_id: str,
+        *,
+        after: int = 0,
+        task_id: str | None = None,
+    ) -> list[RunEvent]:
+        async with self._locked_connection() as connection:
+            query = (
+                "SELECT payload FROM run_events "
+                "WHERE run_id = ? AND sequence > ?"
+            )
+            parameters: list[object] = [run_id, after]
+            if task_id is not None:
+                query += " AND task_id = ?"
+                parameters.append(task_id)
+            query += " ORDER BY sequence"
+            return [
+                RunEvent.model_validate_json(row["payload"])
+                for row in connection.execute(query, parameters).fetchall()
+            ]
+
+    async def wait_for_events(
+        self,
+        run_id: str,
+        *,
+        after: int,
+        timeout: float = 15,
+    ) -> list[RunEvent]:
+        current = await self.events(run_id, after=after)
+        if current:
+            return current
+        condition = self._conditions.setdefault(run_id, asyncio.Condition())
+        try:
+            async with condition:
+                await asyncio.wait_for(condition.wait(), timeout=timeout)
+        except TimeoutError:
+            return []
+        return await self.events(run_id, after=after)
+
+    @staticmethod
+    def _save_run(
+        connection: sqlite3.Connection,
+        run: RunRecord,
+    ) -> None:
+        connection.execute(
+            "UPDATE runs SET payload = ? WHERE run_id = ?",
+            (run.model_dump_json(), run.run_id),
+        )
+
+    @staticmethod
+    def _load_run(
+        connection: sqlite3.Connection,
+        run_id: str,
+    ) -> RunRecord:
+        row = connection.execute(
+            "SELECT payload FROM runs WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            raise LookupError(f"run not found: {run_id}")
+        return RunRecord.model_validate_json(row["payload"])
+
+    @staticmethod
+    def _load_task(
+        connection: sqlite3.Connection,
+        task_id: str,
+    ) -> AgentTask:
+        row = connection.execute(
+            "SELECT payload FROM tasks WHERE task_id = ?",
+            (task_id,),
+        ).fetchone()
+        if row is None:
+            raise LookupError(f"task not found: {task_id}")
+        return AgentTask.model_validate_json(row["payload"])
+
+
+RunStore = InMemoryRunStore | SQLiteRunStore
+
+
+__all__ = ["InMemoryRunStore", "RunStore", "SQLiteRunStore"]

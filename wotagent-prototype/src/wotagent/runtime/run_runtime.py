@@ -13,9 +13,9 @@ from langgraph.types import Command
 from ..agents import AGENT_SPECS, AgentFinding, Evidence
 from ..orchestration import (
     AgentTask,
-    InMemoryRunStore,
     PendingConfirmation,
     RunCoordinator,
+    RunStore,
     SupervisorDecision,
     TaskScheduler,
 )
@@ -23,7 +23,7 @@ from ..orchestration import (
 
 def build_run_coordinator(
     runtime: Any,
-    store: InMemoryRunStore,
+    store: RunStore,
     context: dict[str, Any],
     domain_graphs: dict[str, Any],
 ) -> RunCoordinator:
@@ -36,6 +36,10 @@ def build_run_coordinator(
         ),
         supervisor=_supervisor_decider(runtime, context),
         executors=_specialist_executors(runtime, context, domain_graphs),
+        resumers={
+            agent_id: _device_resumer(runtime, graph)
+            for agent_id, graph in domain_graphs.items()
+        },
         max_supervisor_iterations=runtime.settings.butler_max_iterations,
     )
 
@@ -162,30 +166,32 @@ def _device_executor(
         interrupts = result.get("__interrupt__", [])
         if interrupts:
             payload = interrupts[0].value
-
-            async def resume(approved: bool) -> AgentFinding:
-                resumed = await asyncio.wait_for(
-                    graph.ainvoke(
-                        Command(resume={"approved": approved}),
-                        config={
-                            "configurable": {
-                                "thread_id": task.task_id,
-                            }
-                        },
-                    ),
-                    timeout=runtime.settings.total_timeout_seconds,
-                )
-                return _result_finding(task, resumed)
-
             return PendingConfirmation(
                 payload=payload if isinstance(payload, dict) else {
                     "message": str(payload),
                 },
-                resume=resume,
             )
         return _result_finding(task, result)
 
     return execute
+
+
+def _device_resumer(runtime: Any, graph: Any) -> Callable[[AgentTask, bool], Any]:
+    async def resume(task: AgentTask, approved: bool) -> AgentFinding:
+        result = await asyncio.wait_for(
+            graph.ainvoke(
+                Command(resume={"approved": approved}),
+                config={
+                    "configurable": {
+                        "thread_id": task.task_id,
+                    }
+                },
+            ),
+            timeout=runtime.settings.total_timeout_seconds,
+        )
+        return _result_finding(task, result)
+
+    return resume
 
 
 async def _ensure_legacy_trace(runtime: Any, task: AgentTask) -> None:

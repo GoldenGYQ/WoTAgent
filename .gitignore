@@ -39,6 +39,7 @@ data/state.db
 data/state.db-*
 wotagent-prototype/data/conversations.db*
 wotagent-prototype/data/agent_checkpoints.db*
+wotagent-prototype/data/agent_runs.db*
 wotagent-prototype/data/eldercare.db*
 chroma_db/
 

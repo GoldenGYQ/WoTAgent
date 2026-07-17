@@ -422,13 +422,15 @@ Scheduler 可以使用 `asyncio.gather` 执行同一就绪批次，但不能把�
 7. 高风险 Task 等待确认，并恢复同一个 LangGraph checkpoint。
 8. 前端 Run → Task 时间线和确认交互。
 9. 删除旧 StructuredSupervisorRouter、TaskRunner、Task API 和侧栏 Trace。
+10. SQLite RunStore 持久化 Run、Task、AgentRun、事件和待确认负载。
+11. 服务重启后重建 Coordinator，并按 AgentSpec 恢复同一个 Task checkpoint。
 
 待后续：
 
-1. 将当前内存 RunStore 持久化到 SQLite 或 PostgreSQL。
-2. 把子图内部 Loop、Tool Call 与 Token 用量投影到 RunEvent。
-3. 为 Task 取消、独立重试和补偿增加接口。
-4. 把 Monitor 风险事件统一提交为 Run，而不是保留领域内部任务结果。
+1. 把子图内部 Loop、Tool Call 与 Token 用量投影到 RunEvent。
+2. 为 Task 取消、独立重试和补偿增加接口。
+3. 把 Monitor 风险事件统一提交为 Run，而不是保留领域内部任务结果。
+4. 多后端实例部署时，将事件通知从进程内 Condition 替换为 Redis/PostgreSQL。
 
 ## 13. 验收标准
 

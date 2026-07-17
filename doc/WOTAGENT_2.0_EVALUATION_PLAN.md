@@ -129,10 +129,12 @@ LLM 指标必须固定数据集、模型、temperature、Prompt 版本并至少�
 - 确认测试：首次执行产生 checkpoint interrupt，未确认设备调用为 0；批准后恰好执行一次；拒绝后调用为 0。
 - Recovery 测试：验证失败可触发一次 Replanner 后成功；持续失败时严格遵守最大恢复次数。
 - TraceStore 测试：事件 sequence 单调递增，支持 cursor 回放和异步等待；模型、工具、循环、恢复和 Token 指标可聚合。
-- API 测试：`POST /api/v2/tasks` 返回 `202 Accepted` 和 task_id；后台执行后可由任务查询、SSE、WebSocket 获得同一事件流。
+- API 测试：`POST /api/v2/runs` 返回 `202 Accepted` 和 run_id；后台执行后可由 Run、Task、AgentRun 查询和 WebSocket 获得同一事件流。
 - 隐私边界：记录规划摘要与 Token 元数据，不保存或返回模型原始 Chain-of-Thought。
-- 已知缺口：当前 TraceStore 与 LangGraph checkpointer 是内存实现，进程重启后丢失；生产部署需要 PostgreSQL/Redis 持久化。
-- 结论：本地单进程监控闭环通过，可进入前端接入和持久化阶段。
+- 持久化：SQLite RunStore 保存 Run、Task、AgentRun、事件和确认负载；LangGraph SQLite checkpointer 保存原生 interrupt 状态。
+- 重启恢复：丢弃进程内 Store、Coordinator 和回调后，重建实例仍能恢复同一 Task，并回到 Supervisor 二次决策。
+- 已知缺口：WebSocket 唤醒仍使用进程内 Condition；多实例部署需要 Redis 或 PostgreSQL 通知机制。
+- 结论：本地单进程监控与重启后确认恢复闭环通过。
 
 功能单元：执行后 Response Agent（方案 C）
 

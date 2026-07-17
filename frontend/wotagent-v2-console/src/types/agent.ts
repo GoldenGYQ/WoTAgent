@@ -46,6 +46,9 @@ export interface RunRecord {
   conversation_id: string
   turn_id: string
   root_goal: string
+  role: string
+  user_id: string
+  thinking: boolean
   status: string
   execution_strategy: 'sequential' | 'parallel_when_safe'
   success_criteria: string[]
@@ -70,6 +73,7 @@ export interface AgentTaskRecord {
   parallel_candidate: boolean
   priority: number
   finding: Record<string, unknown> | null
+  confirmation: Record<string, unknown> | null
   created_at: string
   updated_at: string
 }

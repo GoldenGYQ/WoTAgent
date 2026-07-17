@@ -25,7 +25,7 @@ Vue 2.0 Console
 - Executor 是确定性编排器，只执行计划中且 TD 已声明的动作。
 - PolicyEngine 在模型之外执行 RBAC 和高风险确认。
 - 每次任务生成可重放 Trace，记录节点、工具输入输出、循环次数、TTFT、Token 与估算费用。
-- SQLite 保存会话、轮次和 LangGraph checkpoint，支持上下文延续与确认后恢复。
+- SQLite 分别保存会话、Run/Task 运行记录和 LangGraph checkpoint，支持上下文延续与服务重启后的确认恢复。
 
 ## 仓库结构
 

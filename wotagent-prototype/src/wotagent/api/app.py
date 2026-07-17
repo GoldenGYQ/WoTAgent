@@ -11,8 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from langgraph.checkpoint.memory import InMemorySaver
 
 from ..application import RunService
-from ..orchestration import InMemoryRunStore
-from ..paths import project_root
+from ..orchestration import SQLiteRunStore
+from ..paths import data_path, project_root
 from ..runtime import (
     build_run_coordinator,
     create_lifespan,
@@ -39,7 +39,9 @@ _runtime = create_runtime_container(
 )
 _domain_graphs = _runtime.build_domain_graphs(InMemorySaver())
 _bootstrap_graphs = _domain_graphs
-_run_store = InMemoryRunStore()
+_run_store = SQLiteRunStore(
+    os.getenv("WOTAGENT_RUN_DB") or data_path("agent_runs.db")
+)
 _run_service = RunService(
     conversation_store=_runtime.conversation_store,
     run_store=_run_store,

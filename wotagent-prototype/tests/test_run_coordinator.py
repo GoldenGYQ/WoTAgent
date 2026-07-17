@@ -188,7 +188,7 @@ def test_confirmation_resumes_same_task_then_returns_to_supervisor() -> None:
     async def scenario():
         resumed: list[bool] = []
 
-        async def resume(approved: bool) -> AgentFinding:
+        async def resume(_task, approved: bool) -> AgentFinding:
             resumed.append(approved)
             return AgentFinding(
                 agent="environment_agent",
@@ -204,7 +204,6 @@ def test_confirmation_resumes_same_task_then_returns_to_supervisor() -> None:
                     "type": "confirmation_required",
                     "summary": "打开客厅灯",
                 },
-                resume=resume,
             )
 
         decisions = iter([
@@ -235,6 +234,7 @@ def test_confirmation_resumes_same_task_then_returns_to_supervisor() -> None:
             ),
             lambda _context: next(decisions),
             {"environment_agent": execute},
+            resumers={"environment_agent": resume},
             run_id_factory=lambda: "run-confirm",
         )
         waiting = await coordinator.execute(
@@ -246,6 +246,8 @@ def test_confirmation_resumes_same_task_then_returns_to_supervisor() -> None:
             run_id=waiting.run_id,
             task_id="task-confirm",
             approved=True,
+            message="打开客厅灯",
+            context={},
         )
         return (
             waiting,
@@ -273,7 +275,7 @@ def test_confirmation_rejection_does_not_resume_device_graph() -> None:
     async def scenario():
         resumed = False
 
-        async def resume(_approved: bool) -> AgentFinding:
+        async def resume(_task, _approved: bool) -> AgentFinding:
             nonlocal resumed
             resumed = True
             raise AssertionError("rejected confirmation must not resume")
@@ -292,8 +294,8 @@ def test_confirmation_rejection_does_not_resume_device_graph() -> None:
             )]),
             {"environment_agent": lambda _task: PendingConfirmation(
                 payload={"summary": "打开客厅灯"},
-                resume=resume,
             )},
+            resumers={"environment_agent": resume},
             run_id_factory=lambda: "run-reject",
         )
         waiting = await coordinator.execute(
@@ -305,6 +307,8 @@ def test_confirmation_rejection_does_not_resume_device_graph() -> None:
             run_id=waiting.run_id,
             task_id="task-reject",
             approved=False,
+            message="打开客厅灯",
+            context={},
         )
         return rejected, resumed
 

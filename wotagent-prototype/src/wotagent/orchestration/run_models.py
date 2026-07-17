@@ -149,6 +149,7 @@ class AgentTask(BaseModel):
     parallel_candidate: bool = True
     priority: int = 1
     finding: AgentFinding | None = None
+    confirmation: dict[str, object] | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
@@ -171,6 +172,9 @@ class RunRecord(BaseModel):
     conversation_id: str
     turn_id: str
     root_goal: str
+    role: str = "operator"
+    user_id: str = "local-user"
+    thinking: bool = False
     status: RunStatus = "accepted"
     execution_strategy: ExecutionStrategy = "parallel_when_safe"
     success_criteria: list[str] = Field(default_factory=list)

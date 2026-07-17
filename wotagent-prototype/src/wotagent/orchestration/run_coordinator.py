@@ -16,7 +16,7 @@ from .run_models import (
     SupervisorDecision,
     utc_now,
 )
-from .run_store import InMemoryRunStore
+from .run_store import RunStore
 from .scheduler import TaskScheduler
 
 
@@ -33,22 +33,22 @@ TaskExecutor = Callable[
 @dataclass
 class PendingConfirmation:
     payload: dict[str, Any]
-    resume: Callable[[bool], Awaitable[AgentFinding]]
 
 
-@dataclass
-class _PendingTask:
-    confirmation: PendingConfirmation
-    agent_run_id: str
+TaskResumer = Callable[
+    [AgentTask, bool],
+    AgentFinding | Awaitable[AgentFinding],
+]
 
 
 class RunCoordinator:
     def __init__(
         self,
-        store: InMemoryRunStore,
+        store: RunStore,
         scheduler: TaskScheduler,
         supervisor: SupervisorDecider,
         executors: dict[str, TaskExecutor],
+        resumers: dict[str, TaskResumer] | None = None,
         *,
         max_supervisor_iterations: int = 4,
         run_id_factory: Callable[[], str] | None = None,
@@ -57,12 +57,11 @@ class RunCoordinator:
         self.scheduler = scheduler
         self.supervisor = supervisor
         self.executors = executors
+        self.resumers = resumers or {}
         self.max_supervisor_iterations = max_supervisor_iterations
         self.run_id_factory = run_id_factory or (
             lambda: f"run_{uuid4().hex[:12]}"
         )
-        self._pending: dict[str, _PendingTask] = {}
-        self._continuations: dict[str, tuple[str, dict[str, Any], int]] = {}
 
     async def execute(
         self,
@@ -176,11 +175,6 @@ class RunCoordinator:
             )
             run = await self.store.get_run(run.run_id) or run
             if run.status == "waiting_confirmation":
-                self._continuations[run.run_id] = (
-                    message,
-                    context,
-                    supervisor_iteration + 1,
-                )
                 return run
 
         findings = await self._run_findings(run.run_id)
@@ -198,14 +192,38 @@ class RunCoordinator:
         run_id: str,
         task_id: str,
         approved: bool,
+        message: str,
+        context: dict[str, Any],
     ) -> RunRecord:
-        pending = self._pending.pop(task_id, None)
         task = await self.store.get_task(task_id)
-        if pending is None or task is None or task.run_id != run_id:
+        if (
+            task is None
+            or task.run_id != run_id
+            or task.status != "waiting_confirmation"
+            or task.confirmation is None
+        ):
             raise LookupError("task is not waiting for confirmation")
+        agent_runs = await self.store.agent_runs_for_task(task_id)
+        waiting_agent_run = next(
+            (
+                record
+                for record in reversed(agent_runs)
+                if record.status == "waiting_confirmation"
+            ),
+            None,
+        )
+        if waiting_agent_run is None:
+            raise LookupError("waiting agent run not found")
         if approved:
+            resumer = self.resumers.get(task.agent_id)
+            if resumer is None:
+                raise LookupError(
+                    f"no confirmation resumer registered for {task.agent_id}"
+                )
             try:
-                finding = await pending.confirmation.resume(True)
+                finding = AgentFinding.model_validate(
+                    await _resolve(resumer(task, True))
+                )
             except Exception as exc:
                 finding = _failed_finding(task, str(exc))
         else:
@@ -223,14 +241,14 @@ class RunCoordinator:
             lambda item: _complete_task(item, finding, status),
         )
         await self.store.update_agent_run(
-            pending.agent_run_id,
+            waiting_agent_run.agent_run_id,
             lambda item: _finish_agent_run(item, status),
         )
         await self.store.record_event(
             run_id,
             "task.confirmation.resolved",
             task_id=task_id,
-            agent_run_id=pending.agent_run_id,
+            agent_run_id=waiting_agent_run.agent_run_id,
             node=task.agent_id,
             data={"approved": approved},
         )
@@ -238,7 +256,7 @@ class RunCoordinator:
             run_id,
             f"task.{status}",
             task_id=task_id,
-            agent_run_id=pending.agent_run_id,
+            agent_run_id=waiting_agent_run.agent_run_id,
             node=task.agent_id,
             data={"finding": finding.model_dump(mode="json")},
         )
@@ -248,10 +266,12 @@ class RunCoordinator:
                 status="failed",
                 response="操作已由用户拒绝，未执行高风险设备动作。",
             )
-        continuation = self._continuations.pop(run_id, None)
-        if continuation is None:
-            raise LookupError("run continuation not found")
-        message, context, next_iteration = continuation
+        decisions = [
+            event
+            for event in await self.store.events(run_id)
+            if event.type == "supervisor.decision.completed"
+        ]
+        next_iteration = len(decisions) + 1
         run = await self.store.update_run(
             run_id,
             lambda item: setattr(item, "status", "running"),
@@ -330,16 +350,11 @@ class RunCoordinator:
             try:
                 outcome = await _resolve(executor(task))
                 if isinstance(outcome, PendingConfirmation):
-                    self._pending[task.task_id] = _PendingTask(
-                        confirmation=outcome,
-                        agent_run_id=agent_run.agent_run_id,
-                    )
                     await self.store.update_task(
                         task.task_id,
-                        lambda item: setattr(
+                        lambda item: _wait_for_confirmation(
                             item,
-                            "status",
-                            "waiting_confirmation",
+                            outcome.payload,
                         ),
                     )
                     await self.store.update_agent_run(
@@ -500,6 +515,15 @@ def _complete_task(
 ) -> None:
     task.status = status  # type: ignore[assignment]
     task.finding = finding
+    task.confirmation = None
+
+
+def _wait_for_confirmation(
+    task: AgentTask,
+    payload: dict[str, Any],
+) -> None:
+    task.status = "waiting_confirmation"
+    task.confirmation = payload
 
 
 __all__ = [
@@ -507,4 +531,5 @@ __all__ = [
     "RunCoordinator",
     "SupervisorDecider",
     "TaskExecutor",
+    "TaskResumer",
 ]

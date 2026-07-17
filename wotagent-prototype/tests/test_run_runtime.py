@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from langgraph.types import Command
 
 from wotagent.orchestration import AgentTask, PendingConfirmation
-from wotagent.runtime.run_runtime import _device_executor
+from wotagent.runtime.run_runtime import _device_executor, _device_resumer
 
 
 def test_device_executor_surfaces_and_resumes_native_langgraph_interrupt() -> None:
@@ -66,7 +66,7 @@ def test_device_executor_surfaces_and_resumes_native_langgraph_interrupt() -> No
 
         pending = await executor(task)
         assert isinstance(pending, PendingConfirmation)
-        finding = await pending.resume(True)
+        finding = await _device_resumer(runtime, graph)(task, True)
         return pending, finding, graph.calls
 
     pending, finding, calls = asyncio.run(scenario())

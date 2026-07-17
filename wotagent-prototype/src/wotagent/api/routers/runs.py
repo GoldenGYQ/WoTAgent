@@ -5,13 +5,13 @@ from collections.abc import Callable
 from fastapi import APIRouter, BackgroundTasks, WebSocket, WebSocketDisconnect
 
 from ...application import RunService
-from ...orchestration import InMemoryRunStore
+from ...orchestration import RunStore
 from ..schemas import RunConfirmationRequest, RunCreateRequest
 
 
 def create_run_router(
     get_service: Callable[[], RunService],
-    get_store: Callable[[], InMemoryRunStore],
+    get_store: Callable[[], RunStore],
 ) -> APIRouter:
     router = APIRouter(prefix="/api/v2/runs", tags=["runs"])
 
@@ -76,7 +76,7 @@ def create_run_router(
 
 
 def create_run_websocket_handler(
-    get_store: Callable[[], InMemoryRunStore],
+    get_store: Callable[[], RunStore],
 ):
     async def run_websocket(websocket: WebSocket) -> None:
         await websocket.accept()
