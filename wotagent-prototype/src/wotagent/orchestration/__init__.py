@@ -11,7 +11,7 @@ from .run_models import (
     SupervisorDecision,
     SupervisorTaskPlan,
 )
-from .run_coordinator import RunCoordinator
+from .run_coordinator import PendingConfirmation, RunCoordinator
 from .run_store import InMemoryRunStore
 from .scheduler import TaskScheduler
 
@@ -19,6 +19,7 @@ __all__ = [
     "AgentRunRecord",
     "AgentTask",
     "InMemoryRunStore",
+    "PendingConfirmation",
     "ProposedTask",
     "ResourceClaim",
     "RunEvent",

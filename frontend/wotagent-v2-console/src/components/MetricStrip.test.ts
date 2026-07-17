@@ -16,6 +16,7 @@ function run(cost: number, pricingAvailable: boolean): RuntimeRun {
     executionStrategy: 'parallel_when_safe',
     successCriteria: [],
     tasks: [],
+    confirmation: null,
     events: [],
     usage: { ...EMPTY_USAGE, estimated_cost: cost, pricing_available: pricingAvailable },
     loopCount: 1,

@@ -42,6 +42,7 @@ const {
   thinkingSupported,
   backendState,
   submit,
+  confirm,
   checkBackend,
   selectConversation,
   newConversation: resetConversation,
@@ -185,6 +186,7 @@ onMounted(async () => {
           :current-account-name="currentAccount.displayName"
           :sidebar-collapsed="sidebarCollapsed"
           @select-run="chooseRun"
+          @confirm="confirm"
           @example="useExample"
           @toggle-sidebar="toggleSidebar"
         />

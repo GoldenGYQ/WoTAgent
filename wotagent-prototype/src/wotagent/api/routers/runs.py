@@ -6,7 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, WebSocket, WebSocketDisconnect
 
 from ...application import RunService
 from ...orchestration import InMemoryRunStore
-from ..schemas import RunCreateRequest
+from ..schemas import RunConfirmationRequest, RunCreateRequest
 
 
 def create_run_router(
@@ -49,6 +49,18 @@ def create_run_router(
             "task_id": task_id,
             "agent_runs": await get_store().agent_runs_for_task(task_id),
         }
+
+    @router.post("/{run_id}/tasks/{task_id}/confirm")
+    async def confirm_task(
+        run_id: str,
+        task_id: str,
+        request: RunConfirmationRequest,
+    ):
+        return await get_service().confirm(
+            run_id=run_id,
+            task_id=task_id,
+            approved=request.approved,
+        )
 
     @router.get("/{run_id}/events")
     async def get_run_events(run_id: str, after: int = 0):

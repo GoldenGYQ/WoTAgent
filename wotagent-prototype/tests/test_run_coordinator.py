@@ -6,6 +6,7 @@ from typing import Any
 from wotagent.agents import AgentFinding, Evidence
 from wotagent.orchestration import (
     InMemoryRunStore,
+    PendingConfirmation,
     RunCoordinator,
     SupervisorDecision,
     TaskScheduler,
@@ -181,3 +182,133 @@ def test_coordinator_serializes_resource_conflicts() -> None:
 
     assert run.status == "completed"
     assert maximum == 1
+
+
+def test_confirmation_resumes_same_task_then_returns_to_supervisor() -> None:
+    async def scenario():
+        resumed: list[bool] = []
+
+        async def resume(approved: bool) -> AgentFinding:
+            resumed.append(approved)
+            return AgentFinding(
+                agent="environment_agent",
+                objective="打开客厅灯",
+                status="completed",
+                finding="客厅灯已打开并验证。",
+                confidence=1,
+            )
+
+        async def execute(_task):
+            return PendingConfirmation(
+                payload={
+                    "type": "confirmation_required",
+                    "summary": "打开客厅灯",
+                },
+                resume=resume,
+            )
+
+        decisions = iter([
+            _decision([{
+                **_task(
+                    "turn-on",
+                    "environment_agent",
+                    "device:light-001",
+                ),
+                "resource_claims": [{
+                    "key": "device:light-001",
+                    "mode": "write",
+                }],
+            }]),
+            SupervisorDecision(
+                action="finish",
+                goal="打开客厅灯",
+                final_response="客厅灯已经打开。",
+                reason="设备状态已验证",
+            ),
+        ])
+        store = InMemoryRunStore()
+        coordinator = RunCoordinator(
+            store,
+            TaskScheduler(
+                available_agents={"environment_agent"},
+                task_id_factory=lambda: "task-confirm",
+            ),
+            lambda _context: next(decisions),
+            {"environment_agent": execute},
+            run_id_factory=lambda: "run-confirm",
+        )
+        waiting = await coordinator.execute(
+            conversation_id="conv-1",
+            turn_id="turn-1",
+            message="打开客厅灯",
+        )
+        completed = await coordinator.confirm(
+            run_id=waiting.run_id,
+            task_id="task-confirm",
+            approved=True,
+        )
+        return (
+            waiting,
+            completed,
+            resumed,
+            await store.get_task("task-confirm"),
+            await store.events("run-confirm"),
+        )
+
+    waiting, completed, resumed, task, events = asyncio.run(scenario())
+
+    assert waiting.status == "waiting_confirmation"
+    assert completed.status == "completed"
+    assert completed.final_response == "客厅灯已经打开。"
+    assert resumed == [True]
+    assert task is not None and task.status == "completed"
+    assert any(
+        event.type == "task.confirmation.resolved"
+        and event.data["approved"] is True
+        for event in events
+    )
+
+
+def test_confirmation_rejection_does_not_resume_device_graph() -> None:
+    async def scenario():
+        resumed = False
+
+        async def resume(_approved: bool) -> AgentFinding:
+            nonlocal resumed
+            resumed = True
+            raise AssertionError("rejected confirmation must not resume")
+
+        store = InMemoryRunStore()
+        coordinator = RunCoordinator(
+            store,
+            TaskScheduler(
+                available_agents={"environment_agent"},
+                task_id_factory=lambda: "task-reject",
+            ),
+            lambda _context: _decision([_task(
+                "turn-on",
+                "environment_agent",
+                "device:light-001",
+            )]),
+            {"environment_agent": lambda _task: PendingConfirmation(
+                payload={"summary": "打开客厅灯"},
+                resume=resume,
+            )},
+            run_id_factory=lambda: "run-reject",
+        )
+        waiting = await coordinator.execute(
+            conversation_id="conv-1",
+            turn_id="turn-1",
+            message="打开客厅灯",
+        )
+        rejected = await coordinator.confirm(
+            run_id=waiting.run_id,
+            task_id="task-reject",
+            approved=False,
+        )
+        return rejected, resumed
+
+    rejected, resumed = asyncio.run(scenario())
+
+    assert rejected.status == "failed"
+    assert resumed is False

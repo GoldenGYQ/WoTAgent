@@ -8,10 +8,13 @@ from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
 
+from langgraph.types import Command
+
 from ..agents import AGENT_SPECS, AgentFinding, Evidence
 from ..orchestration import (
     AgentTask,
     InMemoryRunStore,
+    PendingConfirmation,
     RunCoordinator,
     SupervisorDecision,
     TaskScheduler,
@@ -120,6 +123,30 @@ def _care_executor(
             ),
             timeout=runtime.settings.total_timeout_seconds,
         )
+        interrupts = result.get("__interrupt__", [])
+        if interrupts:
+            payload = interrupts[0].value
+
+            async def resume(approved: bool) -> AgentFinding:
+                resumed = await asyncio.wait_for(
+                    graph.ainvoke(
+                        Command(resume={"approved": approved}),
+                        config={
+                            "configurable": {
+                                "thread_id": task.task_id,
+                            }
+                        },
+                    ),
+                    timeout=runtime.settings.total_timeout_seconds,
+                )
+                return _result_finding(task, resumed)
+
+            return PendingConfirmation(
+                payload=payload if isinstance(payload, dict) else {
+                    "message": str(payload),
+                },
+                resume=resume,
+            )
         return _result_finding(task, result)
 
     return execute

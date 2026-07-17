@@ -2,11 +2,14 @@
 import {
   Bot,
   BrainCircuit,
+  Check,
   CircleAlert,
   Cpu,
   MessageSquareText,
   PanelLeft,
   Route,
+  ShieldAlert,
+  X,
 } from 'lucide-vue-next'
 import type { ConversationTurn, RuntimeConversation, RuntimeRun } from '../types/agent'
 import InlineTraceTimeline from './InlineTraceTimeline.vue'
@@ -22,6 +25,7 @@ const props = defineProps<{
   sidebarCollapsed: boolean
 }>()
 const emit = defineEmits<{
+  confirm: [runId: string, taskId: string, approved: boolean]
   example: [message: string]
   selectRun: [runId: string]
   toggleSidebar: []
@@ -91,6 +95,31 @@ function runForTurn(turn: ConversationTurn): RuntimeRun | undefined {
             :run="runForTurn(turn)!"
             :selected="activeRun?.id === turn.run_id"
           />
+
+          <section v-if="runForTurn(turn)?.confirmation" class="confirmation-band">
+            <ShieldAlert :size="21" />
+            <div class="confirmation-copy">
+              <strong>需要执行确认</strong>
+              <p>{{ runForTurn(turn)?.confirmation?.summary }}</p>
+              <span>{{ runForTurn(turn)?.confirmation?.taskId }}</span>
+            </div>
+            <div class="confirmation-actions">
+              <button
+                class="icon-text-button secondary"
+                type="button"
+                @click="emit('confirm', turn.run_id, runForTurn(turn)!.confirmation!.taskId, false)"
+              >
+                <X :size="16" />拒绝
+              </button>
+              <button
+                class="icon-text-button primary"
+                type="button"
+                @click="emit('confirm', turn.run_id, runForTurn(turn)!.confirmation!.taskId, true)"
+              >
+                <Check :size="16" />确认执行
+              </button>
+            </div>
+          </section>
 
           <section v-if="turn.assistant_message" class="message-block assistant-message">
             <div class="message-avatar"><Bot :size="17" /></div>

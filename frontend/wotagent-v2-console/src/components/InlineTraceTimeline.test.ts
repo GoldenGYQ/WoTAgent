@@ -50,6 +50,7 @@ const run: RuntimeRun = {
     created_at: '',
     updated_at: '',
   }],
+  confirmation: null,
   events: [event(2, 'task.completed'), event(1, 'run.started')],
   usage: { ...EMPTY_USAGE },
   loopCount: 1,

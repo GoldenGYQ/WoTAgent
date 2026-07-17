@@ -74,6 +74,7 @@ function createRuntimeRun(record: RunRecord, roleValue: AgentRole, thinkingValue
     executionStrategy: record.execution_strategy,
     successCriteria: record.success_criteria,
     tasks: [],
+    confirmation: null,
     events: [],
     usage: { ...EMPTY_USAGE },
     loopCount: 0,
@@ -149,6 +150,19 @@ function addEvent(run: RuntimeRun, event: TraceEvent): void {
   run.events.push(event)
   run.events.sort((a, b) => a.sequence - b.sequence)
   run.updatedAt = event.timestamp
+  if (event.type === 'task.waiting_confirmation' && event.task_id) {
+    const payload = (event.data.confirmation ?? {}) as Record<string, unknown>
+    run.status = 'waiting_confirmation'
+    run.confirmation = {
+      taskId: event.task_id,
+      summary: String(payload.summary ?? '该设备操作需要人工确认'),
+      payload,
+    }
+  }
+  if (event.type === 'task.confirmation.resolved') {
+    run.confirmation = null
+    run.status = 'running'
+  }
   if (event.type.startsWith('run.') && event.type !== 'run.started') {
     run.status = event.type.slice(4)
     run.response = String(event.data.response ?? run.response)
@@ -273,6 +287,19 @@ async function submit(message: string): Promise<RuntimeRun> {
   return run
 }
 
+async function confirm(runId: string, taskId: string, approved: boolean): Promise<void> {
+  const run = runById(runId)
+  if (!run) return
+  try {
+    run.confirmation = null
+    run.status = 'running'
+    applyRecord(run, await agentV2Api.confirmTask(runId, taskId, approved))
+    await refreshRun(runId)
+  } catch (error) {
+    run.error = error instanceof Error ? error.message : String(error)
+  }
+}
+
 async function selectConversation(conversationId: string): Promise<void> {
   activeConversationId.value = conversationId
   const conversation = conversationById(conversationId)
@@ -358,6 +385,7 @@ export function useAgentRuntime() {
     thinkingSupported,
     backendState,
     submit,
+    confirm,
     selectConversation,
     newConversation,
     deleteConversation,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
@@ -25,8 +26,20 @@ SupervisorDecider = Callable[
 ]
 TaskExecutor = Callable[
     [AgentTask],
-    AgentFinding | Awaitable[AgentFinding],
+    "AgentFinding | PendingConfirmation | Awaitable[AgentFinding | PendingConfirmation]",
 ]
+
+
+@dataclass
+class PendingConfirmation:
+    payload: dict[str, Any]
+    resume: Callable[[bool], Awaitable[AgentFinding]]
+
+
+@dataclass
+class _PendingTask:
+    confirmation: PendingConfirmation
+    agent_run_id: str
 
 
 class RunCoordinator:
@@ -48,6 +61,8 @@ class RunCoordinator:
         self.run_id_factory = run_id_factory or (
             lambda: f"run_{uuid4().hex[:12]}"
         )
+        self._pending: dict[str, _PendingTask] = {}
+        self._continuations: dict[str, tuple[str, dict[str, Any], int]] = {}
 
     async def execute(
         self,
@@ -81,12 +96,30 @@ class RunCoordinator:
             node="run_coordinator",
             data={"root_goal": message},
         )
-        findings: list[AgentFinding] = []
-        for supervisor_iteration in range(1, self.max_supervisor_iterations + 1):
+        return await self._decision_loop(
+            run,
+            message=message,
+            context=context or {},
+            start_iteration=1,
+        )
+
+    async def _decision_loop(
+        self,
+        run: RunRecord,
+        *,
+        message: str,
+        context: dict[str, Any],
+        start_iteration: int,
+    ) -> RunRecord:
+        for supervisor_iteration in range(
+            start_iteration,
+            self.max_supervisor_iterations + 1,
+        ):
+            findings = await self._run_findings(run.run_id)
             decision = await _resolve(self.supervisor({
                 "run": run.model_dump(mode="json"),
                 "message": message,
-                "context": context or {},
+                "context": context,
                 "findings": [
                     finding.model_dump(mode="json") for finding in findings
                 ],
@@ -137,19 +170,97 @@ class RunCoordinator:
                 run.run_id,
                 lambda item: _apply_plan(item, plan),
             )
-            wave_findings = await self._execute_wave(
+            await self._execute_wave(
                 run.run_id,
                 plan.execution_strategy,
             )
-            findings.extend(wave_findings)
             run = await self.store.get_run(run.run_id) or run
+            if run.status == "waiting_confirmation":
+                self._continuations[run.run_id] = (
+                    message,
+                    context,
+                    supervisor_iteration + 1,
+                )
+                return run
 
+        findings = await self._run_findings(run.run_id)
         return await self._finish_run(
             run.run_id,
             status=_completion_status(findings),
             response=(
                 "Supervisor 达到最大决策轮次，已返回当前任务结果。"
             ),
+        )
+
+    async def confirm(
+        self,
+        *,
+        run_id: str,
+        task_id: str,
+        approved: bool,
+    ) -> RunRecord:
+        pending = self._pending.pop(task_id, None)
+        task = await self.store.get_task(task_id)
+        if pending is None or task is None or task.run_id != run_id:
+            raise LookupError("task is not waiting for confirmation")
+        if approved:
+            try:
+                finding = await pending.confirmation.resume(True)
+            except Exception as exc:
+                finding = _failed_finding(task, str(exc))
+        else:
+            finding = AgentFinding(
+                agent=task.agent_id,
+                objective=task.objective,
+                status="blocked",
+                finding="用户拒绝了高风险操作，设备未执行。",
+                confidence=1,
+                unresolved_questions=task.success_criteria,
+            )
+        status = _task_status(finding)
+        await self.store.update_task(
+            task_id,
+            lambda item: _complete_task(item, finding, status),
+        )
+        await self.store.update_agent_run(
+            pending.agent_run_id,
+            lambda item: _finish_agent_run(item, status),
+        )
+        await self.store.record_event(
+            run_id,
+            "task.confirmation.resolved",
+            task_id=task_id,
+            agent_run_id=pending.agent_run_id,
+            node=task.agent_id,
+            data={"approved": approved},
+        )
+        await self.store.record_event(
+            run_id,
+            f"task.{status}",
+            task_id=task_id,
+            agent_run_id=pending.agent_run_id,
+            node=task.agent_id,
+            data={"finding": finding.model_dump(mode="json")},
+        )
+        if not approved:
+            return await self._finish_run(
+                run_id,
+                status="failed",
+                response="操作已由用户拒绝，未执行高风险设备动作。",
+            )
+        continuation = self._continuations.pop(run_id, None)
+        if continuation is None:
+            raise LookupError("run continuation not found")
+        message, context, next_iteration = continuation
+        run = await self.store.update_run(
+            run_id,
+            lambda item: setattr(item, "status", "running"),
+        )
+        return await self._decision_loop(
+            run,
+            message=message,
+            context=context,
+            start_iteration=next_iteration,
         )
 
     async def _execute_wave(
@@ -185,9 +296,11 @@ class RunCoordinator:
                     "parallel": len(batch) > 1,
                 },
             )
-            findings.extend(results)
+            findings.extend(
+                result for result in results if result is not None
+            )
 
-    async def _execute_task(self, task: AgentTask) -> AgentFinding:
+    async def _execute_task(self, task: AgentTask) -> AgentFinding | None:
         agent_run = await self.store.add_agent_run(AgentRunRecord(
             agent_run_id=f"agent_run_{uuid4().hex[:12]}",
             run_id=task.run_id,
@@ -215,23 +328,54 @@ class RunCoordinator:
             )
         else:
             try:
-                finding = AgentFinding.model_validate(
-                    await _resolve(executor(task))
-                )
+                outcome = await _resolve(executor(task))
+                if isinstance(outcome, PendingConfirmation):
+                    self._pending[task.task_id] = _PendingTask(
+                        confirmation=outcome,
+                        agent_run_id=agent_run.agent_run_id,
+                    )
+                    await self.store.update_task(
+                        task.task_id,
+                        lambda item: setattr(
+                            item,
+                            "status",
+                            "waiting_confirmation",
+                        ),
+                    )
+                    await self.store.update_agent_run(
+                        agent_run.agent_run_id,
+                        lambda item: setattr(
+                            item,
+                            "status",
+                            "waiting_confirmation",
+                        ),
+                    )
+                    await self.store.update_run(
+                        task.run_id,
+                        lambda item: setattr(
+                            item,
+                            "status",
+                            "waiting_confirmation",
+                        ),
+                    )
+                    await self.store.record_event(
+                        task.run_id,
+                        "task.waiting_confirmation",
+                        task_id=task.task_id,
+                        agent_run_id=agent_run.agent_run_id,
+                        node=task.agent_id,
+                        data={"confirmation": outcome.payload},
+                    )
+                    return None
+                finding = AgentFinding.model_validate(outcome)
             except Exception as exc:
                 finding = _failed_finding(task, str(exc))
-        status = {
-            "completed": "completed",
-            "needs_more_information": "blocked",
-            "blocked": "blocked",
-            "failed": "failed",
-        }[finding.status]
+        status = _task_status(finding)
 
-        def complete(item: AgentTask) -> None:
-            item.status = status
-            item.finding = finding
-
-        await self.store.update_task(task.task_id, complete)
+        await self.store.update_task(
+            task.task_id,
+            lambda item: _complete_task(item, finding, status),
+        )
         await self.store.update_agent_run(
             agent_run.agent_run_id,
             lambda item: _finish_agent_run(item, status),
@@ -246,6 +390,13 @@ class RunCoordinator:
             data={"finding": finding.model_dump(mode="json")},
         )
         return finding
+
+    async def _run_findings(self, run_id: str) -> list[AgentFinding]:
+        return [
+            task.finding
+            for task in await self.store.tasks_for_run(run_id)
+            if task.finding is not None
+        ]
 
     async def _block_unreachable_tasks(
         self,
@@ -333,4 +484,27 @@ def _finish_agent_run(record: AgentRunRecord, status: str) -> None:
     record.iteration_count = 1
 
 
-__all__ = ["RunCoordinator", "SupervisorDecider", "TaskExecutor"]
+def _task_status(finding: AgentFinding) -> str:
+    return {
+        "completed": "completed",
+        "needs_more_information": "blocked",
+        "blocked": "blocked",
+        "failed": "failed",
+    }[finding.status]
+
+
+def _complete_task(
+    task: AgentTask,
+    finding: AgentFinding,
+    status: str,
+) -> None:
+    task.status = status  # type: ignore[assignment]
+    task.finding = finding
+
+
+__all__ = [
+    "PendingConfirmation",
+    "RunCoordinator",
+    "SupervisorDecider",
+    "TaskExecutor",
+]

@@ -24,6 +24,7 @@ class RunService:
         self.run_store = run_store
         self.coordinator_factory = coordinator_factory
         self.thinking_supported = thinking_supported or (lambda: True)
+        self._coordinators: dict[str, RunCoordinator] = {}
 
     async def create(
         self,
@@ -95,6 +96,7 @@ class RunService:
         }
         try:
             coordinator = self.coordinator_factory(context)
+            self._coordinators[run_id] = coordinator
             completed = await coordinator.execute(
                 run_id=run_id,
                 conversation_id=run.conversation_id,
@@ -108,6 +110,8 @@ class RunService:
                 status=completed.status,
                 result=completed.model_dump(mode="json"),
             )
+            if completed.status != "waiting_confirmation":
+                self._coordinators.pop(run_id, None)
         except Exception as exc:
             failed = await self.run_store.update_run(
                 run_id,
@@ -125,6 +129,44 @@ class RunService:
                 status="failed",
                 result=failed.model_dump(mode="json"),
             )
+            self._coordinators.pop(run_id, None)
+
+    async def confirm(
+        self,
+        *,
+        run_id: str,
+        task_id: str,
+        approved: bool,
+    ) -> RunRecord:
+        run = await self.require_run(run_id)
+        if run.status != "waiting_confirmation":
+            raise HTTPException(
+                status_code=409,
+                detail="run is not waiting for confirmation",
+            )
+        coordinator = self._coordinators.get(run_id)
+        if coordinator is None:
+            raise HTTPException(
+                status_code=409,
+                detail="confirmation continuation is not available",
+            )
+        try:
+            completed = await coordinator.confirm(
+                run_id=run_id,
+                task_id=task_id,
+                approved=approved,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        self.conversation_store.finish_turn(
+            run_id,
+            response=completed.final_response,
+            status=completed.status,
+            result=completed.model_dump(mode="json"),
+        )
+        if completed.status != "waiting_confirmation":
+            self._coordinators.pop(run_id, None)
+        return completed
 
     async def require_run(self, run_id: str) -> RunRecord:
         run = await self.run_store.get_run(run_id)

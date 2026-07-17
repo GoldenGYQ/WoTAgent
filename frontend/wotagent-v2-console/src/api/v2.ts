@@ -72,6 +72,12 @@ export const agentV2Api = {
   getTaskAgentRuns(runId: string, taskId: string): Promise<{ run_id: string; task_id: string; agent_runs: AgentRunRecord[] }> {
     return request(`/api/v2/runs/${encodeURIComponent(runId)}/tasks/${encodeURIComponent(taskId)}/agent-runs`)
   },
+  confirmTask(runId: string, taskId: string, approved: boolean): Promise<RunRecord> {
+    return request(`/api/v2/runs/${encodeURIComponent(runId)}/tasks/${encodeURIComponent(taskId)}/confirm`, {
+      method: 'POST',
+      body: JSON.stringify({ approved }),
+    })
+  },
   getEvents(runId: string, after = 0): Promise<{ run_id: string; events: TraceEvent[]; next_cursor: number }> {
     return request(`/api/v2/runs/${encodeURIComponent(runId)}/events?after=${after}`)
   },

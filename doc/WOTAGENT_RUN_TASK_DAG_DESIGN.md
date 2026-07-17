@@ -287,7 +287,6 @@ class AgentRunRecord(BaseModel):
 
 ```json
 {
-  "trace_id": "run_xxx",
   "run_id": "run_xxx",
   "turn_id": "turn_xxx",
   "task_id": "task_xxx",
@@ -334,23 +333,14 @@ POST /api/v2/runs
 GET  /api/v2/runs/{run_id}
 GET  /api/v2/runs/{run_id}/tasks
 GET  /api/v2/runs/{run_id}/events
-GET  /api/v2/tasks/{task_id}
-GET  /api/v2/tasks/{task_id}/events
-POST /api/v2/tasks/{task_id}/confirm
-POST /api/v2/tasks/{task_id}/cancel
-WS   /ws/v2/runs/{run_id}
+GET  /api/v2/runs/{run_id}/tasks/{task_id}/agent-runs
+POST /api/v2/runs/{run_id}/tasks/{task_id}/confirm
+WS   /ws/v2
 ```
 
-### 8.2 过渡兼容
-
-旧接口暂时保留：
-
-```text
-POST /api/v2/tasks
-```
-
-过渡期内部创建 Run，并把 `run_id` 同时填入旧响应的 `task_id` 字段。前端迁移完成
-后删除该兼容语义。
+WebSocket 建立后由客户端发送 `{"run_id": "...", "after": 0}`。旧
+`/api/v2/tasks` 与旧 Task Trace API 已删除，不再保留 `task_id == run_id`
+的兼容语义。
 
 ## 9. LangGraph 落地
 
@@ -419,20 +409,26 @@ Scheduler 可以使用 `asyncio.gather` 执行同一就绪批次，但不能把�
 
 前端默认订阅 Run 级事件，按 `task_id` 分组，不需要为每个 Task 建立独立 WebSocket。
 
-## 12. 迁移顺序
+## 12. 当前实现状态
 
-1. 引入 Run、Task、AgentRun 和 ResourceClaim 模型。
-2. 扩展 TraceEvent，同时保留旧字段。
-3. 新增 RunStore 和 TaskStore。
-4. 把 Conversation Turn 的执行关联从唯一 `task_id` 改为 `run_id`。
-5. 实现确定性 TaskScheduler。
-6. 实现 SupervisorTaskPlan 结构化输出。
-7. 接入 Health ReAct Agent。
-8. 接入 Environment、Care、Security 等专业 Agent。
-9. 新增 `/runs` API 和 Run 级 WebSocket。
-10. 前端迁移到 Run → Task 时间线。
-11. 删除旧 StructuredSupervisorRouter 和 TaskRunner 手写路由循环。
-12. 删除 `task_id == trace_id == thread_id` 的兼容假设。
+已完成：
+
+1. Run、Task、AgentRun、ResourceClaim 和结构化 SupervisorDecision。
+2. Conversation Turn 从 `task_id` 迁移为 `run_id`。
+3. 确定性 DAG Scheduler、依赖校验、资源冲突检测和安全并行。
+4. `create_agent` Butler Supervisor 与 Health ReAct Agent。
+5. Environment、Security、Energy、Housekeeping、DeviceOps 专业子图适配。
+6. Run 级事件流、HTTP 查询和 WebSocket 回放。
+7. 高风险 Task 等待确认，并恢复同一个 LangGraph checkpoint。
+8. 前端 Run → Task 时间线和确认交互。
+9. 删除旧 StructuredSupervisorRouter、TaskRunner、Task API 和侧栏 Trace。
+
+待后续：
+
+1. 将当前内存 RunStore 持久化到 SQLite 或 PostgreSQL。
+2. 把子图内部 Loop、Tool Call 与 Token 用量投影到 RunEvent。
+3. 为 Task 取消、独立重试和补偿增加接口。
+4. 把 Monitor 风险事件统一提交为 Run，而不是保留领域内部任务结果。
 
 ## 13. 验收标准
 
@@ -445,6 +441,5 @@ Scheduler 可以使用 `asyncio.gather` 执行同一就绪批次，但不能把�
 - Run 可以表达成功、部分成功、失败和等待确认；
 - 前端可以按 Run 查看任务树，并展开单个 Task；
 - RBAC、MCP Scope、TD 和硬告警不能被 Supervisor 绕过；
-- 旧接口在迁移期仍可工作；
+- 旧 Task API 不再存在，所有交互统一使用 Run API；
 - Fake LLM、Fake MCP 和确定性状态序列可以复现全部测试。
-

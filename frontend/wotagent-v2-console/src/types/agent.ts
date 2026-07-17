@@ -87,6 +87,12 @@ export interface AgentRunRecord {
   finished_at: string | null
 }
 
+export interface RunConfirmation {
+  taskId: string
+  summary: string
+  payload: Record<string, unknown>
+}
+
 export interface ApiCapabilities {
   thinking: {
     supported: boolean
@@ -199,6 +205,7 @@ export interface RuntimeRun {
   executionStrategy: 'sequential' | 'parallel_when_safe'
   successCriteria: string[]
   tasks: AgentTaskRecord[]
+  confirmation: RunConfirmation | null
   events: TraceEvent[]
   usage: UsageSummary
   loopCount: number

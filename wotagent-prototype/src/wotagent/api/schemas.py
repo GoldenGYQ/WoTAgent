@@ -16,6 +16,10 @@ class RunCreateRequest(BaseModel):
     thinking: bool = False
 
 
+class RunConfirmationRequest(BaseModel):
+    approved: bool
+
+
 class ConversationCreateV2Request(BaseModel):
     user_id: str = "local-user"
     role: str = "operator"
@@ -54,4 +58,5 @@ __all__ = [
     "EldercareScenarioRequest",
     "HealthResponse",
     "RunCreateRequest",
+    "RunConfirmationRequest",
 ]
