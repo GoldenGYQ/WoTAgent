@@ -38,6 +38,10 @@ class AgentState(TypedDict, total=False):
     phase: str
     confirmation_approved: bool
     recovery_attempts: int
+    agent_iterations: int
+    tool_call_count: int
+    execution_history: list[TaskTrace]
+    plan_signatures: list[str]
     task_id: str
     thinking: bool
 
@@ -50,6 +54,8 @@ class AgentGraphDependencies:
     responder: ResponseComposer | None = None
     recovery_planner: RecoveryPlanner | None = None
     max_recovery_attempts: int = 1
+    max_agent_iterations: int = 4
+    max_tool_calls: int = 8
     trace_store: InMemoryTraceStore | None = None
 
 
@@ -60,19 +66,46 @@ def build_agent_graph(deps: AgentGraphDependencies, *, checkpointer: Any = None)
         await _record(deps, state, "agent.node.started", "planner")
         try:
             capabilities = await deps.orchestrator.prepare()
-            planner_state = state
+            context = dict(state.get("context", {}))
             if capabilities is not None:
-                planner_state = {
-                    **state,
-                    "context": {**state.get("context", {}), "devices": capabilities},
-                }
+                context["devices"] = capabilities
+            if state.get("context", {}).get("execution_mode") == "observe_act_loop":
+                context["agent_loop"] = _agent_loop_context(state, deps)
+            planner_state = {**state, "context": context}
             plan = await deps.planner(planner_state)
+            signature = _plan_signature(plan)
+            signatures = list(state.get("plan_signatures", []))
+            if state.get("agent_iterations", 0) and signature in signatures:
+                await _record(
+                    deps,
+                    state,
+                    "agent.loop.terminated",
+                    "loop_control",
+                    {
+                        "reason": "duplicate_plan",
+                        "plan": plan.model_dump(mode="json"),
+                    },
+                    iteration=state.get("agent_iterations", 0),
+                )
+                return {
+                    "plan": plan,
+                    "phase": "loop_stalled",
+                    "error": "agent loop repeated an already executed plan",
+                    "context": context,
+                }
+            signatures.append(signature)
             await _record(deps, state, "agent.node.completed", "planner", {
                 "plan": plan.model_dump(mode="json"),
             })
-            result: dict[str, Any] = {"plan": plan, "phase": "planned", "error": ""}
-            if capabilities is not None:
-                result["context"] = planner_state["context"]
+            result: dict[str, Any] = {
+                "plan": plan,
+                "phase": "planned",
+                "error": "",
+                "context": context,
+                "plan_signatures": signatures,
+            }
+            if state.get("agent_iterations", 0):
+                result["confirmation_approved"] = False
             return result
         except Exception as exc:
             await _record(deps, state, "agent.node.failed", "planner", {"error": str(exc)})
@@ -114,9 +147,66 @@ def build_agent_graph(deps: AgentGraphDependencies, *, checkpointer: Any = None)
                 "agent.loop.completed",
                 "orchestrator",
                 {"status": trace.status.value},
-                iteration=state.get("recovery_attempts", 0) + 1,
+                iteration=state.get("agent_iterations", 0) + 1,
             )
-        return {"trace": trace, "phase": "executed"}
+        execution_history = [*state.get("execution_history", []), trace]
+        return {
+            "trace": trace,
+            "execution_history": execution_history,
+            "agent_iterations": state.get("agent_iterations", 0) + 1,
+            "tool_call_count": state.get("tool_call_count", 0) + len(trace.steps),
+            "phase": "executed",
+        }
+
+    async def loop_control_node(state: AgentState) -> dict[str, Any]:
+        iteration = state.get("agent_iterations", 0)
+        tool_calls = state.get("tool_call_count", 0)
+        if iteration >= deps.max_agent_iterations:
+            await _record(
+                deps,
+                state,
+                "agent.loop.terminated",
+                "loop_control",
+                {
+                    "reason": "max_iterations",
+                    "max_iterations": deps.max_agent_iterations,
+                    "tool_calls": tool_calls,
+                },
+                iteration=iteration,
+            )
+            return {
+                "phase": "loop_iteration_limit",
+                "error": "agent loop reached the maximum iteration limit before proving the goal complete",
+            }
+        if tool_calls >= deps.max_tool_calls:
+            await _record(
+                deps,
+                state,
+                "agent.loop.terminated",
+                "loop_control",
+                {
+                    "reason": "max_tool_calls",
+                    "max_tool_calls": deps.max_tool_calls,
+                    "tool_calls": tool_calls,
+                },
+                iteration=iteration,
+            )
+            return {
+                "phase": "loop_tool_limit",
+                "error": "agent loop reached the maximum tool-call limit before proving the goal complete",
+            }
+        await _record(
+            deps,
+            state,
+            "agent.loop.continued",
+            "loop_control",
+            {
+                "reason": "new observations require another decision",
+                "tool_calls": tool_calls,
+            },
+            iteration=iteration,
+        )
+        return {"phase": "observe_replan"}
 
     async def confirmation_node(state: AgentState) -> dict[str, Any]:
         plan = state["plan"]
@@ -193,7 +283,7 @@ def build_agent_graph(deps: AgentGraphDependencies, *, checkpointer: Any = None)
     def after_confirmation(state: AgentState) -> Literal["execute", "respond"]:
         return "execute" if state.get("confirmation_approved") else "respond"
 
-    def after_execute(state: AgentState) -> Literal["recover", "respond"]:
+    def after_execute(state: AgentState) -> Literal["recover", "loop_control", "respond"]:
         trace = state["trace"]
         if (
             trace.status == TaskStatus.FAILED
@@ -201,7 +291,15 @@ def build_agent_graph(deps: AgentGraphDependencies, *, checkpointer: Any = None)
             and state.get("recovery_attempts", 0) < deps.max_recovery_attempts
         ):
             return "recover"
+        if (
+            trace.status in {TaskStatus.SUCCEEDED, TaskStatus.PARTIAL_SUCCESS}
+            and state.get("context", {}).get("execution_mode") == "observe_act_loop"
+        ):
+            return "loop_control"
         return "respond"
+
+    def after_loop_control(state: AgentState) -> Literal["plan", "respond"]:
+        return "plan" if state.get("phase") == "observe_replan" else "respond"
 
     def after_recover(state: AgentState) -> Literal["policy", "respond"]:
         return "policy" if state.get("phase") == "replanned" else "respond"
@@ -212,6 +310,7 @@ def build_agent_graph(deps: AgentGraphDependencies, *, checkpointer: Any = None)
     builder.add_node("execute", execute_node)
     builder.add_node("confirm", confirmation_node)
     builder.add_node("recover", recover_node)
+    builder.add_node("loop_control", loop_control_node)
     builder.add_node("respond", respond_node)
     builder.add_edge(START, "plan")
     builder.add_conditional_edges("plan", after_plan, {"policy": "policy", "respond": "respond"})
@@ -228,7 +327,12 @@ def build_agent_graph(deps: AgentGraphDependencies, *, checkpointer: Any = None)
     builder.add_conditional_edges(
         "execute",
         after_execute,
-        {"recover": "recover", "respond": "respond"},
+        {"recover": "recover", "loop_control": "loop_control", "respond": "respond"},
+    )
+    builder.add_conditional_edges(
+        "loop_control",
+        after_loop_control,
+        {"plan": "plan", "respond": "respond"},
     )
     builder.add_conditional_edges(
         "recover",
@@ -291,3 +395,53 @@ def _default_response(state: AgentState) -> str:
         TaskStatus.FAILED: "任务执行失败或设备状态未达到目标。",
     }
     return messages.get(trace.status, f"任务状态：{trace.status.value}")
+
+
+def _agent_loop_context(
+    state: AgentState,
+    deps: AgentGraphDependencies,
+) -> dict[str, Any]:
+    return {
+        "execution_mode": "observe_act_loop",
+        "original_objective": (
+            state.get("context", {}).get("original_message")
+            or state.get("message", "")
+        ),
+        "iteration": state.get("agent_iterations", 0) + 1,
+        "max_iterations": deps.max_agent_iterations,
+        "tool_call_count": state.get("tool_call_count", 0),
+        "max_tool_calls": deps.max_tool_calls,
+        "observations": [
+            observation
+            for iteration, trace in enumerate(state.get("execution_history", []), start=1)
+            for observation in _trace_observations(trace, iteration)
+        ],
+    }
+
+
+def _trace_observations(trace: TaskTrace, iteration: int) -> list[dict[str, Any]]:
+    observations: list[dict[str, Any]] = []
+    for item in trace.steps:
+        execution = item.execution
+        observation = {
+            "iteration": iteration,
+            "step_id": item.step.id,
+            "kind": item.step.kind,
+            "device_id": item.step.device_id,
+            "action": item.step.action,
+            "policy": item.policy.effect,
+            "execution_status": execution.status if execution is not None else "not_executed",
+            "result": execution.raw_result if execution is not None else None,
+            "error": execution.error if execution is not None else None,
+        }
+        if item.verification is not None:
+            observation["verification"] = item.verification.model_dump(mode="json")
+        observations.append(observation)
+    return observations
+
+
+def _plan_signature(plan: TaskPlan) -> str:
+    return plan.model_dump_json(
+        exclude={"plan_id", "summary", "assumptions"},
+        exclude_none=True,
+    )

@@ -123,6 +123,10 @@ class TaskPlan(BaseModel):
 
     @model_validator(mode="after")
     def validate_graph(self) -> "TaskPlan":
+        if self.intent in {"query", "control"} and not self.steps:
+            raise ValueError(f"intent={self.intent} requires at least one executable step")
+        if self.intent in {"chat", "clarify"} and self.steps:
+            raise ValueError(f"intent={self.intent} cannot contain executable steps")
         ids = [step.id for step in self.steps]
         if len(ids) != len(set(ids)):
             raise ValueError("step ids must be unique")

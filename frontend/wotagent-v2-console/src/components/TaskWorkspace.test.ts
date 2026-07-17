@@ -46,7 +46,6 @@ describe('TaskWorkspace', () => {
         currentAccountId: 'JH-1',
         currentAccountName: '王护理员',
         sidebarCollapsed: false,
-        traceCollapsed: false,
       },
     })
 
@@ -66,7 +65,6 @@ describe('TaskWorkspace', () => {
         currentAccountId: 'JH-2',
         currentAccountName: '赵观察员',
         sidebarCollapsed: false,
-        traceCollapsed: false,
       },
     })
 

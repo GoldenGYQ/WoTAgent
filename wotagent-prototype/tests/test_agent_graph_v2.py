@@ -271,3 +271,132 @@ def test_response_agent_failure_falls_back_without_changing_trace_truth() -> Non
     assert result["trace"].status == TaskStatus.SUCCEEDED
     assert result["response"] == "任务已执行并通过设备状态验证。"
     assert gateway.control_calls == 1
+
+
+def test_observe_act_loop_replans_after_query_results_before_control() -> None:
+    class ConditionalGateway(FakeGateway):
+        def __init__(self) -> None:
+            super().__init__()
+            self.states = {
+                "light-001": {"on": True},
+                "light-002": {"on": False},
+                "ac-001": {"on": False},
+            }
+            self.actions: list[tuple[str, str]] = []
+
+        async def query_state(self, device_id: str) -> dict[str, Any]:
+            return dict(self.states[device_id])
+
+        async def control_device(
+            self,
+            device_id: str,
+            action: str,
+            parameters: dict[str, Any],
+            *,
+            idempotency_key: str,
+        ) -> dict[str, Any]:
+            self.control_calls += 1
+            self.actions.append((device_id, action))
+            if action == "turnOn":
+                self.states[device_id]["on"] = True
+            return {"success": True}
+
+    gateway = ConditionalGateway()
+    planner_calls = 0
+
+    async def planner(state):
+        nonlocal planner_calls
+        planner_calls += 1
+        loop = state.get("context", {}).get("agent_loop", {})
+        if planner_calls == 1:
+            assert loop["observations"] == []
+            return TaskPlan(intent="query", summary="读取灯状态", steps=[
+                PlanStep(
+                    id="read-light-1",
+                    kind="query",
+                    device_id="light-001",
+                    action="queryState",
+                ),
+                PlanStep(
+                    id="read-light-2",
+                    kind="query",
+                    device_id="light-002",
+                    action="queryState",
+                ),
+            ])
+        if planner_calls == 2:
+            observations = loop["observations"]
+            assert [item["result"]["on"] for item in observations] == [True, False]
+            return TaskPlan(intent="control", summary="开灯数为奇数，打开空调", steps=[
+                PlanStep(
+                    id="turn-on-ac",
+                    kind="action",
+                    device_id="ac-001",
+                    action="turnOn",
+                ),
+            ])
+        assert loop["observations"][-1]["verification"]["passed"] is True
+        return TaskPlan(intent="chat", summary="条件分支已执行并验证")
+
+    policy = PolicyEngine()
+    graph = build_agent_graph(AgentGraphDependencies(
+        planner=planner,
+        policy=policy,
+        orchestrator=TaskOrchestrator(gateway, policy),
+        max_agent_iterations=4,
+        max_tool_calls=8,
+    ))
+
+    result = asyncio.run(graph.ainvoke({
+        "message": "检查灯的状态，开灯数为奇数时打开空调",
+        "role": "operator",
+        "context": {
+            "execution_mode": "observe_act_loop",
+            "original_message": "检查灯的状态，开灯数为奇数时打开空调",
+        },
+    }))
+
+    assert planner_calls == 3
+    assert result["agent_iterations"] == 2
+    assert result["tool_call_count"] == 3
+    assert len(result["execution_history"]) == 2
+    assert gateway.actions == [("ac-001", "turnOn")]
+    assert result["response"] == "条件分支已执行并验证"
+
+
+def test_observe_act_loop_stops_at_iteration_limit() -> None:
+    gateway = FakeGateway()
+    planner_calls = 0
+
+    async def planner(_state):
+        nonlocal planner_calls
+        planner_calls += 1
+        return TaskPlan(intent="query", summary="读取状态", steps=[
+            PlanStep(
+                id="read-light",
+                kind="query",
+                device_id="light-001",
+                action="queryState",
+            ),
+        ])
+
+    policy = PolicyEngine()
+    graph = build_agent_graph(AgentGraphDependencies(
+        planner=planner,
+        policy=policy,
+        orchestrator=TaskOrchestrator(gateway, policy),
+        max_agent_iterations=1,
+        max_tool_calls=8,
+    ))
+
+    result = asyncio.run(graph.ainvoke({
+        "message": "根据灯状态继续处理",
+        "role": "operator",
+        "context": {"execution_mode": "observe_act_loop"},
+    }))
+
+    assert planner_calls == 1
+    assert result["phase"] == "responded"
+    assert "maximum iteration limit" in result["error"]
+    assert result["agent_iterations"] == 1
+    assert result["tool_call_count"] == 1

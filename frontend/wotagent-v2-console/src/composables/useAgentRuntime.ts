@@ -22,6 +22,7 @@ const thinkingSupported = ref(false)
 const backendState = ref<'checking' | 'online' | 'offline'>('checking')
 const subscriptions = new Map<string, TraceSubscription>()
 const pollers = new Map<string, ReturnType<typeof setInterval>>()
+const restoringTaskIds = new Set<string>()
 const STORAGE_KEY = 'wotagent-v2-console.tasks'
 const ACTIVE_CONVERSATION_KEY = 'wotagent-v2-console.active-conversation'
 let hydrated = false
@@ -38,7 +39,9 @@ interface StoredTask {
 }
 
 function taskById(taskId: string): RuntimeTask | undefined {
-  return tasks.find((task) => task.id === taskId)
+  return tasks
+    .filter((task) => task.id === taskId)
+    .sort((left, right) => right.events.length - left.events.length)[0]
 }
 
 function conversationById(conversationId: string): RuntimeConversation | undefined {
@@ -147,7 +150,7 @@ async function refreshTask(taskId: string): Promise<void> {
   }
 }
 
-function addEvent(task: RuntimeTask, event: TraceEvent): void {
+function addEvent(task: RuntimeTask, event: TraceEvent, refreshRecord = true): void {
   if (task.events.some((current) => current.sequence === event.sequence)) return
   task.events.push(event)
   task.events.sort((a, b) => a.sequence - b.sequence)
@@ -165,12 +168,13 @@ function addEvent(task: RuntimeTask, event: TraceEvent): void {
   }
   syncTurn(task)
 
-  if (
-    event.type === 'model.request.completed' ||
-    event.type === 'agent.tool.completed' ||
-    event.type === 'agent.loop.completed' ||
-    event.type.startsWith('task.')
-  ) {
+  const shouldRefreshRecord = refreshRecord && (
+    event.type === 'model.request.completed'
+    || event.type === 'agent.tool.completed'
+    || event.type === 'agent.loop.completed'
+    || event.type.startsWith('task.')
+  )
+  if (shouldRefreshRecord) {
     void refreshTask(task.id)
   }
 }
@@ -229,8 +233,13 @@ function stopTransport(taskId: string): void {
 }
 
 async function restoreTask(stored: StoredTask): Promise<void> {
+  if (taskById(stored.id) || restoringTaskIds.has(stored.id)) return
+  restoringTaskIds.add(stored.id)
   const conversationId = stored.conversationId || stored.sessionId
-  if (!conversationById(conversationId)) return
+  if (!conversationById(conversationId)) {
+    restoringTaskIds.delete(stored.id)
+    return
+  }
   const task: RuntimeTask = {
     id: stored.id,
     turnId: stored.turnId ?? '',
@@ -253,14 +262,34 @@ async function restoreTask(stored: StoredTask): Promise<void> {
     streamState: 'idle',
   }
   tasks.push(task)
-  try {
-    applyRecord(task, await agentV2Api.getTask(task.id))
-    const replay = await agentV2Api.getEvents(task.id, 0)
-    replay.events.forEach((event) => addEvent(task, event))
-    if (ACTIVE_STATUSES.has(task.status)) startTrace(task.id)
-  } catch {
-    tasks.splice(tasks.indexOf(task), 1)
+  const runtimeTask = taskById(stored.id)
+  if (!runtimeTask) {
+    restoringTaskIds.delete(stored.id)
+    return
   }
+  try {
+    applyRecord(runtimeTask, await agentV2Api.getTask(runtimeTask.id))
+    const replay = await agentV2Api.getEvents(runtimeTask.id, 0)
+    replay.events.forEach((event) => addEvent(runtimeTask, event, false))
+    if (ACTIVE_STATUSES.has(runtimeTask.status)) startTrace(runtimeTask.id)
+  } catch {
+    const index = tasks.findIndex((item) => item.id === stored.id)
+    if (index >= 0) tasks.splice(index, 1)
+  } finally {
+    restoringTaskIds.delete(stored.id)
+  }
+}
+
+async function restoreConversationTasks(conversation: RuntimeConversation): Promise<void> {
+  await Promise.all(conversation.turns.map((turn) => restoreTask({
+    id: turn.task_id,
+    turnId: turn.turn_id,
+    conversationId: conversation.conversation_id,
+    sessionId: conversation.conversation_id,
+    message: turn.user_message,
+    role: conversation.role,
+    createdAt: turn.created_at,
+  })))
 }
 
 async function hydrateRuntime(): Promise<void> {
@@ -342,6 +371,7 @@ async function selectConversation(conversationId: string): Promise<void> {
   if (!conversation) return
   conversation.loading = true
   await refreshConversation(conversationId)
+  await restoreConversationTasks(conversation)
   conversation.loading = false
   activeTaskId.value = tasks
     .filter((task) => task.conversationId === conversationId)
@@ -403,6 +433,7 @@ function resetRuntimeState(): void {
   subscriptions.clear()
   pollers.forEach((poller) => clearInterval(poller))
   pollers.clear()
+  restoringTaskIds.clear()
   tasks.splice(0)
   conversations.splice(0)
   activeConversationId.value = null

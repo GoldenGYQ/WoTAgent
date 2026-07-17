@@ -59,6 +59,22 @@ flowchart TD
     V -. "invalid / timeout" .-> RF["Rule evaluator fallback"]
 ```
 
+### User chat routing
+
+Ordinary chat and Monitor events now share the same Butler responsibility
+boundary. In `hybrid` and `agentic` modes, chat routing is produced as a
+validated `RouteDecision` by the LLM Butler. The decision resolves elliptical
+references, selects one registered Agent, carries the resident scope, and
+rewrites the request into a self-contained professional objective.
+
+If a professional Agent returns a structured `clarify` or planning failure,
+the outcome returns to the Butler. The Butler may select a different,
+previously unattempted Agent. `SUPERVISOR_MAX_ROUTES` bounds this hand-back
+loop and defaults to two routes.
+
+The keyword router remains only as the `rule` mode Oracle and as an LLM
+failure fallback. It is no longer the primary chat router in hybrid mode.
+
 ## 5. Health Agent Loop
 
 Code path:
@@ -130,6 +146,8 @@ New events include:
 - `agent.goal.evaluated`
 - `agent.fallback.activated`
 - `agent.shadow.compared`
+- `agent.delegation.returned`
+- `agent.reroute.selected`
 
 Only concise structured decision reasons are recorded. Hidden chain-of-thought
 is not logged.
@@ -137,6 +155,8 @@ is not logged.
 ## 10. Current Limitations
 
 - Only Health Agent has a complete autonomous investigation loop.
+- Ordinary health chat now enters the bounded Health Agent loop instead of
+  being limited to a fixed health-summary read.
 - Care and Environment Agents remain bounded single-round executors.
 - `agentic` mode is reserved and does not yet enable unrestricted additional
   loops.

@@ -180,7 +180,10 @@ class StructuredHealthDecisionMaker:
                 "finish. Use existing evidence before requesting more data. Check freshness "
                 "before trusting a summary, inspect latest values when stale, and inspect trend "
                 "when an abnormal value requires temporal evidence. Do not diagnose or recommend "
-                "medication.",
+                "medication. A finish finding must be concise plain text, normally under 180 "
+                "Chinese characters. Do not produce Markdown tables, normal-range comparisons, "
+                "disease labels, or new severity judgments. Report only observed values, source "
+                "risk labels, freshness, trend availability, and unresolved data gaps.",
             )),
             HumanMessage(content=context_message("health_loop_context", context)),
         ]

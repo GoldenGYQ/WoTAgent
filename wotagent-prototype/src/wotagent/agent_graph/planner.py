@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
-import re
 import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
-from jsonschema import ValidationError, validate
+from jsonschema import ValidationError as JSONSchemaValidationError, validate
+from pydantic import BaseModel, Field, ValidationError as PydanticValidationError
 
 from ..domain import TaskPlan
 from ..prompting import (
@@ -57,6 +57,96 @@ _DEVICE_TERMS: dict[str, tuple[str, ...]] = {
     "housekeeping": ("扫地机器人", "清洁", "家务", "vacuum"),
     "device_ops": ("网关", "设备运维", "设备离线", "gateway"),
 }
+
+
+class ConditionalPlanReview(BaseModel):
+    approved: bool
+    observed_facts: list[str] = Field(default_factory=list)
+    selected_branch: str = ""
+    violations: list[str] = Field(default_factory=list)
+
+
+CONDITIONAL_PLAN_REVIEW_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "review_conditional_plan",
+        "description": "Check whether a candidate device action plan follows observed conditions",
+        "parameters": ConditionalPlanReview.model_json_schema(),
+    },
+}
+
+
+@dataclass
+class StructuredConditionalPlanReviewer:
+    runnable: Any
+    trace_store: InMemoryTraceStore | None = None
+
+    async def review(
+        self,
+        *,
+        state: dict[str, Any],
+        plan: TaskPlan,
+        loop_context: dict[str, Any],
+    ) -> ConditionalPlanReview:
+        task_id = state.get("task_id", "")
+        messages = [
+            (
+                "system",
+                "You are a strict conditional-plan reviewer. Check the candidate action plan "
+                "against the original objective and authoritative observations. Recompute counts, "
+                "parity, comparisons, arithmetic, and branch activation. Reject any action from "
+                "an inactive branch, any action unsupported by observations, or any plan that "
+                "performs an unrequested parent action merely to activate a downstream condition. "
+                "The candidate is only the next stage of a bounded Observe-Act loop, not the full "
+                "remaining workflow. Do not reject a correct next-stage action merely because a "
+                "downstream condition is intentionally deferred until that action is verified. "
+                "A parent action explicitly required by the active branch is valid. For count "
+                "arithmetic, a verified boolean device state contributes 1 when on and 0 when off "
+                "if the user's expression combines that device with another count. Do not "
+                "review RBAC or TD capability; those are separate deterministic layers. Return "
+                "only the review_conditional_plan tool call.",
+            ),
+            (
+                "human",
+                context_message("conditional_plan_review", {
+                    "original_objective": loop_context.get("original_objective", ""),
+                    "observations": loop_context.get("observations", []),
+                    "candidate_plan": plan.model_dump(mode="json"),
+                }),
+            ),
+        ]
+        if self.trace_store is not None and task_id:
+            await self.trace_store.record(
+                task_id=task_id,
+                type="model.request.started",
+                node="plan_reviewer",
+                data={
+                    "purpose": "conditional_plan_review",
+                    "prompt_version": "conditional-review-v1",
+                },
+            )
+        started = time.perf_counter()
+        result = await self.runnable.ainvoke(messages)
+        review = ConditionalPlanReview.model_validate(
+            _extract_named_tool_arguments(result, "review_conditional_plan")
+        )
+        if self.trace_store is not None and task_id:
+            await self.trace_store.record(
+                task_id=task_id,
+                type="model.request.completed",
+                node="plan_reviewer",
+                duration_ms=(time.perf_counter() - started) * 1000,
+                data={
+                    "purpose": "conditional_plan_review",
+                    "prompt_version": "conditional-review-v1",
+                    "approved": review.approved,
+                    "selected_branch": review.selected_branch,
+                    "violations": review.violations,
+                    "model": _extract_model_name(result),
+                    **extract_usage_with_cost(result),
+                },
+            )
+        return review
 
 
 def capability_context(message: str = "", max_devices: int = 8) -> list[dict[str, Any]]:
@@ -151,6 +241,7 @@ class LangChainTaskPlanner:
     capability_provider: Callable[[], Awaitable[list[dict[str, Any]]]] | None = None
     thinking_runnable: Any | None = None
     agent_profile: AgentPromptProfile | None = None
+    plan_reviewer: StructuredConditionalPlanReviewer | None = None
 
     async def __call__(self, state: dict[str, Any]) -> TaskPlan:
         thinking = bool(state.get("thinking", False))
@@ -168,33 +259,15 @@ class LangChainTaskPlanner:
             message,
             state.get("conversation_history", []),
         )
-        devices = select_capability_context(all_devices, selection_text)
-        runtime_context = state.get("context", {}).get("runtime", {})
-        resumed = _resume_pending_plan(message, runtime_context)
-        if resumed is not None:
-            violations = _capability_violations(
-                resumed,
-                all_devices,
-                str(runtime_context["pending_goal"].get("user_message", "")),
-            )
-            if violations:
-                raise ValueError(
-                    "pending goal no longer matches current TD capabilities: "
-                    + "; ".join(violations)
-                )
-            if self.trace_store is not None and state.get("task_id"):
-                await self.trace_store.record(
-                    task_id=state["task_id"],
-                    type="context.pending_goal.resumed",
-                    node="planner",
-                    data={
-                        "source_task_id": runtime_context["pending_goal"].get("source_task_id"),
-                        "current_role": runtime_context.get("current_role"),
-                        "intent": resumed.intent,
-                        "step_count": len(resumed.steps),
-                    },
-                )
-            return resumed
+        loop_context = state.get("context", {}).get("agent_loop")
+        devices = select_capability_context(
+            all_devices,
+            selection_text,
+            max_devices=24 if loop_context else 8,
+        )
+        runtime_context = dict(state.get("context", {}).get("runtime", {}))
+        if loop_context:
+            runtime_context["agent_loop"] = loop_context
 
         profile = self.agent_profile or profile_for(
             state.get("context", {}).get("delegated_agent")
@@ -255,9 +328,75 @@ class LangChainTaskPlanner:
         result = await self.runnable.ainvoke(messages)
         await self._record_model_completion(state, result, started, attempt=1)
         arguments = _extract_tool_arguments(result)
-        plan = TaskPlan.model_validate(arguments)
+        schema_repaired = False
+        repair_used = False
+        try:
+            plan = TaskPlan.model_validate(arguments)
+        except PydanticValidationError as exc:
+            schema_repaired = True
+            repair_used = True
+            if self.trace_store is not None and task_id:
+                await self.trace_store.record(
+                    task_id=task_id,
+                    type="plan.validation.failed",
+                    node="planner",
+                    data={"attempt": 1, "violations": [str(exc)]},
+                )
+                await self.trace_store.record(
+                    task_id=task_id,
+                    type="model.request.started",
+                    node="planner",
+                    data={
+                        "purpose": "task_planning_repair",
+                        "prompt_version": "planner-v3",
+                        "attempt": 2,
+                        "thinking": thinking,
+                        "model_thinking": False,
+                    },
+                )
+            repair_prompt = (
+                "The generated plan violates the structured TaskPlan contract: "
+                f"{exc}. Regenerate the complete plan. query/control intents require at least "
+                "one executable step. If the original objective is already complete and no "
+                "further tool call is needed, use intent=chat with steps=[]. clarify also has "
+                "no executable steps."
+            )
+            repair_messages = [
+                *messages[:-1],
+                ("human", f"{state.get('message', '')}\n\nPlanner correction: {repair_prompt}"),
+            ]
+            repair_started = time.perf_counter()
+            result = await self.runnable.ainvoke(repair_messages)
+            await self._record_model_completion(state, result, repair_started, attempt=2)
+            arguments = _extract_tool_arguments(result)
+            try:
+                plan = TaskPlan.model_validate(arguments)
+            except PydanticValidationError:
+                if not _terminal_noop_after_execution(arguments, state):
+                    raise
+                plan = TaskPlan(
+                    intent="chat",
+                    summary=str(arguments.get("summary", "") or "目标已完成。"),
+                    assumptions=list(arguments.get("assumptions", [])),
+                )
+                if self.trace_store is not None and task_id:
+                    await self.trace_store.record(
+                        task_id=task_id,
+                        type="plan.normalized",
+                        node="planner",
+                        data={
+                            "reason": "repaired plan declared no remaining executable steps",
+                            "from_intent": arguments.get("intent"),
+                            "to_intent": "chat",
+                        },
+                    )
         violations = _capability_violations(plan, devices, message)
         if violations:
+            if schema_repaired:
+                raise ValueError(
+                    "planner returned a TD-invalid plan after one schema repair: "
+                    + "; ".join(violations)
+                )
             if self.trace_store is not None and task_id:
                 await self.trace_store.record(
                     task_id=task_id,
@@ -296,12 +435,82 @@ class LangChainTaskPlanner:
             await self._record_model_completion(state, result, repair_started, attempt=2)
             arguments = _extract_tool_arguments(result)
             plan = TaskPlan.model_validate(arguments)
+            repair_used = True
             violations = _capability_violations(plan, devices, message)
             if violations:
                 raise ValueError(
                     "planner returned a TD-invalid plan after one repair: "
                     + "; ".join(violations)
                 )
+        if loop_context and plan.intent == "control" and self.plan_reviewer is not None:
+            review = await self.plan_reviewer.review(
+                state=state,
+                plan=plan,
+                loop_context=loop_context,
+            )
+            if not review.approved:
+                if repair_used:
+                    raise ValueError(
+                        "conditional plan review rejected the repaired plan: "
+                        + "; ".join(review.violations or ["branch consistency failure"])
+                    )
+                if self.trace_store is not None and task_id:
+                    await self.trace_store.record(
+                        task_id=task_id,
+                        type="plan.validation.failed",
+                        node="plan_reviewer",
+                        data={
+                            "attempt": 1,
+                            "violations": review.violations,
+                            "selected_branch": review.selected_branch,
+                        },
+                    )
+                    await self.trace_store.record(
+                        task_id=task_id,
+                        type="model.request.started",
+                        node="planner",
+                        data={
+                            "purpose": "task_planning_repair",
+                            "prompt_version": "planner-v3",
+                            "attempt": 2,
+                            "thinking": thinking,
+                            "model_thinking": False,
+                        },
+                    )
+                repair_prompt = (
+                    "An independent conditional-plan review rejected the candidate plan. "
+                    f"Observed branch: {review.selected_branch or 'undetermined'}. "
+                    f"Violations: {'; '.join(review.violations)}. Regenerate the complete next "
+                    "plan using only the active branch supported by observations. If the goal is "
+                    "already complete, return intent=chat with no steps."
+                )
+                repair_messages = [
+                    *messages[:-1],
+                    ("human", f"{state.get('message', '')}\n\nPlanner correction: {repair_prompt}"),
+                ]
+                repair_started = time.perf_counter()
+                result = await self.runnable.ainvoke(repair_messages)
+                await self._record_model_completion(state, result, repair_started, attempt=2)
+                plan = TaskPlan.model_validate(_extract_tool_arguments(result))
+                violations = _capability_violations(plan, devices, message)
+                if violations:
+                    raise ValueError(
+                        "conditional plan repair violated TD capabilities: "
+                        + "; ".join(violations)
+                    )
+                if plan.intent == "control":
+                    repaired_review = await self.plan_reviewer.review(
+                        state=state,
+                        plan=plan,
+                        loop_context=loop_context,
+                    )
+                    if not repaired_review.approved:
+                        raise ValueError(
+                            "conditional plan review rejected the repaired plan: "
+                            + "; ".join(
+                                repaired_review.violations or ["branch consistency failure"]
+                            )
+                        )
         if self.trace_store is not None and task_id:
             await self.trace_store.record(
                 task_id=task_id,
@@ -431,6 +640,24 @@ def _extract_tool_arguments(result: Any) -> dict[str, Any]:
     return json.loads(arguments) if isinstance(arguments, str) else arguments
 
 
+def _extract_named_tool_arguments(result: Any, expected_name: str) -> dict[str, Any]:
+    tool_calls = getattr(result, "tool_calls", None) or []
+    if tool_calls:
+        call = tool_calls[0]
+        if call.get("name") != expected_name:
+            raise ValueError(f"unexpected tool: {call.get('name')}")
+        arguments = call.get("args", {})
+        return json.loads(arguments) if isinstance(arguments, str) else arguments
+    raw_calls = getattr(result, "additional_kwargs", {}).get("tool_calls", [])
+    if not raw_calls:
+        raise ValueError(f"model returned no {expected_name} tool call")
+    function = raw_calls[0].get("function", {})
+    if function.get("name") != expected_name:
+        raise ValueError(f"unexpected tool: {function.get('name')}")
+    arguments = function.get("arguments", {})
+    return json.loads(arguments) if isinstance(arguments, str) else arguments
+
+
 def _extract_content(result: Any) -> str:
     message = result
     if isinstance(result, dict):
@@ -447,29 +674,20 @@ def _extract_content(result: Any) -> str:
         )
     return str(content or "")
 
+
+def _terminal_noop_after_execution(
+    arguments: dict[str, Any],
+    state: dict[str, Any],
+) -> bool:
+    return (
+        bool(state.get("execution_history"))
+        and arguments.get("intent") in {"query", "control"}
+        and arguments.get("steps") == []
+    )
+
 def _extract_model_name(result: Any) -> str:
     metadata = getattr(result, "response_metadata", None) or {}
     return str(metadata.get("model_name") or metadata.get("model") or "unknown")
-
-
-def _resume_pending_plan(message: str, runtime_context: dict[str, Any]) -> TaskPlan | None:
-    pending = runtime_context.get("pending_goal")
-    if not isinstance(pending, dict) or not _is_retry_request(message):
-        return None
-    raw_plan = pending.get("plan")
-    if not isinstance(raw_plan, dict):
-        return None
-    payload = dict(raw_plan)
-    payload.pop("plan_id", None)
-    payload["summary"] = payload.get("summary") or pending.get("user_message", "继续上一任务")
-    return TaskPlan.model_validate(payload)
-
-
-def _is_retry_request(message: str) -> bool:
-    normalized = re.sub(r"[\s，。！？、,.!?]", "", message.lower())
-    exact = {"现在呢", "那现在呢", "继续", "执行吧", "继续执行", "接着做"}
-    markers = ("再试", "重试", "试试看", "试试就知道", "现在可以", "重新执行")
-    return normalized in exact or any(marker in normalized for marker in markers)
 
 
 def _capability_violations(
@@ -497,7 +715,7 @@ def _capability_violations(
             continue
         try:
             validate(instance=step.input, schema=action.get("input_schema") or {})
-        except ValidationError as exc:
+        except JSONSchemaValidationError as exc:
             violations.append(f"step {step.id}: invalid '{step.action}' input: {exc.message}")
     normalized_message = message.lower()
     requested_off = any(

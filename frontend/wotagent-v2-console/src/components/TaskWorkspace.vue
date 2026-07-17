@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-vue-next'
 import type { ConversationTurn, RuntimeConversation, RuntimeTask } from '../types/agent'
+import InlineTraceTimeline from './InlineTraceTimeline.vue'
 import MetricStrip from './MetricStrip.vue'
 import StatusBadge from './StatusBadge.vue'
 
@@ -22,31 +23,20 @@ const props = defineProps<{
   currentAccountId: string | null
   currentAccountName: string | null
   sidebarCollapsed: boolean
-  traceCollapsed: boolean
 }>()
 const emit = defineEmits<{
   confirm: [taskId: string, approved: boolean]
   example: [message: string]
   selectTask: [taskId: string]
   toggleSidebar: []
-  toggleTrace: []
 }>()
 
 function taskForTurn(turn: ConversationTurn): RuntimeTask | undefined {
-  return props.tasks.find((task) => task.id === turn.task_id)
+  return props.tasks
+    .filter((task) => task.id === turn.task_id)
+    .sort((left, right) => right.events.length - left.events.length)[0]
 }
 
-function isActive(task: RuntimeTask | undefined): boolean {
-  return Boolean(task && ['accepted', 'received', 'running'].includes(task.status))
-}
-
-function currentNode(task: RuntimeTask): string {
-  const events = [...task.events].reverse()
-  const failed = events.find((event) => event.type === 'agent.node.failed')
-  if (failed) return `${failed.node} 执行失败`
-  const latest = events.find((event) => event.type === 'agent.node.started')
-  return latest ? `${latest.node} 正在处理` : '正在构建会话上下文'
-}
 </script>
 
 <template>
@@ -66,15 +56,12 @@ function currentNode(task: RuntimeTask): string {
         <StatusBadge v-if="activeTask" :status="activeTask.status" />
         <span v-if="activeTask?.thinking" class="thinking-mode"><BrainCircuit :size="13" />深度思考</span>
       </div>
-      <button
-        class="icon-button workspace-toggle"
-        type="button"
-        :title="traceCollapsed ? '展开 Trace 面板' : '折叠 Trace 面板'"
-        :aria-pressed="!traceCollapsed"
-        @click="emit('toggleTrace')"
-      >
-        <Route :size="15" />
-      </button>
+      <span v-if="activeTask" class="workspace-trace-status" :data-live="activeTask.streamState === 'live'">
+        <i />
+        <Route :size="14" />
+        {{ activeTask.events.length }} 个事件
+      </span>
+      <Route v-else :size="15" class="workspace-header-mark" />
     </header>
 
     <template v-if="conversation">
@@ -105,13 +92,11 @@ function currentNode(task: RuntimeTask): string {
             </div>
           </section>
 
-          <section v-if="isActive(taskForTurn(turn))" class="runtime-band">
-            <span class="runtime-spinner" />
-            <div>
-              <strong>{{ currentNode(taskForTurn(turn)!) }}</strong>
-              <span>{{ taskForTurn(turn)?.events.length ?? 0 }} 个 trace 事件</span>
-            </div>
-          </section>
+          <InlineTraceTimeline
+            v-if="taskForTurn(turn)"
+            :task="taskForTurn(turn)!"
+            :selected="activeTask?.id === turn.task_id"
+          />
 
           <section v-if="taskForTurn(turn)?.confirmation" class="confirmation-band">
             <ShieldAlert :size="21" />
@@ -211,5 +196,32 @@ function currentNode(task: RuntimeTask): string {
 
 .workspace-title .conversation-title {
   text-align: center;
+}
+
+.workspace-trace-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.workspace-trace-status i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #9da7b1;
+}
+
+.workspace-trace-status[data-live="true"] i {
+  background: #20a265;
+  animation: pulse 1.8s ease-in-out infinite;
+}
+
+.workspace-header-mark {
+  justify-self: end;
+  color: var(--text-faint);
 }
 </style>

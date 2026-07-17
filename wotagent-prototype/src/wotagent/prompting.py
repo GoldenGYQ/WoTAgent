@@ -177,7 +177,20 @@ DEVICE_PLANNING_CONTRACT = (
     "refer to the same canonical room. Resolve exact title or alias wording first. Modifiers "
     "such as dimmer are significant and must not be added when absent. For elliptical "
     "follow-ups, prefer pending_goal or last_task. Use intent=clarify only when no safe target "
-    "can be resolved. Do not decide permissions."
+    "can be resolved. Do not decide permissions. When runtime_context.agent_loop.execution_mode "
+    "is observe_act_loop, use its authoritative observations to plan only the next remaining "
+    "stage of the original objective. Do not repeat successful queries or actions. Never execute "
+    "both sides of a conditional branch: observe the required facts first, then select the one "
+    "satisfied branch. Conditional consequences remain inside their parent branch. An instruction "
+    "such as 'if even, open the humidifier; after opening the humidifier, maybe open the fan' "
+    "means the fan condition is also inactive when the even branch was not selected. Never perform "
+    "an inactive branch action merely to make its downstream condition applicable. For example, "
+    "when the observed count is odd and the odd branch's air-conditioner action is verified, the "
+    "even humidifier branch and its fan descendants are skipped and the objective is complete. "
+    "If another later decision inside the active branch depends on the result of the next action, plan "
+    "that action now and leave the later decision for the following iteration. Once the complete "
+    "objective is satisfied, return intent=chat with no steps and summarize the evidence. A "
+    "successful prerequisite query alone does not complete a conditional automation objective."
 )
 
 ELDERCARE_PLANNING_CONTRACT = (

@@ -15,6 +15,7 @@ from wotagent.conversation import ConversationStore
 from wotagent.domain import PlanStep, PolicyDecision, TaskPlan
 from wotagent.orchestration import TaskOrchestrator
 from wotagent.policy import PolicyEngine
+from wotagent.supervisor import RouteDecision
 
 app_module = importlib.import_module("wotagent.api.app")
 
@@ -97,6 +98,70 @@ def test_v2_task_endpoint_returns_real_graph_result(monkeypatch) -> None:
                 break
     assert messages[-1]["status"] == "responded"
     assert all(item.get("sequence", 2) > 1 for item in messages[:-1])
+
+
+def test_specialist_clarify_returns_to_butler_for_one_reroute(monkeypatch) -> None:
+    class FakeRouter:
+        def __init__(self):
+            self.calls = 0
+
+        async def route(self, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return RouteDecision(
+                    agent_id="environment_agent",
+                    resolved_request="查询最近趋势",
+                    confidence=0.6,
+                    reason="first route",
+                )
+            assert kwargs["attempted_agents"] == ["environment_agent"]
+            assert kwargs["previous_outcome"]["plan"]["intent"] == "clarify"
+            return RouteDecision(
+                agent_id="health_agent",
+                resolved_request="查询张爷爷最近的健康趋势",
+                resident_id="elderly-001",
+                confidence=0.98,
+                reason="specialist returned out of scope",
+            )
+
+    class ClarifyGraph:
+        async def ainvoke(self, state, config=None):
+            return {
+                **state,
+                "phase": "responded",
+                "plan": TaskPlan(intent="clarify", summary="不属于环境领域"),
+                "response": "不属于环境领域",
+            }
+
+    class FakeEldercareChat:
+        async def run(self, **kwargs):
+            assert kwargs["routed_agent"] == "health_agent"
+            assert kwargs["message"] == "查询张爷爷最近的健康趋势"
+            return {
+                "status": "succeeded",
+                "response": "张爷爷最近血氧呈下降趋势。",
+                "plan": {"intent": "query", "summary": kwargs["message"], "steps": []},
+            }
+
+    router = FakeRouter()
+    monkeypatch.setattr(app_module, "_supervisor_router", router)
+    monkeypatch.setattr(app_module, "_v2_graph", ClarifyGraph())
+    monkeypatch.setattr(app_module, "_eldercare_chat_agent", FakeEldercareChat())
+
+    client = TestClient(app_module.app)
+    created = client.post("/api/v2/tasks", json={
+        "message": "那最近的趋势呢",
+        "role": "viewer",
+    })
+    task_id = created.json()["task_id"]
+    task = client.get(f"/api/v2/tasks/{task_id}").json()
+    events = client.get(f"/api/v2/tasks/{task_id}/events").json()["events"]
+
+    assert task["status"] == "succeeded"
+    assert task["result"]["response"] == "张爷爷最近血氧呈下降趋势。"
+    assert router.calls == 2
+    assert any(item["type"] == "agent.delegation.returned" for item in events)
+    assert any(item["type"] == "agent.reroute.selected" for item in events)
 
 
 def test_v2_capabilities_reports_thinking_without_exposing_private_reasoning(monkeypatch) -> None:

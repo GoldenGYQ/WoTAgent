@@ -16,7 +16,6 @@ import TaskSidebar from './components/TaskSidebar.vue'
 import EldercareDashboard from './components/EldercareDashboard.vue'
 import LoginScreen from './components/LoginScreen.vue'
 import TaskWorkspace from './components/TaskWorkspace.vue'
-import TraceInspector from './components/TraceInspector.vue'
 import { useAgentRuntime } from './composables/useAgentRuntime'
 import type { LoginAccount } from './types/agent'
 
@@ -55,10 +54,8 @@ const {
 const draft = ref('')
 const submitting = ref(false)
 const submitError = ref('')
-const mobileView = ref<'workspace' | 'trace'>('workspace')
 const drawerOpen = ref(false)
 const sidebarCollapsed = ref(false)
-const traceCollapsed = ref(false)
 const appView = ref<'agent' | 'eldercare'>('agent')
 const currentAccount = ref<LoginAccount | null>(savedAccount())
 const composer = ref<HTMLTextAreaElement | null>(null)
@@ -74,7 +71,6 @@ async function send(): Promise<void> {
   try {
     await submit(message)
     draft.value = ''
-    mobileView.value = 'workspace'
   } catch (error) {
     submitError.value = error instanceof Error ? error.message : String(error)
   } finally {
@@ -107,16 +103,11 @@ async function chooseConversation(conversationId: string): Promise<void> {
 function newTask(): void {
   resetConversation()
   drawerOpen.value = false
-  mobileView.value = 'workspace'
   void nextTick(() => composer.value?.focus())
 }
 
 function toggleSidebar(): void {
   sidebarCollapsed.value = !sidebarCollapsed.value
-}
-
-function toggleTrace(): void {
-  traceCollapsed.value = !traceCollapsed.value
 }
 
 async function login(account: LoginAccount): Promise<void> {
@@ -175,7 +166,7 @@ onMounted(async () => {
     <div
       v-if="appView === 'agent'"
       class="desktop-layout"
-      :class="{ 'sidebar-collapsed': sidebarCollapsed, 'trace-collapsed': traceCollapsed }"
+      :class="{ 'sidebar-collapsed': sidebarCollapsed }"
     >
       <TaskSidebar
         :collapsed="sidebarCollapsed"
@@ -186,7 +177,7 @@ onMounted(async () => {
         @delete="removeConversation"
       />
 
-      <div class="workspace-column" :class="{ 'mobile-hidden': mobileView !== 'workspace' }">
+      <div class="workspace-column">
         <TaskWorkspace
           :conversation="activeConversation"
           :tasks="conversationTasks"
@@ -194,12 +185,10 @@ onMounted(async () => {
           :current-account-id="currentAccount.accountId"
           :current-account-name="currentAccount.displayName"
           :sidebar-collapsed="sidebarCollapsed"
-          :trace-collapsed="traceCollapsed"
           @confirm="confirm"
           @select-task="chooseTask"
           @example="useExample"
           @toggle-sidebar="toggleSidebar"
-          @toggle-trace="toggleTrace"
         />
         <div class="composer-region">
           <div v-if="submitError" class="composer-error">{{ submitError }}</div>
@@ -242,17 +231,9 @@ onMounted(async () => {
         </div>
       </div>
 
-      <div v-if="!traceCollapsed" class="inspector-column" :class="{ 'mobile-hidden': mobileView !== 'trace' }">
-        <TraceInspector :task="activeTask" />
-      </div>
     </div>
 
     <EldercareDashboard v-else :initial-resident-id="currentAccount.residentId" />
-
-    <nav v-if="appView === 'agent'" class="mobile-nav" aria-label="移动端视图">
-      <button type="button" :class="{ active: mobileView === 'workspace' }" @click="mobileView = 'workspace'">任务</button>
-      <button type="button" :class="{ active: mobileView === 'trace' }" @click="mobileView = 'trace'">Trace</button>
-    </nav>
 
     <div v-if="drawerOpen && appView === 'agent'" class="drawer-backdrop" @click="drawerOpen = false">
       <div class="mobile-drawer" @click.stop>

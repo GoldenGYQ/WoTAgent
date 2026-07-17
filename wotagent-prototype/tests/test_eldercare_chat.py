@@ -13,6 +13,7 @@ from wotagent.eldercare import (
     SensorReading,
     is_eldercare_request,
 )
+from wotagent.eldercare.models import AgentFinding, Evidence
 from wotagent.telemetry import InMemoryTraceStore
 
 
@@ -185,3 +186,49 @@ def test_eldercare_planner_honors_thinking_mode(tmp_path) -> None:
         "eldercare_reasoner",
         "eldercare_planner",
     ]
+
+
+def test_health_route_uses_bounded_health_agent_loop(tmp_path) -> None:
+    agent, trace = make_agent(tmp_path, {
+        "intent": "clarify",
+        "clarification": "planner should not be used",
+    })
+
+    class FakeHealthLoop:
+        async def run(self, *, task_id, resident_id, delegation):
+            assert resident_id == "elderly-001"
+            assert "趋势" in delegation.objective
+            return AgentFinding(
+                agent="health_agent",
+                objective=delegation.objective,
+                status="completed",
+                finding="最近三次血氧为94%、92%、90%，呈下降趋势，需要护理人员复核。",
+                confidence=0.94,
+                evidence=[Evidence(
+                    source="read_vital_trend",
+                    value={"spo2": [94, 92, 90]},
+                    reliability=1.0,
+                    description="最近血氧趋势",
+                )],
+                recommended_actions=["通知护理员复核"],
+            )
+
+    agent.runtime.health_agent = FakeHealthLoop()
+
+    async def run():
+        await trace.create(task_id="task-trend", session_id="conv", request_id="req")
+        result = await agent.run(
+            task_id="task-trend",
+            message="查询张爷爷最近的健康趋势",
+            history=[],
+            role="viewer",
+            routed_agent="health_agent",
+            resident_id="elderly-001",
+        )
+        return result, await trace.events("task-trend")
+
+    result, events = asyncio.run(run())
+    assert result["status"] == "succeeded"
+    assert "下降趋势" in result["response"]
+    assert result["finding"]["evidence"][0]["source"] == "read_vital_trend"
+    assert any(event.type == "agent.finding.completed" for event in events)

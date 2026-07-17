@@ -3,12 +3,16 @@ import type { TraceEvent } from '../types/agent'
 export type EventTone = 'neutral' | 'model' | 'policy' | 'tool' | 'verify' | 'success' | 'danger'
 
 export function eventTone(event: TraceEvent): EventTone {
-  if (event.type.includes('failed')) return 'danger'
+  if (event.type.includes('failed') || event.type.includes('fallback')) return 'danger'
   if (event.type.startsWith('model.')) return 'model'
   if (event.type === 'context.built') return 'verify'
   if (event.type.startsWith('policy.')) return 'policy'
-  if (event.type.startsWith('agent.tool')) return 'tool'
-  if (event.type.startsWith('verification.')) return 'verify'
+  if (event.type.startsWith('agent.tool') || event.type.startsWith('agent.resource')) return 'tool'
+  if (
+    event.type.startsWith('verification.')
+    || event.type === 'agent.finding.completed'
+    || event.type === 'agent.goal.evaluated'
+  ) return 'verify'
   if (event.type.startsWith('task.succeeded')) return 'success'
   return 'neutral'
 }
@@ -31,6 +35,18 @@ export function eventTitle(event: TraceEvent): string {
     'verification.completed': '状态验证',
     'agent.loop.completed': '循环完成',
     'agent.recovery.completed': '恢复规划',
+    'agent.fast_path.selected': '规则快速通道',
+    'agent.goal.created': 'Butler 建立目标',
+    'agent.goal.evaluated': 'Butler 评估目标',
+    'agent.delegation.created': '创建专业委派',
+    'agent.delegation.returned': '专业 Agent 退回 Butler',
+    'agent.reroute.selected': 'Butler 重新委派',
+    'agent.delegation.started': `${nodeLabel(event.node)}开始任务`,
+    'agent.health.decision': 'Health Agent 决策',
+    'agent.resource.completed': '读取 MCP Resource',
+    'agent.finding.completed': `${nodeLabel(event.node)}提交发现`,
+    'agent.fallback.activated': '启用规则回退',
+    'agent.shadow.compared': 'Shadow 策略比较',
   }
   return labels[event.type] ?? event.type
 }
@@ -53,6 +69,49 @@ export function eventSummary(event: TraceEvent): string {
   if (event.type === 'agent.tool.completed') {
     return `${String(data.tool ?? 'tool')} · ${String(data.step_id ?? '')}`
   }
+  if (event.type === 'agent.resource.completed') {
+    return `${String(data.tool ?? data.uri ?? 'resource')} · ${outputState(data.output)}`
+  }
+  if (event.type === 'agent.goal.created') {
+    const plan = record(data.goal_plan)
+    return String(plan.goal ?? data.goal ?? '已生成目标与成功条件')
+  }
+  if (event.type === 'agent.goal.evaluated') {
+    const evaluation = record(data.evaluation)
+    const complete = evaluation.goal_completed === true
+    const remaining = Array.isArray(evaluation.unsatisfied_criteria)
+      ? evaluation.unsatisfied_criteria.length
+      : 0
+    return complete ? '成功条件已满足' : `${remaining} 项成功条件尚未满足`
+  }
+  if (event.type === 'agent.delegation.created') {
+    const delegations = Array.isArray(data.delegations) ? data.delegations : []
+    if (data.agent_id) {
+      return `${String(data.agent_id)} · ${String(data.resolved_request ?? data.reason ?? '')}`
+    }
+    return `${delegations.length} 个专业任务`
+  }
+  if (event.type === 'agent.delegation.returned') {
+    return `${event.node || 'specialist'} · ${String(data.reason ?? '请求 Butler 重新评估')}`
+  }
+  if (event.type === 'agent.reroute.selected') {
+    return `${String(data.agent_id ?? 'unknown')} · ${String(data.reason ?? '')}`
+  }
+  if (event.type === 'agent.delegation.started') {
+    return String(data.objective ?? data.reason ?? '执行专业任务')
+  }
+  if (event.type === 'agent.health.decision') {
+    return `${String(data.action ?? 'decision')} · ${String(data.tool ?? data.reason ?? '')}`
+  }
+  if (event.type === 'agent.finding.completed') {
+    const finding = record(data.finding)
+    return String(finding.finding ?? finding.status ?? '已返回结构化证据')
+  }
+  if (event.type === 'agent.fast_path.selected') return String(data.reason ?? '规则直接生成计划')
+  if (event.type === 'agent.fallback.activated') {
+    return `${String(data.component ?? 'agent')} → ${String(data.fallback ?? 'rule')}`
+  }
+  if (event.type === 'agent.shadow.compared') return '规则路径真实执行，Hybrid 路径仅比较'
   if (event.type === 'verification.completed') {
     return data.passed === true ? '后置条件通过' : '后置条件未满足'
   }
@@ -72,6 +131,19 @@ export function nodeLabel(node: string): string {
     recovery: 'Recovery',
     responder: 'Response',
     orchestrator: 'Loop',
+    butler: 'Butler',
+    butler_supervisor: 'Butler',
+    butler_goal_planner: 'Butler Planner',
+    butler_goal_evaluator: 'Butler Evaluator',
+    health_agent: 'Health Agent',
+    care_agent: 'Care Agent',
+    environment_agent: 'Environment Agent',
+    security_agent: 'Security Agent',
+    energy_agent: 'Energy Agent',
+    housekeeping_agent: 'Housekeeping Agent',
+    device_ops_agent: 'DeviceOps Agent',
+    delegation_policy: 'Delegation Policy',
+    rule_planner: 'Rule Planner',
     api: 'API',
     context: 'Context',
   }
@@ -98,4 +170,15 @@ function number(value: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return isRecord(value) ? value : {}
+}
+
+function outputState(value: unknown): string {
+  const output = record(value)
+  if (output.verified === true || output.success === true) return '已获得结果'
+  if (output.error_message || output.error) return '读取失败'
+  return '已完成'
 }

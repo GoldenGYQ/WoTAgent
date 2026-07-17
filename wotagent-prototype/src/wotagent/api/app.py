@@ -21,9 +21,11 @@ from pydantic import BaseModel, Field
 
 from ..agent_graph import (
     AgentGraphDependencies,
+    CONDITIONAL_PLAN_REVIEW_SCHEMA,
     DecisionModeTaskPlanner,
     LangChainResponseComposer,
     LangChainTaskPlanner,
+    StructuredConditionalPlanReviewer,
     build_agent_graph,
 )
 from ..agentic_config import AgenticSettings
@@ -37,7 +39,6 @@ from ..eldercare import (
     EldercareStore,
     Resident,
     SensorReading,
-    is_eldercare_request,
 )
 from ..eldercare.strategies import (
     GOAL_EVALUATION_SCHEMA,
@@ -58,7 +59,13 @@ from ..prompting import (
     profile_for,
 )
 from ..telemetry import InMemoryTraceStore
-from ..supervisor import AGENT_REGISTRY, select_supervisor_route
+from ..supervisor import (
+    AGENT_REGISTRY,
+    ROUTE_DECISION_SCHEMA,
+    RouteDecision,
+    StructuredSupervisorRouter,
+    select_rule_supervisor_route,
+)
 
 _env_path = Path(__file__).resolve().parents[3] / ".env"
 load_dotenv(_env_path, encoding="utf-8")
@@ -94,6 +101,22 @@ _goal_evaluation_runnable = _pipeline.response_model.bind(
 _health_decision_runnable = _pipeline.response_model.bind(
     tools=[HEALTH_DECISION_SCHEMA],
     tool_choice={"type": "function", "function": {"name": "decide_health_step"}},
+)
+_supervisor_route_runnable = _pipeline.response_model.bind(
+    tools=[ROUTE_DECISION_SCHEMA],
+    tool_choice={"type": "function", "function": {"name": "select_agent_route"}},
+)
+_conditional_plan_review_runnable = _pipeline.response_model.bind(
+    tools=[CONDITIONAL_PLAN_REVIEW_SCHEMA],
+    tool_choice={
+        "type": "function",
+        "function": {"name": "review_conditional_plan"},
+    },
+)
+_supervisor_router = StructuredSupervisorRouter(
+    _supervisor_route_runnable,
+    timeout_seconds=_agentic_settings.llm_timeout_seconds,
+    trace_store=_v2_trace_store,
 )
 _eldercare_runtime = EldercareRuntime(
     _eldercare_store,
@@ -150,6 +173,10 @@ def _build_v2_graph(
                 capability_provider=gateway.capabilities,
                 thinking_runnable=_pipeline.thinking_planner,
                 agent_profile=profile_for(agent_id),
+                plan_reviewer=StructuredConditionalPlanReviewer(
+                    _conditional_plan_review_runnable,
+                    trace_store=_v2_trace_store,
+                ),
             ),
             mode=_agentic_settings.decision_mode,
             trace_store=_v2_trace_store,
@@ -161,6 +188,8 @@ def _build_v2_graph(
             trace_store=_v2_trace_store,
             thinking_runnable=_pipeline.thinking_response_model,
         ),
+        max_agent_iterations=_agentic_settings.device_max_iterations,
+        max_tool_calls=_agentic_settings.max_tool_calls,
         trace_store=_v2_trace_store,
     )
     return build_agent_graph(dependencies, checkpointer=checkpointer)
@@ -352,6 +381,16 @@ async def get_v2_capabilities() -> dict[str, Any]:
             "butler_goal_loop": {
                 "enabled": _agentic_settings.decision_mode in {"hybrid", "agentic"},
                 "max_iterations": _agentic_settings.butler_max_iterations,
+                "fallback": "rule",
+            },
+            "supervisor_routing": {
+                "strategy": (
+                    "rule"
+                    if _agentic_settings.decision_mode == "rule"
+                    else "structured_llm"
+                ),
+                "max_routes": _agentic_settings.supervisor_max_routes,
+                "out_of_scope_return": True,
                 "fallback": "rule",
             },
         },
@@ -679,82 +718,79 @@ async def _run_v2_task(
                 "thinking": thinking,
             },
         )
-        supervisor_route = select_supervisor_route(
-            message,
-            history,
-            _eldercare_store.list_residents(),
-        )
-        await _v2_trace_store.record(
-            task_id=task_id,
-            type="agent.delegation.created",
-            node="butler_supervisor",
-            data={
-                "agent_id": supervisor_route.agent_id,
-                "runtime": supervisor_route.runtime,
-                "reason": supervisor_route.reason,
-            },
-        )
-        if supervisor_route.runtime == "eldercare":
-            eldercare_result = await _eldercare_chat_agent.run(
+        attempted_agents: list[str] = []
+        previous_outcome: dict[str, Any] | None = None
+        for route_iteration in range(1, _agentic_settings.supervisor_max_routes + 1):
+            if _agentic_settings.decision_mode == "rule":
+                supervisor_route = select_rule_supervisor_route(
+                    message,
+                    history,
+                    _eldercare_store.list_residents(),
+                    excluded_agents=set(attempted_agents),
+                )
+            else:
+                supervisor_route = await _supervisor_router.route(
+                    task_id=task_id,
+                    message=message,
+                    history=history,
+                    residents=_eldercare_store.list_residents(),
+                    runtime_context=runtime_context,
+                    attempted_agents=attempted_agents,
+                    previous_outcome=previous_outcome,
+                )
+            await _record_supervisor_route(task_id, supervisor_route, route_iteration)
+            if supervisor_route.action == "clarify":
+                await _finish_v2_trace(_clarification_response(
+                    task_id, conversation_id, thinking, supervisor_route,
+                ))
+                return
+
+            response, outcome = await _execute_supervisor_route(
                 task_id=task_id,
-                message=message,
-                history=history,
+                request_id=request_id,
+                conversation_id=conversation_id,
+                user_id=user_id,
                 role=role,
+                original_message=message,
                 thinking=thinking,
+                history=history,
+                runtime_context=runtime_context,
+                route=supervisor_route,
             )
-            if eldercare_result.get("plan") is not None:
+            if response.status == "waiting_confirmation":
                 await _v2_trace_store.record(
                     task_id=task_id,
-                    type="agent.plan.completed",
-                    node="eldercare_planner",
-                    data={"plan": eldercare_result["plan"]},
+                    type="task.waiting_confirmation",
+                    node="confirmation",
+                    data={"confirmation": response.confirmation or {}},
                 )
-            response = TaskCreateV2Response(
-                task_id=task_id,
-                turn_id=(
-                    _v2_conversation_store.turn_for_task(task_id) or {}
-                ).get("turn_id"),
-                conversation_id=conversation_id,
-                session_id=conversation_id,
-                status=str(eldercare_result["status"]),
-                response=str(eldercare_result["response"]),
-                thinking=thinking,
-            )
-            await _finish_v2_trace(response)
-            return
-        graph = _selected_domain_graph(supervisor_route.agent_id)
-        _task_graphs[task_id] = graph
-        result = await graph.ainvoke({
-            "request_id": request_id,
-            "task_id": task_id,
-            "session_id": conversation_id,
-            "user_id": user_id,
-            "role": role,
-            "message": message,
-            "thinking": thinking,
-            "conversation_history": history,
-            "context": {
-                "runtime": runtime_context,
-                "delegated_agent": supervisor_route.agent_id,
-            },
-        }, config={"configurable": {"thread_id": task_id}})
-        response = _task_v2_response(result, conversation_id)
-        if response.status == "waiting_confirmation":
+                await _v2_trace_store.set_status(task_id, "waiting_confirmation")
+                _v2_conversation_store.finish_turn(
+                    task_id,
+                    response=response.response,
+                    status="waiting_confirmation",
+                    result=response.model_dump(mode="json"),
+                )
+                return
+            if (
+                not _should_reroute(outcome)
+                or route_iteration >= _agentic_settings.supervisor_max_routes
+            ):
+                await _finish_v2_trace(response)
+                return
+            attempted_agents.append(str(supervisor_route.agent_id))
+            previous_outcome = outcome
             await _v2_trace_store.record(
                 task_id=task_id,
-                type="task.waiting_confirmation",
-                node="confirmation",
-                data={"confirmation": response.confirmation or {}},
+                type="agent.delegation.returned",
+                node=str(supervisor_route.agent_id),
+                iteration=route_iteration,
+                data={
+                    "status": response.status,
+                    "reason": "specialist returned structured clarify outcome",
+                    "outcome": outcome,
+                },
             )
-            await _v2_trace_store.set_status(task_id, "waiting_confirmation")
-            _v2_conversation_store.finish_turn(
-                task_id,
-                response=response.response,
-                status="waiting_confirmation",
-                result=response.model_dump(mode="json"),
-            )
-        else:
-            await _finish_v2_trace(response)
     except Exception as exc:
         await _v2_trace_store.record(
             task_id=task_id,
@@ -769,6 +805,140 @@ async def _run_v2_task(
             status="failed",
             result={"status": "failed", "error": str(exc)},
         )
+
+
+async def _record_supervisor_route(
+    task_id: str,
+    route: RouteDecision,
+    iteration: int,
+) -> None:
+    await _v2_trace_store.record(
+        task_id=task_id,
+        type=(
+            "agent.reroute.selected"
+            if iteration > 1
+            else "agent.delegation.created"
+        ),
+        node="butler_supervisor",
+        iteration=iteration,
+        data={
+            "agent_id": route.agent_id,
+            "runtime": route.runtime if route.agent_id else None,
+            "resolved_request": route.resolved_request,
+            "resident_id": route.resident_id,
+            "confidence": route.confidence,
+            "reason": route.reason,
+            "action": route.action,
+            "execution_mode": route.execution_mode,
+        },
+    )
+
+
+async def _execute_supervisor_route(
+    *,
+    task_id: str,
+    request_id: str,
+    conversation_id: str,
+    user_id: str,
+    role: str,
+    original_message: str,
+    thinking: bool,
+    history: list[dict[str, Any]],
+    runtime_context: dict[str, Any],
+    route: RouteDecision,
+) -> tuple[TaskCreateV2Response, dict[str, Any]]:
+    delegated_message = route.resolved_request or original_message
+    if route.runtime == "eldercare":
+        eldercare_result = await _eldercare_chat_agent.run(
+            task_id=task_id,
+            message=delegated_message,
+            history=history,
+            role=role,
+            thinking=thinking,
+            routed_agent=route.agent_id,
+            resident_id=route.resident_id,
+        )
+        if eldercare_result.get("plan") is not None:
+            await _v2_trace_store.record(
+                task_id=task_id,
+                type="agent.plan.completed",
+                node="eldercare_planner",
+                data={"plan": eldercare_result["plan"]},
+            )
+        response = TaskCreateV2Response(
+            task_id=task_id,
+            turn_id=(
+                _v2_conversation_store.turn_for_task(task_id) or {}
+            ).get("turn_id"),
+            conversation_id=conversation_id,
+            session_id=conversation_id,
+            status=str(eldercare_result["status"]),
+            response=str(eldercare_result["response"]),
+            plan=eldercare_result.get("plan"),
+            thinking=thinking,
+        )
+        return response, {
+            "agent_id": route.agent_id,
+            "status": response.status,
+            "plan": eldercare_result.get("plan"),
+            "response": response.response,
+        }
+
+    graph = _selected_domain_graph(str(route.agent_id))
+    _task_graphs[task_id] = graph
+    result = await graph.ainvoke({
+        "request_id": request_id,
+        "task_id": task_id,
+        "session_id": conversation_id,
+        "user_id": user_id,
+        "role": role,
+        "message": delegated_message,
+        "thinking": thinking,
+        "conversation_history": history,
+        "context": {
+            "runtime": runtime_context,
+            "delegated_agent": route.agent_id,
+            "original_message": original_message,
+            "supervisor_reason": route.reason,
+            "execution_mode": route.execution_mode,
+        },
+    }, config={"configurable": {"thread_id": task_id}})
+    response = _task_v2_response(result, conversation_id)
+    return response, {
+        "agent_id": route.agent_id,
+        "status": response.status,
+        "plan": _model_dump(result.get("plan")) if result.get("plan") is not None else None,
+        "phase": result.get("phase"),
+        "error": result.get("error", ""),
+        "response": response.response,
+    }
+
+
+def _should_reroute(outcome: dict[str, Any]) -> bool:
+    plan = outcome.get("plan")
+    return (
+        isinstance(plan, dict)
+        and plan.get("intent") == "clarify"
+    ) or outcome.get("phase") == "planning_failed"
+
+
+def _clarification_response(
+    task_id: str,
+    conversation_id: str,
+    thinking: bool,
+    route: RouteDecision,
+) -> TaskCreateV2Response:
+    return TaskCreateV2Response(
+        task_id=task_id,
+        turn_id=(
+            _v2_conversation_store.turn_for_task(task_id) or {}
+        ).get("turn_id"),
+        conversation_id=conversation_id,
+        session_id=conversation_id,
+        status="responded",
+        response=route.clarification,
+        thinking=thinking,
+    )
 
 
 def _selected_domain_graph(agent_id: str):
@@ -879,7 +1049,9 @@ def _task_v2_response(result: dict[str, Any], session_id: str) -> TaskCreateV2Re
     interrupts = result.get("__interrupt__", [])
     confirmation = interrupts[0].value if interrupts else None
     decisions = result.get("policy_decisions", [])
-    if trace is not None:
+    if result.get("error"):
+        status = "failed"
+    elif trace is not None:
         status = trace.status.value
     elif confirmation:
         status = "waiting_confirmation"

@@ -1,5 +1,13 @@
+import asyncio
+
+from langchain_core.messages import AIMessage
+
 from wotagent.eldercare import Resident
-from wotagent.supervisor import AGENT_REGISTRY, select_supervisor_route
+from wotagent.supervisor import (
+    AGENT_REGISTRY,
+    StructuredSupervisorRouter,
+    select_supervisor_route,
+)
 
 
 RESIDENTS = [
@@ -41,3 +49,73 @@ def test_registry_exposes_all_butler_domains() -> None:
     }
     assert AGENT_REGISTRY["security_agent"].mcp_scopes == ("wot.security",)
     assert AGENT_REGISTRY["energy_agent"].runtime == "langgraph_subgraph"
+
+
+def test_structured_supervisor_resolves_elliptical_health_follow_up() -> None:
+    class FakeRouteRunnable:
+        async def ainvoke(self, messages):
+            assert any("张爷爷" in str(item.content) for item in messages)
+            return AIMessage(content="", tool_calls=[{
+                "name": "select_agent_route",
+                "args": {
+                    "action": "delegate",
+                    "agent_id": "health_agent",
+                    "resolved_request": "查询张爷爷最近的健康趋势",
+                    "resident_id": "elderly-001",
+                    "confidence": 0.97,
+                    "reason": "继承上一轮张爷爷健康状态查询",
+                },
+                "id": "route-1",
+                "type": "tool_call",
+            }])
+
+    decision = asyncio.run(StructuredSupervisorRouter(
+        FakeRouteRunnable(),
+    ).route(
+        task_id="",
+        message="那最近的趋势呢",
+        history=[
+            {"role": "user", "content": "查看张爷爷今天的健康状态"},
+            {"role": "assistant", "content": "张爷爷当前心率82。"},
+        ],
+        residents=RESIDENTS,
+        runtime_context={"last_task": {"user_message": "查看张爷爷今天的健康状态"}},
+    ))
+
+    assert decision.agent_id == "health_agent"
+    assert decision.resident_id == "elderly-001"
+    assert decision.resolved_request == "查询张爷爷最近的健康趋势"
+
+
+def test_structured_supervisor_marks_state_dependent_automation_as_loop() -> None:
+    class FakeRouteRunnable:
+        async def ainvoke(self, messages):
+            system = str(messages[0].content)
+            assert "observe_act_loop" in system
+            assert "Never use device_ops_agent for ordinary" in system
+            return AIMessage(content="", tool_calls=[{
+                "name": "select_agent_route",
+                "args": {
+                    "action": "delegate",
+                    "agent_id": "environment_agent",
+                    "resolved_request": "先统计开灯数量，再按奇偶控制空调或加湿器",
+                    "execution_mode": "observe_act_loop",
+                    "confidence": 0.98,
+                    "reason": "后续动作取决于设备查询结果",
+                },
+                "id": "route-loop",
+                "type": "tool_call",
+            }])
+
+    decision = asyncio.run(StructuredSupervisorRouter(
+        FakeRouteRunnable(),
+    ).route(
+        task_id="",
+        message="检查灯的状态，如果开着的灯是奇数就打开空调，否则打开加湿器",
+        history=[],
+        residents=RESIDENTS,
+        runtime_context={},
+    ))
+
+    assert decision.agent_id == "environment_agent"
+    assert decision.execution_mode == "observe_act_loop"

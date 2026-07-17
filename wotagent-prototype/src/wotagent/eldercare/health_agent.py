@@ -59,8 +59,13 @@ class HealthAgentLoop:
                 "resident_id": resident_id,
                 "expected_evidence": delegation.expected_evidence,
                 "available_tools": self.gateway.available_tools(),
-                "evidence": [item.model_dump(mode="json") for item in evidence],
-                "tool_calls": [item.model_dump(mode="json") for item in tool_calls],
+                "evidence": [_compact_evidence(item) for item in evidence],
+                "tool_calls": [{
+                    "tool_name": item.tool_name,
+                    "success": item.success,
+                    "verified": item.verified,
+                    "error_code": item.error_code,
+                } for item in tool_calls],
                 "iteration": iteration,
                 "max_iterations": self.max_iterations,
                 "remaining_tool_calls": self.max_tool_calls - len(tool_calls),
@@ -199,6 +204,33 @@ def _evidence_timestamp(result: ToolExecutionResult) -> str | None:
         ]
         return max(timestamps) if timestamps else None
     return None
+
+
+def _compact_evidence(evidence: Evidence) -> dict[str, Any]:
+    value = evidence.value
+    if not isinstance(value, dict):
+        compact_value = value
+    elif evidence.source == "read_health_summary":
+        compact_value = {
+            key: value.get(key)
+            for key in ("resident", "latest", "heart_rate_avg", "open_risks", "generated_at")
+            if key in value
+        }
+    elif evidence.source == "check_data_quality":
+        compact_value = {
+            key: value.get(key)
+            for key in ("sensors", "checked_at")
+            if key in value
+        }
+    else:
+        compact_value = value
+    return {
+        "source": evidence.source,
+        "value": compact_value,
+        "timestamp": evidence.timestamp,
+        "reliability": evidence.reliability,
+        "description": evidence.description,
+    }
 
 
 async def _decide(

@@ -20,6 +20,7 @@ from ..prompting import (
 from ..telemetry import InMemoryTraceStore, extract_usage_with_cost
 from .mcp_server import build_eldercare_mcp
 from .models import DelegatedAction, DelegatedTask, Resident
+from .models import Delegation
 from .runtime import EldercareRuntime
 
 
@@ -250,9 +251,14 @@ class EldercareChatAgent:
         history: list[dict[str, Any]],
         role: str,
         thinking: bool = False,
+        routed_agent: str | None = None,
+        resident_id: str | None = None,
     ) -> dict[str, Any]:
         residents = self.runtime.store.list_residents()
-        resident = resolve_resident(message, history, residents)
+        resident = next(
+            (item for item in residents if item.resident_id == resident_id),
+            None,
+        ) if resident_id else resolve_resident(message, history, residents)
         await self.trace_store.record(
             task_id=task_id,
             type="agent.route.selected",
@@ -268,6 +274,41 @@ class EldercareChatAgent:
                 "status": "clarify",
                 "response": f"请说明要操作哪位老人。目前可选：{names}。",
                 "plan": None,
+            }
+
+        if routed_agent == "health_agent":
+            finding = await self.runtime.health_agent.run(
+                task_id=task_id,
+                resident_id=resident.resident_id,
+                delegation=Delegation(
+                    agent="health_agent",
+                    objective=message,
+                    reason="Butler delegated a user health investigation",
+                    expected_evidence=["与问题相关的健康事实", "数据时间或趋势证据"],
+                ),
+            )
+            await self.trace_store.record(
+                task_id=task_id,
+                type="agent.finding.completed",
+                node="health_agent",
+                data={"finding": finding.model_dump(mode="json")},
+            )
+            return {
+                "status": (
+                    "succeeded"
+                    if finding.status == "completed"
+                    else "partial_success"
+                    if finding.evidence
+                    else finding.status
+                ),
+                "response": _health_finding_response(resident, finding),
+                "plan": {
+                    "intent": "query",
+                    "summary": message,
+                    "routed_agent": "health_agent",
+                    "steps": [],
+                },
+                "finding": finding.model_dump(mode="json"),
             }
 
         plan = await self.planner.plan(
@@ -402,6 +443,17 @@ def _summary_response(summary: dict[str, Any]) -> str:
     risks = summary.get("open_risks", [])
     risk_text = f"当前有 {len(risks)} 个开放风险" if risks else "当前没有开放风险"
     return f"{resident['name']}当前状态：{facts}；{risk_text}。"
+
+
+def _health_finding_response(resident: Resident, finding: Any) -> str:
+    evidence_count = len(finding.evidence)
+    if finding.status == "completed":
+        return f"{resident.name}：{finding.finding}"
+    if evidence_count:
+        unresolved = "；".join(finding.unresolved_questions)
+        suffix = f" 尚待确认：{unresolved}。" if unresolved else ""
+        return f"{resident.name}：{finding.finding}{suffix}"
+    return f"暂时无法完成对{resident.name}的健康调查：{finding.finding}"
 
 
 def _action_response(result: dict[str, Any]) -> str:

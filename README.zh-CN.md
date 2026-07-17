@@ -7,6 +7,8 @@ WoTAgent 2.0 是一个面向实验验证的 LLM + WoT 智能家居控制系统�
 ```text
 Vue 2.0 Console
   -> FastAPI /api/v2
+  -> Structured LLM Butler Supervisor
+  -> Professional Agent / bounded re-route
   -> LangGraph Agent Loop
   -> Planner -> Policy -> Orchestrator -> Verifier/Recovery -> Response Agent
   -> MCPDeviceGateway -> TD-generated MCP tools
@@ -16,6 +18,9 @@ Vue 2.0 Console
 关键原则：
 
 - LLM 是语义决策核心，但不直接驱动硬件。
+- 普通聊天和 Monitor 事件都由 Butler 负责目标解析与专业 Agent 委派。
+- 专业 Agent 返回结构化 `clarify` 时可退回 Butler，最多有限次数重新路由。
+- Health Agent 对普通健康查询也使用受限 Observe-Reason-Act 调查循环。
 - Planner 输出受 Pydantic Schema 约束的计划。
 - Executor 是确定性编排器，只执行计划中且 TD 已声明的动作。
 - PolicyEngine 在模型之外执行 RBAC 和高风险确认。
