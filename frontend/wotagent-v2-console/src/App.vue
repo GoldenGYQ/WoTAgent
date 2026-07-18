@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue'
 import {
-  Activity,
   Boxes,
   BrainCircuit,
+  LoaderCircle,
   LogOut,
   MessageSquare,
+  Mic,
   PanelLeft,
   RefreshCw,
   SendHorizontal,
+  ShieldCheck,
+  Square,
   SquareTerminal,
   X,
 } from 'lucide-vue-next'
@@ -17,6 +20,7 @@ import DomainOperationsCenter from './components/DomainOperationsCenter.vue'
 import LoginScreen from './components/LoginScreen.vue'
 import TaskWorkspace from './components/TaskWorkspace.vue'
 import { useAgentRuntime } from './composables/useAgentRuntime'
+import { useVoiceInput } from './composables/useVoiceInput'
 import type { LoginAccount } from './types/agent'
 
 const LOGIN_KEY = 'wotagent-v2-console.account'
@@ -37,9 +41,10 @@ const {
   activeConversation,
   activeRunId,
   activeRun,
-  role,
   thinking,
   thinkingSupported,
+  speechSupported,
+  speechMaxSeconds,
   backendState,
   submit,
   confirm,
@@ -60,6 +65,14 @@ const sidebarCollapsed = ref(false)
 const appView = ref<'agent' | 'domains'>('agent')
 const currentAccount = ref<LoginAccount | null>(savedAccount())
 const composer = ref<HTMLTextAreaElement | null>(null)
+const voiceInput = useVoiceInput(
+  () => speechSupported.value,
+  () => speechMaxSeconds.value,
+  (transcript) => {
+    draft.value = [draft.value.trim(), transcript].filter(Boolean).join(' ')
+    void nextTick(() => composer.value?.focus())
+  },
+)
 const conversationRuns = computed(() => runs.filter(
   (run) => run.conversationId === activeConversationId.value,
 ))
@@ -197,8 +210,10 @@ onMounted(async () => {
           @toggle-sidebar="toggleSidebar"
         />
         <div class="composer-region">
-          <div v-if="submitError" class="composer-error">{{ submitError }}</div>
-          <div class="composer-shell">
+          <div v-if="submitError || voiceInput.error.value" class="composer-error">
+            {{ submitError || voiceInput.error.value }}
+          </div>
+          <div class="composer-shell" :data-recording="voiceInput.recording.value">
             <textarea
               ref="composer"
               v-model="draft"
@@ -209,27 +224,48 @@ onMounted(async () => {
               @keydown="keyboardSubmit"
             />
             <div class="composer-controls">
-              <div class="role-control" aria-label="执行角色">
-                <button v-for="item in ['viewer', 'operator', 'admin'] as const" :key="item" type="button" :class="{ active: role === item }" disabled title="角色由登录账号决定">
-                  {{ item }}
-                </button>
-              </div>
+              <span
+                class="principal-context"
+                :title="`权限主体 ${currentAccount.accountId}；角色 ${currentAccount.role}；关联资源 ${currentAccount.subjectName}`"
+              >
+                <ShieldCheck :size="14" />
+                <strong>{{ currentAccount.accountId }}</strong>
+                <code>{{ currentAccount.role }}</code>
+                <span>{{ currentAccount.subjectName }}</span>
+              </span>
               <button
+                v-if="thinkingSupported"
                 class="thinking-toggle"
                 type="button"
                 role="switch"
                 :aria-checked="thinking"
                 :class="{ active: thinking }"
-                :disabled="!thinkingSupported"
-                :title="thinkingSupported ? '切换深度思考' : '后端未启用深度思考能力'"
+                title="切换深度思考"
                 @click="thinking = !thinking"
               >
                 <BrainCircuit :size="15" />
                 <span>深度思考</span>
                 <i aria-hidden="true" />
               </button>
+              <span v-if="voiceInput.recording.value" class="recording-status">
+                <i />{{ voiceInput.elapsedSeconds.value }}s
+              </span>
+              <button
+                v-if="voiceInput.available.value"
+                class="voice-button"
+                :class="{ recording: voiceInput.recording.value }"
+                type="button"
+                :title="voiceInput.recording.value ? '停止并转写' : '语音输入'"
+                :aria-label="voiceInput.recording.value ? '停止录音并转写' : '开始语音输入'"
+                :disabled="voiceInput.transcribing.value || submitting"
+                @click="voiceInput.toggleRecording"
+              >
+                <LoaderCircle v-if="voiceInput.transcribing.value" :size="17" class="spin" />
+                <Square v-else-if="voiceInput.recording.value" :size="14" />
+                <Mic v-else :size="17" />
+              </button>
               <button class="send-button" type="button" title="发送任务" :disabled="!draft.trim() || submitting || backendState === 'offline'" @click="send">
-                <Activity v-if="submitting" :size="17" class="spin" />
+                <LoaderCircle v-if="submitting" :size="17" class="spin" />
                 <SendHorizontal v-else :size="17" />
               </button>
             </div>

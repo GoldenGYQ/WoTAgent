@@ -43,6 +43,13 @@ def create_system_router(
                 "private_reasoning_exposed": False,
             },
             "streaming": bool_env("ENABLE_STREAMING", True),
+            "speech_transcription": {
+                "supported": bool_env("SPEECH_TRANSCRIPTION_ENABLED", True),
+                "model": os.getenv("SPEECH_MODEL_SIZE", "base"),
+                "device": os.getenv("SPEECH_DEVICE", "cpu"),
+                "max_seconds": int(os.getenv("SPEECH_MAX_SECONDS", "30")),
+                "mixed_language": True,
+            },
             "orchestration": {
                 "root": "run",
                 "hierarchy": ["run", "task", "agent_run", "loop", "tool_call"],

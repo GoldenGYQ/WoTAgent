@@ -20,10 +20,12 @@ from ..runtime import (
     create_lifespan,
     create_runtime_container,
 )
+from ..speech import SpeechTranscriber
 from .routers.conversations import create_conversation_router
 from .routers.domains import create_domain_router
 from .routers.eldercare import create_eldercare_router
 from .routers.runs import create_run_router, create_run_websocket_handler
+from .routers.speech import create_speech_router
 from .routers.system import create_system_router
 
 load_dotenv(project_root() / ".env", encoding="utf-8")
@@ -60,6 +62,7 @@ _domain_event_consumer = DomainEventConsumer(
     _runtime.eldercare_store,
     _run_service,
 )
+_speech_transcriber = SpeechTranscriber()
 _domain_registry = DomainOperationsRegistry([
     EldercareOperations(
         get_store=lambda: _runtime.eldercare_store,
@@ -130,6 +133,9 @@ app.include_router(create_conversation_router(
 app.include_router(create_run_router(
     lambda: _run_service,
     lambda: _run_store,
+))
+app.include_router(create_speech_router(
+    lambda: _speech_transcriber
 ))
 app.websocket("/ws/v2")(create_run_websocket_handler(
     lambda: _run_store,

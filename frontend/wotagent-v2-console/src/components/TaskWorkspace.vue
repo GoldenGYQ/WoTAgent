@@ -230,4 +230,18 @@ function runForTurn(turn: ConversationTurn): RuntimeRun | undefined {
   justify-self: end;
   color: var(--text-faint);
 }
+
+@media (max-width: 820px) {
+  .workspace-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .workspace-title {
+    justify-content: flex-start;
+  }
+
+  .workspace-title .conversation-title {
+    text-align: left;
+  }
+}
 </style>

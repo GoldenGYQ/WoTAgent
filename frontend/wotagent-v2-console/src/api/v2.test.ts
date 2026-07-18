@@ -63,6 +63,31 @@ describe('agentV2Api', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v2/conversations/conv-1/turns')
   })
 
+  it('uploads recorded audio without forcing a JSON content type', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        text: '打开 living room 的灯',
+        language: 'zh',
+        language_probability: 0.96,
+        duration_seconds: 1.8,
+        processing_ms: 42,
+        model: 'base',
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await agentV2Api.transcribeSpeech(
+      new Blob(['audio'], { type: 'audio/webm' }),
+    )
+
+    expect(result.text).toBe('打开 living room 的灯')
+    const init = fetchMock.mock.calls[0][1] as RequestInit
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v2/speech/transcriptions')
+    expect(init.body).toBeInstanceOf(FormData)
+    expect(init.headers).not.toHaveProperty('Content-Type')
+  })
+
   it('scopes conversation listing to the login account', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

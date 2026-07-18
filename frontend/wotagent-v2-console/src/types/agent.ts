@@ -234,6 +234,22 @@ export interface ApiCapabilities {
     private_reasoning_exposed: boolean
   }
   streaming: boolean
+  speech_transcription?: {
+    supported: boolean
+    model: string
+    device: string
+    max_seconds: number
+    mixed_language: boolean
+  }
+}
+
+export interface SpeechTranscription {
+  text: string
+  language: string | null
+  language_probability: number | null
+  duration_seconds: number
+  processing_ms: number
+  model: string
 }
 
 export type SensorType = 'heart_rate' | 'spo2' | 'fall_detected' | 'bed_occupancy' | 'sleep_quality' | 'room_temperature' | 'room_humidity'

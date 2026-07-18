@@ -1476,3 +1476,73 @@ Replay cursor: 0
 Frontend tests: 16 passed
 Frontend typecheck/build: passed
 ```
+
+## 18. 平台级语音输入与授权上下文显示
+
+### 18.1 界面问题
+
+旧输入区显示 `viewer / operator / admin` 三个禁用按钮。它们不能切换权限，却仍以
+可操作控件的外观出现；移动端还同时显示两个侧栏按钮。深度思考在后端不支持时也
+会作为禁用控件占用空间。
+
+本轮调整为：
+
+- 删除伪角色切换按钮；
+- 使用只读授权上下文展示 `Principal + Role + 关联资源`；
+- 示例：`JH-1 · operator · 张爷爷`；
+- 移动端只保留一个会话侧栏入口；
+- 深度思考仅在后端声明支持时显示；
+- 保留发送、录音和必要状态控件。
+
+权限上下文不是单独的 RBAC。当前链路是：
+
+```text
+Principal
+→ Role 提供基础 capability
+→ Principal 与目标的 assignment 约束资源关系
+→ AuthorizationService 签发 effective_scope
+→ MCP 执行时再次检查 scope
+```
+
+### 18.2 语音链路
+
+语音识别被实现为平台能力，而不是养老 Domain 或 Agent：
+
+```text
+Browser MediaRecorder
+→ HTTPS multipart upload
+→ POST /api/v2/speech/transcriptions
+→ faster-whisper base multilingual
+→ CPU int8
+→ transcript
+→ 用户输入框
+→ 用户确认后提交现有 Run API
+```
+
+录音最长 30 秒，前端协商 `webm/opus`、`mp4` 或 `ogg/opus`。后端限制上传类型和
+8 MB 大小，使用临时文件解码并在结束后删除。模型首次请求懒加载，避免增加普通
+Agent 请求的启动时间。转写结果不会自动发送，防止误识别直接触发设备动作。
+
+### 18.3 测试与踩坑
+
+项目 `.venv` 没有内置 `pip`，依赖必须通过 `uv` 安装。服务运行时直接执行
+`uv sync` 会因为 `wotagent.exe` 被占用而失败；开发期间可先用 `uv pip install`
+安装新增库，最终应停止托管服务后再执行一次 `uv sync`。
+
+Windows 自带英文 SAPI 语音不能用于验证真实中英混合准确率：中文片段会被合成
+为无效音素。因此合成音频冒烟只能证明模型下载、加载和音频解码成功，不能代替
+手机真人语音验收。
+
+首次模型下载曾使并发的公网请求等待约 65 秒并被 Quick Tunnel 断开。修复方式是
+模型加载时先使用 `local_files_only=True` 命中本机 Hugging Face 缓存，仅在缓存
+不存在时访问模型仓库。修复后，服务重启后的第一次公网转写约 5.9 秒，其中模型
+初始化与推理约 3.5 秒；后续请求更快。
+
+```text
+Speech API tests: 3 passed
+Frontend tests: 18 passed
+Full backend tests: 184 passed, 2 skipped
+Frontend typecheck/build: passed
+faster-whisper base CPU int8: model load and WAV decode passed
+Quick Tunnel multipart transcription: passed
+```

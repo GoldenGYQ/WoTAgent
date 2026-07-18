@@ -18,6 +18,8 @@ const role = ref<AgentRole>('operator')
 const userId = ref('local-user')
 const thinking = ref(localStorage.getItem('wotagent-v2-console.thinking') === 'true')
 const thinkingSupported = ref(false)
+const speechSupported = ref(false)
+const speechMaxSeconds = ref(30)
 const backendState = ref<'checking' | 'online' | 'offline'>('checking')
 const subscriptions = new Map<string, TraceSubscription>()
 const pollers = new Map<string, ReturnType<typeof setInterval>>()
@@ -394,6 +396,8 @@ async function checkBackend(): Promise<void> {
     await agentV2Api.health()
     const capabilities = await agentV2Api.capabilities()
     thinkingSupported.value = capabilities.thinking.supported
+    speechSupported.value = capabilities.speech_transcription?.supported ?? false
+    speechMaxSeconds.value = capabilities.speech_transcription?.max_seconds ?? 30
     if (!thinkingSupported.value) thinking.value = false
     backendState.value = 'online'
   } catch {
@@ -444,6 +448,8 @@ export function useAgentRuntime() {
     userId,
     thinking,
     thinkingSupported,
+    speechSupported,
+    speechMaxSeconds,
     backendState,
     submit,
     confirm,

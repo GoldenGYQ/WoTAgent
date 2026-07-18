@@ -20,6 +20,7 @@ import type {
   RiskEvent,
   RunRecord,
   SensorType,
+  SpeechTranscription,
   TraceEvent,
 } from '../types/agent'
 
@@ -28,9 +29,13 @@ export interface TraceSubscription {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const isFormData = init?.body instanceof FormData
   const response = await fetch(path, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    headers: {
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+      ...init?.headers,
+    },
   })
   if (!response.ok) {
     const body = await response.json().catch(() => ({ detail: response.statusText }))
@@ -47,6 +52,15 @@ function websocketUrl(path: string): string {
 export const agentV2Api = {
   health: (): Promise<{ status: string; pipeline: string }> => request('/api/health'),
   capabilities: (): Promise<ApiCapabilities> => request('/api/v2/capabilities'),
+  transcribeSpeech(audio: Blob): Promise<SpeechTranscription> {
+    const form = new FormData()
+    const suffix = audio.type.includes('mp4') ? 'm4a' : audio.type.includes('ogg') ? 'ogg' : 'webm'
+    form.append('audio', audio, `voice-input.${suffix}`)
+    return request('/api/v2/speech/transcriptions', {
+      method: 'POST',
+      body: form,
+    })
+  },
 
   listDomains: (): Promise<{ domains: DomainManifest[] }> => request('/api/v2/domains'),
   listDomainSubjects(domainId: string, principalId: string): Promise<{ domain_id: string; subjects: DomainSubject[] }> {
