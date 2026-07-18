@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-18
 Current branch: `codex/run-task-dag`
-Current HEAD: `f5cc0aa feat: persist run state across restarts`
+Current implementation baseline: `54e2528 feat: bind task identity scope and failures`
 
 ## 中文快速交接摘要
 
@@ -32,21 +32,29 @@ Conversation → Turn → Run → 多个 Task → AgentRun → Loop → ToolCall
 4. LangGraph 原生 `interrupt()` 与 `Command(resume=...)`；
 5. SQLite 持久化 Run、Task、AgentRun、事件和确认负载；
 6. 服务重启后恢复同一个 Task checkpoint；
-7. 后端 `160 passed, 1 skipped`，前端 `15 passed`，生产构建通过。
+7. 后端 `167 passed, 2 skipped`，前端 `15 passed`，生产构建通过；
+8. 模型 Finding Payload 与运行时 Finding Envelope 已拆分；
+9. Task 已增加 Principal、Target、Capability、Effective Scope 和 Failure；
+10. 张爷爷等居民名称在 Task 执行前解析为 canonical resident ID；
+11. Health MCP 已执行居民 Scope 二次检查；
+12. 相同不可恢复失败已由 Coordinator 阻止重复执行。
 
 但真实模型测试暴露了尚未解决的问题：
 
-1. Health Agent 输出展示名 `Health Agent`，运行时要求内部 ID
-   `health_agent`。已讨论采用 `Literal` 硬约束和提示词双重约束，但尚未改代码。
-2. “张爷爷”没有在创建 Health Task 前解析为 `elderly-001`，模型把中文姓名直接
-   放进 MCP Resource URI，导致 `resident not found`。
-3. 前端展示 `JH-1 → 张爷爷`、`JH-2 → 李奶奶`，但后端尚未实施用户到居民的
-   资源级授权；当前主要是粗粒度角色 RBAC。
-4. 相同不可恢复错误被 Supervisor 重复调度四次，缺少失败指纹、错误分类和重复
-   Task 检测。
-5. 自动化测试主要使用 Fake/Scripted LLM，未覆盖真实中文请求、真实模型、居民
+1. 历史真实运行曾出现 `Health Agent`/`health_agent` 身份漂移；现在模型不再
+   生成可信身份，Coordinator 注入 Agent、Task 和 AgentRun 身份，但尚未用真实
+   DeepSeek 重新验证。
+2. 历史真实运行曾把“张爷爷”直接作为 MCP `resident_id`；现在已增加平台
+   EntityResolver 接口和养老 ResidentEntityResolver，但尚未真实模型复验。
+3. 后端已增加最小的 JH-1/JH-2 居民关系授权和 MCP Scope 校验，但登录身份仍由
+   客户端提交，因此还不是生产级认证授权。
+4. 失败分类、fingerprint 和重复终止已接入；更复杂的可重试、补偿和跨 Agent
+   替代策略仍需继续完善。
+5. 自动化测试仍主要使用 Fake/Scripted LLM，尚未执行新增的 opt-in 真实模型
+   冒烟测试。
+6. 自动化测试未证明真实中文请求、真实模型、居民
    实体解析和 MCP 的完整链路。
-6. 新 RunEvent 尚未完整投影模型 Token、TTFT、专业 Agent Loop 和 ToolCall，
+7. 新 RunEvent 尚未完整投影模型 Token、TTFT、专业 Agent Loop 和 ToolCall，
    因此前端部分指标会显示为零。
 
 安全状态：
@@ -60,12 +68,9 @@ Conversation → Turn → Run → 多个 Task → AgentRun → Loop → ToolCall
 
 ```text
 P0 真实链路正确性
-→ Agent ID 双重约束
-→ typed principal/target/capability/resource_scope
-→ 姓名到 resident_id 的可信解析
-→ MCP 居民范围二次校验
-→ 重复失败终止
-→ 真实模型小预算冒烟测试
+→ 已完成本地契约与范围修复
+→ 待密钥安全确认后执行真实模型小预算冒烟测试
+→ 根据真实结果继续修正
 
 P1 居民级授权
 → Principal / Resident / CareAssignment / Permission
@@ -461,12 +466,15 @@ Root cause:
 - `create_agent(name="health_agent")` does not populate that output field;
 - runtime performs strict string equality after generation.
 
-Agreed remediation, not yet implemented:
+Remediation implemented locally in `54e2528`:
 
-1. use an Agent-specific `Literal["health_agent"]`/JSON Schema enum;
-2. explicitly state display name versus internal ID in the prompt.
+1. specialist models now return an identity-free `AgentFindingPayload`;
+2. the Coordinator injects Agent, Task and AgentRun identity into the persisted
+   `AgentFinding`;
+3. the prompt explicitly forbids model-generated runtime identity.
 
-The same pattern should be applied to every specialist.
+The deterministic tests pass, but the real DeepSeek scenario has not yet been
+rerun.
 
 ### 11.2 Resident Entity Resolution Failure
 
@@ -499,23 +507,25 @@ elderly://elderly-001/health/summary
 This produced `resident not found` errors. In one iteration, repeated tool
 failure also resulted in `structured_response=None`.
 
-This is not merely a prompt problem. The current `AgentTask` lacks typed domain
-targets and the Health executor does not pass a resolved resident ID.
+This was not merely a prompt problem. `AgentTask` now carries typed Principal,
+Target, requested capability and effective scope. A domain Resolver resolves
+the resident before execution, and the Health executor receives the canonical
+ID.
 
 ### 11.3 Ineffective Retry
 
 The Supervisor saw the infrastructure/contract failure and created essentially
 the same Health Task four times.
 
-Missing controls:
+The following controls are now implemented:
 
 - repeated failure fingerprint detection;
 - duplicate Task detection across Supervisor iterations;
 - recoverable versus non-recoverable error classification;
 - distinction between business evidence shortage and platform contract failure.
 
-The maximum iteration bound prevented an infinite loop, but still wasted model
-calls and returned an unhelpful final message.
+The Coordinator now refuses to execute the same non-recoverable subject twice.
+More advanced compensation and alternative delegation remain future work.
 
 ## 12. Current Authorization Problem
 
@@ -527,21 +537,23 @@ operator → device.read + device.control
 admin    → wildcard
 ```
 
-It does not enforce the relationship:
+The new P0 authorization service now enforces the demo relationship:
 
 ```text
 JH-1 may access elderly-001
 JH-2 may access elderly-002
 ```
 
-The frontend displays that association, but the backend does not treat it as an
-authorization rule.
+This is still not production authentication: the client can currently submit
+its own `user_id` and role. The relationship check is therefore a functional
+experiment boundary, not a secure identity boundary.
 
 `Resident.caregiver` is a display string, not a principal ID. Existing
 `resident_scope` fields constrain some domain delegations, but do not prove that
 the current user is authorized for that resident.
 
-Consequently, the system currently lacks resident-level health-data privacy.
+The Health MCP client now independently checks the effective resident scope and
+returns `RESOURCE_SCOPE_DENIED` for cross-resident access.
 
 Recommended target model:
 
@@ -614,7 +626,7 @@ consumer behavior. However:
 Last verified automated results before this handoff:
 
 ```text
-Backend: 160 passed, 1 skipped
+Backend: 167 passed, 2 skipped
 Frontend: 15 passed
 Frontend production build: passed
 ```
@@ -755,13 +767,11 @@ without checking with the user.
 
 ### P0: Restore Correctness
 
-1. Add Agent-specific structured output schemas with `Literal` Agent IDs.
-2. Clarify internal ID and display name in every specialist prompt.
-3. Introduce typed Task target/principal/capability/resource-scope fields.
-4. Resolve resident names to canonical IDs before specialist execution.
-5. Bind or validate the authorized resident scope inside the Health MCP client.
-6. Classify errors and stop repeated non-recoverable failures.
-7. Add a real-model eldercare smoke suite with a small explicit token budget.
+1. Confirm account/API-key safety and rotate keys if needed.
+2. Run the opt-in real-model eldercare smoke suite with a small explicit token
+   budget.
+3. Inspect the resulting RunEvents, MCP calls and Finding.
+4. Fix any remaining real-model behavior without weakening Scope or Policy.
 
 ### P1: Complete Authorization
 
