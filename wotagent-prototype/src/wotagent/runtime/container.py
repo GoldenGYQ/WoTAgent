@@ -16,6 +16,7 @@ from ..agent_graph import (
 from ..agentic_config import AgenticSettings
 from ..agents import (
     AGENT_SPECS,
+    AgentFindingPayload,
     build_health_react_agent,
     build_run_supervisor_agent,
 )
@@ -53,6 +54,17 @@ DOMAIN_GRAPH_AGENTS = (
     "device_ops_agent",
 )
 
+HEALTH_FINDING_REPAIR_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "repair_health_finding",
+        "description": (
+            "Convert observed Health Agent facts into AgentFindingPayload"
+        ),
+        "parameters": AgentFindingPayload.model_json_schema(),
+    },
+}
+
 
 @dataclass
 class RuntimeContainer:
@@ -66,6 +78,7 @@ class RuntimeContainer:
     eldercare_runtime: EldercareRuntime
     eldercare_chat_agent: EldercareChatAgent
     health_react_agent: Any
+    health_finding_repair_runnable: Any
     health_gateway: ScopedHealthMCPClient
     conditional_plan_review_runnable: Any
 
@@ -118,12 +131,14 @@ def create_runtime_container(
     *,
     enable_thinking: bool,
     enable_streaming: bool,
+    temperature: float | None = None,
 ) -> RuntimeContainer:
     configure_logging()
     pipeline = create_wot_pipeline(
         enable_thinking=enable_thinking,
         reasoning_effort=os.getenv("REASONING_EFFORT", "high"),
         enable_streaming=enable_streaming,
+        temperature=0.7 if temperature is None else temperature,
     )
     gateway = MCPDeviceGateway()
     trace_store = InMemoryTraceStore()
@@ -208,6 +223,15 @@ def create_runtime_container(
     health_react_agent = build_health_react_agent(
         pipeline.response_model,
         health_gateway,
+        max_iterations=settings.health_max_iterations,
+        max_tool_calls=settings.max_tool_calls,
+    )
+    health_finding_repair_runnable = pipeline.response_model.bind(
+        tools=[HEALTH_FINDING_REPAIR_SCHEMA],
+        tool_choice={
+            "type": "function",
+            "function": {"name": "repair_health_finding"},
+        },
     )
     return RuntimeContainer(
         pipeline=pipeline,
@@ -220,6 +244,7 @@ def create_runtime_container(
         eldercare_runtime=eldercare_runtime,
         eldercare_chat_agent=eldercare_chat_agent,
         health_react_agent=health_react_agent,
+        health_finding_repair_runnable=health_finding_repair_runnable,
         health_gateway=health_gateway,
         conditional_plan_review_runnable=conditional_plan_review_runnable,
     )

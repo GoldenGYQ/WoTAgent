@@ -39,6 +39,7 @@ AgentRunStatus = Literal[
 ExecutionStrategy = Literal["sequential", "parallel_when_safe"]
 ResourceMode = Literal["read", "write"]
 FailureCategory = Literal[
+    "budget",
     "contract",
     "model_output",
     "entity_resolution",
@@ -179,6 +180,7 @@ class AgentTask(BaseModel):
     agent_id: str
     objective: str
     reason: str
+    source_request: str = ""
     status: TaskStatus = "pending"
     expected_evidence: list[str] = Field(default_factory=list)
     success_criteria: list[str] = Field(default_factory=list)

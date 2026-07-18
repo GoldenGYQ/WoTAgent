@@ -1117,3 +1117,117 @@ Butler 应根据验证后的状态判断成功，而不是仅看 HTTP 200。
 - Trace 负责把整个过程转化为可复盘、可评测的实验记录。
 
 真正可靠的物联网 Agent 不是让大模型控制一切，而是在确定性安全底座之上，给予它有限、明确、可观察、可回退的决策权。
+
+---
+
+## 13. 2026-07-18 真实 Health 链路复验
+
+### 13.1 测试前上下文审计
+
+本轮没有直接放开真实模型测试，而是先检查 Supervisor 和 Health
+`create_agent` 的实际模型边界。审计发现：
+
+1. `HEALTH_AGENT_MAX_ITERATIONS` 和 `AGENT_MAX_TOOL_CALLS` 虽然存在于
+   配置中，但此前没有接入 Health `create_agent` 的原生 Middleware。
+2. Supervisor 每轮会收到完整历史和完整 `AgentFinding`，大型 Evidence
+   与 Tool Result 会随二次决策累积。
+3. 模型没有统一的单次输出 Token 硬上限。
+4. Health 的原始用户请求没有作为不可变字段进入 Task，Supervisor 可以通过
+   `objective` 和 `success_criteria` 擅自扩大调查范围。
+
+本轮修复：
+
+- Health Agent 使用 LangChain 原生 `ModelCallLimitMiddleware` 和
+  `ToolCallLimitMiddleware`；
+- Supervisor 每次调用最多一次模型；
+- Health 最多执行配置的调查阶段，并为最终结构化 Finding 预留一次模型调用；
+- 默认单次模型输出上限为 2048 Token，可通过
+  `WOTAGENT_MAX_OUTPUT_TOKENS` 调整；
+- Supervisor 历史压缩为最近 6 条、每条最多 400 字符；
+- 最多向 Supervisor 提供 6 个压缩 Finding，每个 Finding 只保留关键
+  Evidence、工具成功/验证状态和错误；
+- `AgentTask.source_request` 由运行时写入，Specialist 不得把 Supervisor
+  提案中超出原始请求的内容当成权威目标。
+
+极端构造测试使用 20 条超长历史和 12 个大型 Finding。模型边界上的动态
+上下文被压缩为：
+
+```text
+Conversation Context: 3,191 characters
+Completed Findings: 15,301 characters
+Total Dynamic Context: 18,492 characters
+Conservative Token Estimate: 9,246
+```
+
+该数字是防爆上限测试，不是正常单轮消耗。真实空历史案例明显更小。
+
+### 13.2 本轮真实测试踩坑记录
+
+| 序号 | 现象 | 根因 | 修复 |
+| --- | --- | --- | --- |
+| 1 | 未显式设置 ACK 时真实测试仍发出请求 | 新增 `MeteredAgent` 后，`skipif` 装饰器误贴到了辅助类，而不是测试函数 | 恢复函数级 `skipif`，验证无 ACK 时 `1 skipped` |
+| 2 | 张爷爷解析成功但没有 `effective_scope` | 模型自由生成了授权服务不认识的 capability | Health/Care capability 由运行时规范化，模型不能定义安全标识 |
+| 3 | 某轮 Task 的 `target=None` | 模型生成了非规范 `target_type` | Health/Care 目标类型由运行时规范化为 `resident` |
+| 4 | Health 触发 `TOOL_CALL_LIMIT_EXCEEDED (5/4)` | Supervisor 把一般健康状态扩展成生命体征、睡眠、趋势和数据质量，Health 尝试读取全部资源 | 保留 4 次工具硬上限；增加最小证据规则和不可变 `source_request` |
+| 5 | Health Task 失败后 Run 仍显示 `completed` | Supervisor 返回 `clarify` 时 Coordinator 无条件把 Run 标记成功 | 有 Finding 时根据 Finding 计算 Run 状态 |
+| 6 | Health 成功但 Run 为 `partial_success` | Health-only 测试向 Supervisor 暴露了全部 Agent，模型又委派未注册 Executor 的 DeviceOps | Health 合同测试只暴露 `health_agent`；多 Agent 联动另做 simulator-backed 测试 |
+| 7 | 李奶奶工具调用成功但 `structured_response=None` | `deepseek-v4-flash` 偶发用自然语言结束 ReAct，没有生成结构化 Finding | 增加一次结构修复；修复失败不可重跑整条调查链 |
+| 8 | `with_structured_output()` 修复仍返回 `None` | 当前 DeepSeek OpenAI-compatible 接口对此方式兼容不稳定 | 改用项目已验证的强制 Function Calling：`bind(tools=..., tool_choice=...)` |
+| 9 | 正向案例受默认种子数据是否新鲜影响 | 测试没有固定生命体征输入 | 在隔离 SQLite 中写入固定、当前时间戳的心率、血氧和睡眠数据 |
+
+特别需要记住：测试保护机制本身也必须测试。一个写错位置的 `skipif` 会使
+“默认不消耗外部 Token”成为假设而不是事实。
+
+### 13.3 最终真实模型结果
+
+模型：`deepseek-v4-flash`
+
+真实测试限制：
+
+```text
+temperature = 0
+Supervisor iterations <= 2
+Health investigation stages <= 4
+Health tool calls <= 4
+Health model calls <= 5
+Structured repair calls <= 1
+Output tokens per model call <= 900
+Specialist total timeout = 20 seconds
+LLM call timeout = 10 seconds
+```
+
+| 案例 | 结果 | Input | Output | Total | Cache Read |
+| --- | --- | ---: | ---: | ---: | ---: |
+| JH-1 查看张爷爷今天的健康状态 | Run/Task completed，目标 `elderly-001` | 8,207 | 1,716 | 9,923 | 4,352 |
+| JH-2 查看李奶奶最近生命体征 | Run/Task completed，目标 `elderly-002`，使用一次结构修复 | 11,830 | 2,705 | 14,535 | 9,600 |
+| JH-2 查看张爷爷健康状态 | Run failed，`RESOURCE_ACCESS_DENIED`，未进入 Health MCP | 2,452 | 664 | 3,116 | 2,176 |
+
+失败尝试也真实消耗了模型 Token，但早期失败路径尚未正确导出 usage，因此本表
+只报告最终可验证运行，不能把它当成本轮所有调试调用的总账。
+
+### 13.4 最终自动化回归
+
+```text
+Backend: 176 passed, 2 skipped
+Frontend: 15 passed
+Frontend typecheck and production build: passed
+```
+
+默认执行 `pytest` 时真实模型测试仍然跳过。只有当前进程显式设置：
+
+```powershell
+$env:WOTAGENT_REAL_MODEL_SMOKE_ACK =
+  "I_UNDERSTAND_THIS_USES_EXTERNAL_TOKENS"
+```
+
+才允许调用外部模型。可用 `WOTAGENT_REAL_MODEL_CASE` 单独执行一个案例，避免
+为了复查单点问题重复消耗其他案例的 Token。
+
+### 13.5 本轮结论
+
+真实复验说明，Fake LLM 通过不能证明生产链路正确。真正的问题集中在主体身份、
+实体类型、授权 capability、上游目标扩张、结构化输出兼容性和测试边界，而不是
+Health Agent 是否“足够聪明”。
+
+本轮没有把 LLM 改成规则输出。Supervisor 和 Health ReAct 仍由 LLM 驱动；
+程序只接管不可由模型自证的系统事实、上下文预算、授权范围、修复次数和失败状态。

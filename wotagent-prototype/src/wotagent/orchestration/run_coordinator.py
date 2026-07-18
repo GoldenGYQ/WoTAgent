@@ -153,9 +153,14 @@ class RunCoordinator:
                 data=decision.model_dump(mode="json"),
             )
             if decision.action == "clarify":
+                clarification_status = (
+                    _completion_status(findings)
+                    if findings
+                    else "completed"
+                )
                 return await self._finish_run(
                     run.run_id,
-                    status="completed",
+                    status=clarification_status,
                     response=decision.clarification,
                 )
             if decision.action == "finish":
@@ -254,6 +259,8 @@ class RunCoordinator:
         message: str,
         context: dict[str, Any],
     ) -> list[AgentTask]:
+        for task in tasks:
+            task.source_request = message
         if self.task_preparer is None:
             return tasks
         prepared: list[AgentTask] = []
@@ -724,6 +731,31 @@ def _wait_for_confirmation(
 
 def _classify_failure(task: AgentTask, exc: Exception) -> TaskFailure:
     message = str(exc)
+    class_name = exc.__class__.__name__
+    if class_name == "ModelCallLimitExceededError":
+        return _make_failure(
+            task,
+            category="budget",
+            code="MODEL_CALL_LIMIT_EXCEEDED",
+            message=message,
+            retryable=False,
+        )
+    if class_name == "ToolCallLimitExceededError":
+        return _make_failure(
+            task,
+            category="budget",
+            code="TOOL_CALL_LIMIT_EXCEEDED",
+            message=message,
+            retryable=False,
+        )
+    if class_name == "HealthFindingRepairError":
+        return _make_failure(
+            task,
+            category="model_output",
+            code="MODEL_OUTPUT_REPAIR_FAILED",
+            message=message,
+            retryable=False,
+        )
     if isinstance(exc, ValidationError):
         return _make_failure(
             task,

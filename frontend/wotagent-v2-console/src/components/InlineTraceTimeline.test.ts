@@ -39,6 +39,7 @@ const run: RuntimeRun = {
     local_id: 'inspect',
     agent_id: 'environment_agent',
     objective: '读取客厅灯状态',
+    source_request: '读取客厅灯状态',
     reason: '需要状态证据',
     status: 'completed',
     expected_evidence: ['开关状态'],

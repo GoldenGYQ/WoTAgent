@@ -3,6 +3,13 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Sequence
 
+import pytest
+from langchain.agents.middleware.model_call_limit import (
+    ModelCallLimitExceededError,
+)
+from langchain.agents.middleware.tool_call_limit import (
+    ToolCallLimitExceededError,
+)
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
@@ -28,6 +35,7 @@ class ScriptedChatModel(BaseChatModel):
     responses: list[AIMessage]
     index: int = 0
     bound_tool_names: list[list[str]] = Field(default_factory=list)
+    captured_messages: list[list[BaseMessage]] = Field(default_factory=list)
 
     @property
     def _llm_type(self) -> str:
@@ -56,6 +64,7 @@ class ScriptedChatModel(BaseChatModel):
         run_manager: Any = None,
         **kwargs: Any,
     ) -> ChatResult:
+        self.captured_messages.append(list(messages))
         if self.index >= len(self.responses):
             raise AssertionError("scripted model ran out of responses")
         response = self.responses[self.index]
@@ -186,6 +195,86 @@ def test_specialist_create_agent_runs_multi_step_react_and_returns_finding() -> 
         "unlock_medicine_cabinet" not in names
         for names in model.bound_tool_names
     )
+
+
+def test_specialist_enforces_model_call_budget() -> None:
+    model = ScriptedChatModel(responses=[
+        AIMessage(
+            content="",
+            tool_calls=[{
+                "name": "read_health_summary",
+                "args": {"resident_id": "elderly-001"},
+                "id": "summary-call",
+                "type": "tool_call",
+            }],
+        ),
+        AIMessage(
+            content="",
+            tool_calls=[{
+                "name": "read_latest_vitals",
+                "args": {"resident_id": "elderly-001"},
+                "id": "vitals-call",
+                "type": "tool_call",
+            }],
+        ),
+        AIMessage(
+            content="",
+            tool_calls=[{
+                "name": "AgentFindingPayload",
+                "args": _finding_payload(),
+                "id": "finding-call",
+                "type": "tool_call",
+            }],
+        ),
+    ])
+    agent = build_specialist_agent(
+        model,
+        get_agent_spec("health_agent"),
+        [read_health_summary, read_latest_vitals],
+        max_model_calls=2,
+        max_tool_calls=8,
+    )
+
+    with pytest.raises(ModelCallLimitExceededError):
+        agent.invoke({
+            "messages": [{"role": "user", "content": "检查健康状态"}],
+        })
+
+    assert model.index == 2
+
+
+def test_specialist_enforces_tool_call_budget() -> None:
+    model = ScriptedChatModel(responses=[
+        AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "read_health_summary",
+                    "args": {"resident_id": "elderly-001"},
+                    "id": "summary-call",
+                    "type": "tool_call",
+                },
+                {
+                    "name": "read_latest_vitals",
+                    "args": {"resident_id": "elderly-001"},
+                    "id": "vitals-call",
+                    "type": "tool_call",
+                },
+            ],
+        ),
+    ])
+    agent = build_specialist_agent(
+        model,
+        get_agent_spec("health_agent"),
+        [read_health_summary, read_latest_vitals],
+        max_model_calls=3,
+        max_tool_calls=1,
+    )
+
+    with pytest.raises(ToolCallLimitExceededError):
+        agent.invoke({
+            "messages": [{"role": "user", "content": "检查健康状态"}],
+        })
 
 
 def test_supervisor_create_agent_delegates_to_specialist() -> None:
@@ -351,3 +440,7 @@ def test_run_supervisor_creates_structured_parallel_task_dag() -> None:
         "environment_agent",
     ]
     assert parsed.task_plan().tasks[0].local_id == "health"
+    assert "最小必要任务原则" in model.captured_messages[0][0].content
+    assert "最小必要证据原则" in get_agent_spec(
+        "health_agent"
+    ).system_prompt

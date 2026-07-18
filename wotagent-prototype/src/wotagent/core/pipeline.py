@@ -29,11 +29,16 @@ def _build_llm(
     enable_streaming: bool = False,
 ) -> ChatOpenAI:
     """Build an OpenAI-compatible chat model."""
+    max_output_tokens = max(
+        256,
+        min(int(os.getenv("WOTAGENT_MAX_OUTPUT_TOKENS", "2048")), 8192),
+    )
     kwargs: dict[str, Any] = {
         "model": model_name or os.getenv("LLM_MODEL", "deepseek-chat"),
         "openai_api_key": os.getenv("OPENAI_API_KEY", ""),
         "base_url": os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com/v1"),
         "temperature": temperature,
+        "max_tokens": max_output_tokens,
         "streaming": enable_streaming,
         "extra_body": {
             "thinking": {"type": "enabled" if enable_thinking else "disabled"}

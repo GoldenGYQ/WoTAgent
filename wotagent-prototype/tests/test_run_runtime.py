@@ -1,12 +1,23 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 from langgraph.types import Command
 
-from wotagent.orchestration import AgentTask, PendingConfirmation
-from wotagent.runtime.run_runtime import _device_executor, _device_resumer
+from wotagent.agents import AgentFindingPayload, Evidence
+from wotagent.orchestration import (
+    AgentTask,
+    PendingConfirmation,
+    ResourceScope,
+    TaskTarget,
+)
+from wotagent.runtime.run_runtime import (
+    _device_executor,
+    _device_resumer,
+    _health_executor,
+)
 
 
 def test_device_executor_surfaces_and_resumes_native_langgraph_interrupt() -> None:
@@ -76,3 +87,91 @@ def test_device_executor_surfaces_and_resumes_native_langgraph_interrupt() -> No
     assert isinstance(calls[1][0], Command)
     assert calls[0][1]["configurable"]["thread_id"] == "task-confirm"
     assert calls[1][1]["configurable"]["thread_id"] == "task-confirm"
+
+
+def test_health_executor_repairs_missing_structured_response_once() -> None:
+    async def scenario():
+        class Gateway:
+            @contextmanager
+            def authorized_scope(self, _scope):
+                yield
+
+        class HealthAgent:
+            calls = 0
+
+            async def ainvoke(self, _value):
+                self.calls += 1
+                return {
+                    "structured_response": None,
+                    "messages": [
+                        {
+                            "role": "tool",
+                            "name": "read_latest_vitals",
+                            "content": '{"heart_rate":82}',
+                        },
+                        {
+                            "role": "assistant",
+                            "content": "最新心率为 82 bpm。",
+                        },
+                    ],
+                }
+
+        class RepairRunnable:
+            calls = 0
+            input = None
+
+            async def ainvoke(self, value):
+                self.calls += 1
+                self.input = value
+                return AgentFindingPayload(
+                    status="completed",
+                    finding="最新心率为 82 bpm。",
+                    confidence=0.95,
+                    evidence=[Evidence(
+                        source="read_latest_vitals",
+                        value={"heart_rate": 82},
+                        reliability=1,
+                        description="最新生命体征",
+                    )],
+                )
+
+        agent = HealthAgent()
+        repair = RepairRunnable()
+        runtime = SimpleNamespace(
+            health_gateway=Gateway(),
+            health_react_agent=agent,
+            health_finding_repair_runnable=repair,
+            settings=SimpleNamespace(
+                total_timeout_seconds=2,
+                llm_timeout_seconds=2,
+            ),
+        )
+        task = AgentTask(
+            task_id="task-health",
+            run_id="run-health",
+            local_id="health",
+            agent_id="health_agent",
+            objective="获取最新生命体征",
+            source_request="查看李奶奶最近的生命体征",
+            reason="用户请求",
+            success_criteria=["获得最新生命体征"],
+            target=TaskTarget(
+                type="resident",
+                id="elderly-002",
+                display_name="李奶奶",
+            ),
+            effective_scope=ResourceScope(
+                resource_ids=["resident:elderly-002"],
+                capabilities=["health.status.read"],
+            ),
+        )
+
+        result = await _health_executor(runtime)(task)
+        return result, agent, repair
+
+    result, agent, repair = asyncio.run(scenario())
+
+    assert result.status == "completed"
+    assert agent.calls == 1
+    assert repair.calls == 1
+    assert "read_latest_vitals" in repair.input[1]["content"]

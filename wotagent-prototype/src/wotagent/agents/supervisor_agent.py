@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from langchain.agents import create_agent
+from langchain.agents.middleware import ModelCallLimitMiddleware
 
 from ..orchestration.run_models import SupervisorDecision
 from .contracts import AgentSpec
@@ -27,6 +28,12 @@ def build_run_supervisor_agent(
     return create_agent(
         model=model,
         tools=[],
+        middleware=[
+            ModelCallLimitMiddleware(
+                run_limit=1,
+                exit_behavior="error",
+            ),
+        ],
         response_format=SupervisorDecision,
         system_prompt=(
             "你是 WoTAgent Butler Supervisor，是整个 Run 的目标决策智能体。"
@@ -39,6 +46,10 @@ def build_run_supervisor_agent(
             "等领域对象时，只在 target_mention 中填写用户使用的名称，并填写"
             "target_type；不得猜测内部规范 ID。requested_capability 是能力请求，"
             "最终 effective_scope 只能由后端授权模块签发。\n\n"
+            "遵循最小必要任务原则：不得把用户的一般查询自动扩展为该专业 Agent "
+            "能够调查的全部项目。用户只问“今天健康状态”时，不要自动追加睡眠、"
+            "长期趋势等未明确要求的成功条件；仅创建回答当前问题所需的最小证据"
+            "集合，后续是否补查由专业 Agent 根据实际观察决定。\n\n"
             f"当前可用专业 Agent：\n{agent_catalog}"
         ),
         checkpointer=checkpointer,

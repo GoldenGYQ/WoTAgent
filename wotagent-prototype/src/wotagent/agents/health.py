@@ -55,12 +55,20 @@ def build_health_react_agent(
     gateway: ScopedHealthMCPClient,
     *,
     checkpointer: Any = None,
+    max_iterations: int | None = None,
+    max_tool_calls: int | None = None,
 ):
     return build_specialist_agent(
         model,
         get_agent_spec("health_agent"),
         build_health_tools(gateway),
         checkpointer=checkpointer,
+        max_model_calls=(
+            max_iterations + 1
+            if max_iterations is not None
+            else None
+        ),
+        max_tool_calls=max_tool_calls,
     )
 
 

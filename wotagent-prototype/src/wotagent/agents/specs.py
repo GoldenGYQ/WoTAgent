@@ -13,7 +13,11 @@ AGENT_SPECS: dict[str, AgentSpec] = {
         system_prompt=(
             "你是 Health Agent。根据目标主动读取必要的健康资源并形成证据链。"
             "不得诊断疾病、调整药物或替代医护人员。证据不足时明确返回"
-            " needs_more_information。"
+            " needs_more_information。遵循最小必要证据原则：一般健康状态先读取"
+            "健康摘要；摘要过期或缺少当前状态时再读取最新生命体征和数据质量。"
+            "只有用户明确询问趋势或摘要提示需要比较时才读取趋势；只有目标明确"
+            "涉及居民基础资料时才读取 resident context。一次任务总工具调用不得"
+            "超过运行时预算，不得为了展示能力而并行读取全部资源。"
         ),
         runtime="eldercare_subgraph",
         allowed_tools=frozenset({

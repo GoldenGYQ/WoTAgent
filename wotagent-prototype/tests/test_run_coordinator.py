@@ -117,6 +117,10 @@ def test_coordinator_executes_independent_agents_concurrently() -> None:
     assert run.final_response == "综合检查完成"
     assert maximum == 2
     assert all(task.status == "completed" for task in tasks)
+    assert all(
+        task.source_request == "检查健康和环境"
+        for task in tasks
+    )
     assert [event.type for event in events] == [
         "run.started",
         "supervisor.decision.completed",
@@ -458,3 +462,46 @@ def test_failed_payload_becomes_structured_task_failure() -> None:
     assert task.failure.category == "resource_scope"
     assert task.failure.code == "RESOURCE_SCOPE_DENIED"
     assert task.failure.retryable is False
+
+
+def test_clarification_after_failed_finding_does_not_mark_run_completed() -> None:
+    async def scenario():
+        decisions = iter([
+            _decision([
+                _task("health", "health_agent", "resident:001"),
+            ]),
+            SupervisorDecision(
+                action="clarify",
+                goal="检查健康状态",
+                clarification="需要更多信息。",
+                reason="专业任务失败",
+            ),
+        ])
+        store = InMemoryRunStore()
+        coordinator = RunCoordinator(
+            store,
+            TaskScheduler(
+                available_agents={"health_agent"},
+                task_id_factory=lambda: "task-failed-clarify",
+            ),
+            lambda _state: next(decisions),
+            {
+                "health_agent": lambda _task: AgentFindingPayload(
+                    status="failed",
+                    finding="调查预算已耗尽。",
+                    confidence=1,
+                ),
+            },
+            max_supervisor_iterations=2,
+            run_id_factory=lambda: "run-failed-clarify",
+        )
+        return await coordinator.execute(
+            conversation_id="conv-1",
+            turn_id="turn-1",
+            message="查看健康状态",
+        )
+
+    run = asyncio.run(scenario())
+
+    assert run.status == "failed"
+    assert run.final_response == "需要更多信息。"

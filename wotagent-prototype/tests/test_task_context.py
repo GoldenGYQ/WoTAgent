@@ -72,6 +72,50 @@ def test_task_preparer_issues_scope_for_assigned_resident(tmp_path) -> None:
     assert task.effective_scope.resource_ids == ["resident:elderly-001"]
 
 
+def test_task_preparer_normalizes_model_proposed_health_capability(
+    tmp_path,
+) -> None:
+    async def scenario():
+        prepare = _task_preparer(SimpleNamespace(
+            eldercare_store=_store(tmp_path),
+        ))
+        task = _health_task("JH-1")
+        task.requested_capability = "health.read.generated.by.model"
+        return await prepare(
+            task,
+            "查看张爷爷今天的健康状态",
+            {},
+        )
+
+    task = asyncio.run(scenario())
+
+    assert task.requested_capability == "health.status.read"
+    assert task.effective_scope is not None
+    assert task.effective_scope.capabilities == ["health.status.read"]
+
+
+def test_task_preparer_normalizes_model_proposed_target_type(
+    tmp_path,
+) -> None:
+    async def scenario():
+        prepare = _task_preparer(SimpleNamespace(
+            eldercare_store=_store(tmp_path),
+        ))
+        task = _health_task("JH-1")
+        task.target_type = "elderly_person_generated_by_model"
+        return await prepare(
+            task,
+            "查看张爷爷今天的健康状态",
+            {},
+        )
+
+    task = asyncio.run(scenario())
+
+    assert task.target_type == "resident"
+    assert task.target is not None
+    assert task.target.id == "elderly-001"
+
+
 def test_task_preparer_denies_cross_resident_access(tmp_path) -> None:
     async def scenario():
         prepare = _task_preparer(SimpleNamespace(

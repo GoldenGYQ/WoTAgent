@@ -32,7 +32,7 @@ Conversation → Turn → Run → 多个 Task → AgentRun → Loop → ToolCall
 4. LangGraph 原生 `interrupt()` 与 `Command(resume=...)`；
 5. SQLite 持久化 Run、Task、AgentRun、事件和确认负载；
 6. 服务重启后恢复同一个 Task checkpoint；
-7. 后端 `167 passed, 2 skipped`，前端 `15 passed`，生产构建通过；
+7. 后端 `176 passed, 2 skipped`，前端 `15 passed`，生产构建通过；
 8. 模型 Finding Payload 与运行时 Finding Envelope 已拆分；
 9. Task 已增加 Principal、Target、Capability、Effective Scope 和 Failure；
 10. 张爷爷等居民名称在 Task 执行前解析为 canonical resident ID；
@@ -42,16 +42,17 @@ Conversation → Turn → Run → 多个 Task → AgentRun → Loop → ToolCall
 但真实模型测试暴露了尚未解决的问题：
 
 1. 历史真实运行曾出现 `Health Agent`/`health_agent` 身份漂移；现在模型不再
-   生成可信身份，Coordinator 注入 Agent、Task 和 AgentRun 身份，但尚未用真实
-   DeepSeek 重新验证。
+   生成可信身份，Coordinator 注入 Agent、Task 和 AgentRun 身份，真实
+   DeepSeek Health 冒烟测试已通过。
 2. 历史真实运行曾把“张爷爷”直接作为 MCP `resident_id`；现在已增加平台
-   EntityResolver 接口和养老 ResidentEntityResolver，但尚未真实模型复验。
+   EntityResolver 接口和养老 ResidentEntityResolver，真实模型已验证
+   `张爷爷 → elderly-001`、`李奶奶 → elderly-002`。
 3. 后端已增加最小的 JH-1/JH-2 居民关系授权和 MCP Scope 校验，但登录身份仍由
    客户端提交，因此还不是生产级认证授权。
 4. 失败分类、fingerprint 和重复终止已接入；更复杂的可重试、补偿和跨 Agent
    替代策略仍需继续完善。
-5. 自动化测试仍主要使用 Fake/Scripted LLM，尚未执行新增的 opt-in 真实模型
-   冒烟测试。
+5. 自动化测试仍主要使用 Fake/Scripted LLM，但 opt-in 真实模型 Health/Scope
+   三案例已执行并记录；完整多 Agent + simulator 链路仍待单独测试。
 6. 自动化测试未证明真实中文请求、真实模型、居民
    实体解析和 MCP 的完整链路。
 7. 新 RunEvent 尚未完整投影模型 Token、TTFT、专业 Agent Loop 和 ToolCall，
@@ -69,8 +70,8 @@ Conversation → Turn → Run → 多个 Task → AgentRun → Loop → ToolCall
 ```text
 P0 真实链路正确性
 → 已完成本地契约与范围修复
-→ 待密钥安全确认后执行真实模型小预算冒烟测试
-→ 根据真实结果继续修正
+→ 已完成 Health + Resident Scope 三案例真实模型冒烟测试
+→ 已修复上下文预算、目标扩张和结构化 Finding 兼容问题
 
 P1 居民级授权
 → Principal / Resident / CareAssignment / Permission
@@ -626,7 +627,7 @@ consumer behavior. However:
 Last verified automated results before this handoff:
 
 ```text
-Backend: 167 passed, 2 skipped
+Backend: 176 passed, 2 skipped
 Frontend: 15 passed
 Frontend production build: passed
 ```
@@ -767,11 +768,12 @@ without checking with the user.
 
 ### P0: Restore Correctness
 
-1. Confirm account/API-key safety and rotate keys if needed.
-2. Run the opt-in real-model eldercare smoke suite with a small explicit token
-   budget.
-3. Inspect the resulting RunEvents, MCP calls and Finding.
-4. Fix any remaining real-model behavior without weakening Scope or Policy.
+1. Keep the real-model suite opt-in and preserve its explicit token budgets.
+2. Project create_agent usage and repair-call usage into persistent RunEvents.
+3. Add a separate simulator-backed multi-Agent smoke suite; do not mix it with
+   the isolated Health/Scope contract test.
+4. Preserve `source_request` as the immutable user-goal boundary while allowing
+   the Supervisor to propose narrower specialist objectives.
 
 ### P1: Complete Authorization
 

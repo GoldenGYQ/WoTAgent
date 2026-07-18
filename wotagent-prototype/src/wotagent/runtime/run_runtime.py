@@ -25,6 +25,18 @@ from ..orchestration import (
     TaskScheduler,
 )
 from ..domain.entity_resolution import EntityResolutionError
+from ..prompting import compact_history
+
+
+SUPERVISOR_HISTORY_MESSAGES = 6
+SUPERVISOR_HISTORY_CHARACTERS = 400
+SUPERVISOR_FINDINGS = 6
+SUPERVISOR_EVIDENCE_PER_FINDING = 2
+SUPERVISOR_TOOL_CALLS_PER_FINDING = 3
+
+
+class HealthFindingRepairError(ValueError):
+    pass
 
 
 def build_run_coordinator(
@@ -58,8 +70,8 @@ def _supervisor_decider(
     async def decide(state: dict[str, Any]) -> SupervisorDecision:
         payload = {
             "user_request": state["message"],
-            "conversation_context": base_context,
-            "completed_findings": state["findings"],
+            "conversation_context": _compact_supervisor_context(base_context),
+            "completed_findings": _compact_findings(state["findings"]),
             "decision_iteration": state["supervisor_iteration"],
         }
         result = await asyncio.wait_for(
@@ -80,6 +92,112 @@ def _supervisor_decider(
         )
 
     return decide
+
+
+def _compact_supervisor_context(context: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "principal": {
+            "user_id": context.get("user_id", "local-user"),
+            "role": context.get("role", "operator"),
+        },
+        "history": compact_history(
+            context.get("history", []),
+            max_messages=SUPERVISOR_HISTORY_MESSAGES,
+            max_characters=SUPERVISOR_HISTORY_CHARACTERS,
+        ),
+        "runtime": _bounded_value(context.get("runtime", {})),
+    }
+
+
+def _compact_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    compacted: list[dict[str, Any]] = []
+    for finding in findings[-SUPERVISOR_FINDINGS:]:
+        compacted.append({
+            "agent": finding.get("agent"),
+            "objective": _bounded_text(finding.get("objective"), 240),
+            "status": finding.get("status"),
+            "finding": _bounded_text(finding.get("finding"), 500),
+            "confidence": finding.get("confidence"),
+            "evidence": [
+                {
+                    "source": item.get("source"),
+                    "value": _value_summary(item.get("value")),
+                    "timestamp": item.get("timestamp"),
+                    "reliability": item.get("reliability"),
+                    "description": _bounded_text(
+                        item.get("description"),
+                        120,
+                    ),
+                }
+                for item in finding.get("evidence", [])[
+                    -SUPERVISOR_EVIDENCE_PER_FINDING:
+                ]
+                if isinstance(item, dict)
+            ],
+            "recommended_actions": [
+                _bounded_text(item, 120)
+                for item in finding.get("recommended_actions", [])[:2]
+            ],
+            "unresolved_questions": [
+                _bounded_text(item, 120)
+                for item in finding.get("unresolved_questions", [])[:2]
+            ],
+            "tool_calls": [
+                {
+                    "success": item.get("success"),
+                    "verified": item.get("verified"),
+                    "tool_name": item.get("tool_name"),
+                    "error_code": item.get("error_code"),
+                    "error_message": _bounded_text(
+                        item.get("error_message"),
+                        120,
+                    ),
+                    "retryable": item.get("retryable"),
+                }
+                for item in finding.get("tool_calls", [])[
+                    -SUPERVISOR_TOOL_CALLS_PER_FINDING:
+                ]
+                if isinstance(item, dict)
+            ],
+        })
+    return compacted
+
+
+def _bounded_text(value: Any, limit: int) -> str:
+    return str(value or "")[:limit]
+
+
+def _bounded_value(value: Any, *, depth: int = 0) -> Any:
+    if depth >= 4:
+        return _bounded_text(value, 300)
+    if isinstance(value, dict):
+        return {
+            _bounded_text(key, 80): _bounded_value(item, depth=depth + 1)
+            for key, item in list(value.items())[:16]
+        }
+    if isinstance(value, list | tuple):
+        return [
+            _bounded_value(item, depth=depth + 1)
+            for item in value[:8]
+        ]
+    if isinstance(value, str):
+        return value[:500]
+    return value
+
+
+def _value_summary(value: Any) -> Any:
+    if value is None or isinstance(value, bool | int | float):
+        return value
+    bounded = _bounded_value(value)
+    rendered = json.dumps(
+        bounded,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        default=str,
+    )
+    if len(rendered) <= 200:
+        return bounded
+    return f"{rendered[:200]}...[truncated]"
 
 
 def _specialist_executors(
@@ -104,21 +222,103 @@ def _health_executor(runtime: Any) -> Callable[[AgentTask], Any]:
                     "messages": [{
                         "role": "user",
                         "content": (
-                            f"任务目标：{task.objective}\n"
+                            f"原始用户请求（权威范围）："
+                            f"{task.source_request or task.objective}\n"
+                            f"Supervisor 委派目标（不得扩大原始请求）："
+                            f"{task.objective}\n"
                             f"规范居民 ID："
                             f"{task.target.id if task.target else ''}\n"
-                            f"期望证据：{task.expected_evidence}\n"
-                            f"成功条件：{task.success_criteria}"
+                            "只收集回答原始用户请求所需的最小证据。"
+                            "如果委派目标、期望证据或成功条件加入了原始请求"
+                            "没有要求的睡眠、趋势、档案等项目，忽略扩张部分。"
                         ),
                     }],
                 }),
                 timeout=runtime.settings.total_timeout_seconds,
             )
-        return AgentFindingPayload.model_validate(
-            result.get("structured_response")
-        )
+        structured = result.get("structured_response")
+        if structured is not None:
+            return AgentFindingPayload.model_validate(structured)
+        try:
+            repaired = await asyncio.wait_for(
+                runtime.health_finding_repair_runnable.ainvoke([
+                    {
+                        "role": "system",
+                        "content": (
+                            "把 Health Agent 的执行事实修复为严格的 "
+                            "AgentFindingPayload。不得增加未出现的证据，"
+                            "不得诊断疾病。工具失败或证据不足时必须如实"
+                            "使用 failed 或 needs_more_information。"
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {
+                                "source_request": task.source_request,
+                                "objective": task.objective,
+                                "resident_id": (
+                                    task.target.id if task.target else None
+                                ),
+                                "transcript": _compact_agent_messages(
+                                    result.get("messages", [])
+                                ),
+                            },
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                            default=str,
+                        ),
+                    },
+                ]),
+                timeout=runtime.settings.llm_timeout_seconds,
+            )
+            return AgentFindingPayload.model_validate(
+                _structured_tool_arguments(repaired)
+            )
+        except Exception as exc:
+            raise HealthFindingRepairError(str(exc)) from exc
 
     return execute
+
+
+def _structured_tool_arguments(result: Any) -> Any:
+    if isinstance(result, AgentFindingPayload | dict):
+        return result
+    tool_calls = getattr(result, "tool_calls", None) or []
+    if not tool_calls:
+        raise ValueError("repair model did not emit a tool call")
+    first = tool_calls[0]
+    if isinstance(first, dict):
+        return first.get("args")
+    return getattr(first, "args", None)
+
+
+def _compact_agent_messages(messages: list[Any]) -> list[dict[str, Any]]:
+    compacted: list[dict[str, Any]] = []
+    for message in messages[-10:]:
+        message_type = str(
+            getattr(message, "type", None)
+            or (
+                message.get("role", "message")
+                if isinstance(message, dict)
+                else "message"
+            )
+        )
+        content = (
+            message.get("content", "")
+            if isinstance(message, dict)
+            else getattr(message, "content", "")
+        )
+        compacted.append({
+            "type": message_type,
+            "name": (
+                message.get("name")
+                if isinstance(message, dict)
+                else getattr(message, "name", None)
+            ),
+            "content": _bounded_text(content, 1200),
+        })
+    return compacted
 
 
 def _task_preparer(runtime: Any) -> Callable[[AgentTask, str, dict[str, Any]], Any]:
@@ -139,13 +339,14 @@ def _task_preparer(runtime: Any) -> Callable[[AgentTask, str, dict[str, Any]], A
         _context: dict[str, Any],
     ) -> AgentTask:
         capability = (
-            task.requested_capability
-            or default_capabilities.get(task.agent_id, "")
+            default_capabilities.get(task.agent_id)
+            or task.requested_capability
         )
         task.requested_capability = capability
         if task.agent_id not in {"health_agent", "care_agent"}:
             return task
-        target_type = task.target_type or "resident"
+        target_type = "resident"
+        task.target_type = target_type
         try:
             task.target = resolver.resolve(
                 target_type=target_type,

@@ -6,6 +6,10 @@ from collections.abc import Sequence
 from typing import Any
 
 from langchain.agents import create_agent
+from langchain.agents.middleware import (
+    ModelCallLimitMiddleware,
+    ToolCallLimitMiddleware,
+)
 from langchain_core.tools import BaseTool, StructuredTool
 
 from .contracts import (
@@ -22,9 +26,22 @@ def build_specialist_agent(
     tools: Sequence[BaseTool],
     *,
     checkpointer: Any = None,
+    max_model_calls: int | None = None,
+    max_tool_calls: int | None = None,
 ):
     """Create a bounded ReAct specialist with a business-only output contract."""
     scoped_tools = _scope_tools(spec, tools)
+    middleware = []
+    if max_model_calls is not None:
+        middleware.append(ModelCallLimitMiddleware(
+            run_limit=max_model_calls,
+            exit_behavior="error",
+        ))
+    if max_tool_calls is not None:
+        middleware.append(ToolCallLimitMiddleware(
+            run_limit=max_tool_calls,
+            exit_behavior="error",
+        ))
     prompt = (
         f"{spec.system_prompt}\n\n"
         f"职责：{spec.responsibility}\n"
@@ -33,13 +50,15 @@ def build_specialist_agent(
         "status、finding、confidence、evidence、recommended_actions、"
         "unresolved_questions 和 tool_calls。不要生成 agent、task_id 或 "
         "agent_run_id；这些身份字段由运行时注入。finding 中的结论必须能由 "
-        "evidence 支撑，不得声称未验证的动作已经成功。"
+        "evidence 支撑，不得声称未验证的动作已经成功。原始用户请求是调查范围"
+        "的权威来源；上游委派不得扩大用户没有要求的调查主题。"
     )
     return create_agent(
         model=model,
         tools=scoped_tools,
         system_prompt=prompt,
         response_format=AgentFindingPayload,
+        middleware=middleware,
         checkpointer=checkpointer,
         name=spec.agent_id,
     )

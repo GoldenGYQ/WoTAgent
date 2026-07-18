@@ -65,6 +65,7 @@ export interface AgentTaskRecord {
   local_id: string
   agent_id: string
   objective: string
+  source_request: string
   reason: string
   status: string
   expected_evidence: string[]
