@@ -19,6 +19,31 @@ The v1 implementation remains available in Git history and tag `v1.0.0`. The cur
 
 ## Start
 
+Recommended Windows entry points:
+
+```text
+start-wotagent.bat         Start the complete local stack
+start-wotagent-safe.bat    Start without submitting Monitor events to the LLM
+start-wotagent-remote.bat  Start the stack and open a temporary Cloudflare Quick Tunnel
+status-wotagent.bat        Show process and health status
+stop-wotagent.bat          Stop the stack and remove the Tailscale Serve proxy
+```
+
+The managed stack starts the simulator (`18080`), Agent API (`8000`),
+independent Monitor worker, and Vue console (`5174`) in that order. Logs and
+PID files are stored under `%LOCALAPPDATA%\WoTAgent\stack`, outside the
+repository.
+
+For phone access, run `start-wotagent-remote.bat`. It prints a temporary
+`trycloudflare.com` URL and records the tunnel process so `stop-wotagent.bat`
+can close it. This URL is public and the experimental API has no real
+authentication, so use it only for short tests and stop it immediately after.
+
+Private Tailscale access remains available from PowerShell with
+`scripts\wotagent-stack.ps1 private`.
+
+Manual commands remain available:
+
 ```powershell
 # Simulator (optional when using stdio MCP)
 cd wot-device-simulator

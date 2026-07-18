@@ -68,8 +68,9 @@ Conversation → Turn → Run → 多个 Task → AgentRun → Loop → ToolCall
 
 - 项目没有真实登录鉴权，`user_id` 和 `role` 由客户端提交；
 - 曾临时使用 Cloudflare Quick Tunnel 暴露 Vite，而 Vite 同时代理后端 API；
-- 用户报告疑似账号安全问题后，隧道、前端、后端和仿真端均已关闭并确认端口停止；
-- 在加入认证网关、后端鉴权、限流和密钥轮换前，禁止再次公网暴露。
+- 2026-07-18 按用户明确要求重新开启 Quick Tunnel，用于短时手机验收；
+- 当前公网地址会同时暴露 Vite 代理的 API 与 WebSocket，完成测试后必须执行
+  `stop-wotagent.bat`，不得作为生产部署。
 
 建议下一步优先顺序：
 
@@ -736,15 +737,18 @@ After the user reported suspected account compromise:
 Current service status at handoff:
 
 ```text
-Frontend: local only on 127.0.0.1:5174
-Backend: local only on 127.0.0.1:8000
-Simulator: local only on 127.0.0.1:18080
-Domain event consumer: disabled for token-safe UI QA
-Independent Monitor: not running continuously
-Cloudflare tunnel: stopped
+Frontend: managed and healthy on 127.0.0.1:5174
+Backend: managed and healthy on 127.0.0.1:8000
+Simulator: managed and healthy on 127.0.0.1:18080
+Domain event consumer: enabled
+Independent Monitor: managed and heartbeat online/running
+Cloudflare Quick Tunnel: enabled for temporary mobile testing
 ```
 
-Do not create another public tunnel until at least one of the following exists:
+The tunnel was reopened at the user's explicit request despite the missing
+authentication controls. Run `stop-wotagent.bat` immediately after testing.
+Do not treat it as a production deployment until at least one of the following
+exists:
 
 - authenticated reverse proxy/access gateway;
 - backend authentication and server-derived roles;

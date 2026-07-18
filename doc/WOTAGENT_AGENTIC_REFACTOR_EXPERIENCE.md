@@ -1316,3 +1316,49 @@ Simulator/API/Frontend local HTTP: 200/200/200
 `ELDERCARE_EVENT_CONSUMER_ENABLED=false`，防止历史 outbox 在界面检查期间触发
 真实模型调用。没有进行新的真实模型测试，也没有产生用于本轮验收的外部模型
 Token。
+
+## 15. 统一服务栈启动与临时手机访问
+
+### 15.1 统一进程模型
+
+项目实际需要同时运行四个进程：
+
+```text
+wot-device-simulator
+Agent API
+independent Monitor
+Vue console
+```
+
+新增 `scripts/wotagent-stack.ps1`，统一负责启动顺序、PID、端口冲突、HTTP
+健康检查、日志、状态查询和停止。运行状态保存在
+`%LOCALAPPDATA%\WoTAgent\stack`，避免把 PID 和日志写入仓库。根目录提供
+`start-wotagent.bat`、`start-wotagent-safe.bat`、
+`start-wotagent-remote.bat`、`status-wotagent.bat` 和
+`stop-wotagent.bat`。
+
+### 15.2 本轮踩坑
+
+| 现象 | 根因 | 处理 |
+| --- | --- | --- |
+| 仿真端启动时报 `ArgumentList` 为空 | Windows PowerShell 5 的 `Start-Process` 不接受空参数集合 | 仅在参数非空时传入 `ArgumentList` |
+| 状态显示服务健康但不可停止 | 服务由旧脚本启动，没有统一 PID 记录 | 不盲目接管未知进程；确认命令行后重启为托管模式 |
+| Quick Tunnel 已建立但脚本返回失败 | 日志文件已经创建但第一轮读取内容为空，正则收到 `null` | 空日志先跳过，并支持从运行中隧道日志恢复 URL |
+| Tailscale 自动安装长时间等待 | Windows 系统级安装需要 UAC 与账号登录交互 | 保留为可选 `private` 模式；按用户选择默认使用 Quick Tunnel |
+
+### 15.3 安全边界与验证
+
+Cloudflare Quick Tunnel 是匿名公网入口。由于当前 Vite 同域代理 `/api` 和
+`/ws/v2`，公开前端等价于同时公开未鉴权实验 API。因此只用于短时演示，完成后
+必须执行 `stop-wotagent.bat`。脚本会先关闭 `cloudflared`，再按逆序停止四个
+本地进程。
+
+```text
+PowerShell parser: passed
+Frontend tests: 15 passed
+Frontend typecheck/build: passed
+Simulator/API/Frontend health: passed
+Monitor heartbeat: online/running
+Quick Tunnel frontend: HTTP 200
+Quick Tunnel proxied /api/health: ok
+```

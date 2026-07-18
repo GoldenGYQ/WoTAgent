@@ -46,6 +46,25 @@ WoTAgent/
 
 ## 本地启动
 
+Windows 下推荐直接双击仓库根目录中的统一入口：
+
+```text
+start-wotagent.bat         启动完整本地服务栈
+start-wotagent-safe.bat    安全模式，不把 Monitor 事件提交给大模型
+start-wotagent-remote.bat  启动服务栈并创建临时 Cloudflare 公网隧道
+status-wotagent.bat        查看进程和健康状态
+stop-wotagent.bat          停止服务栈并关闭 Tailscale Serve
+```
+
+统一脚本依次启动仿真端（`18080`）、Agent API（`8000`）、独立 Monitor
+进程和 Vue 前端（`5174`）。PID 与日志保存在
+`%LOCALAPPDATA%\WoTAgent\stack`，不会写入项目仓库。
+
+手机访问时双击 `start-wotagent-remote.bat`，窗口会输出临时
+`trycloudflare.com` 地址。当前实验 API 没有真实鉴权，因此该地址仅用于短时
+测试；测试完成后应立即双击 `stop-wotagent.bat`。如需 Tailscale 私网方式，
+可在 PowerShell 中执行 `scripts\wotagent-stack.ps1 private`。
+
 ### 1. 仿真端
 
 ```powershell
