@@ -25,3 +25,16 @@ __all__ = [
     "TaskTrace",
     "VerificationResult",
 ]
+from .operations import (
+    DomainAccessDenied,
+    DomainManifest,
+    DomainNotFound,
+    DomainOperationsRegistry,
+)
+
+__all__ = [
+    "DomainAccessDenied",
+    "DomainManifest",
+    "DomainNotFound",
+    "DomainOperationsRegistry",
+]

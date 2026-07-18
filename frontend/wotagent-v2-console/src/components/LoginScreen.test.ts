@@ -6,8 +6,8 @@ import LoginScreen from './LoginScreen.vue'
 describe('LoginScreen', () => {
   it('offers two one-click experiment accounts and emits the selected identity', async () => {
     const accounts: LoginAccount[] = [
-      { accountId: 'JH-1', displayName: '王护理员', role: 'operator', residentId: 'elderly-001', residentName: '张爷爷' },
-      { accountId: 'JH-2', displayName: '赵观察员', role: 'viewer', residentId: 'elderly-002', residentName: '李奶奶' },
+      { accountId: 'JH-1', displayName: '王护理员', role: 'operator', subjectId: 'elderly-001', subjectName: '张爷爷' },
+      { accountId: 'JH-2', displayName: '赵观察员', role: 'viewer', subjectId: 'elderly-002', subjectName: '李奶奶' },
     ]
     const wrapper = mount(LoginScreen, { props: { accounts } })
 

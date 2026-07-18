@@ -1231,3 +1231,88 @@ Health Agent 是否“足够聪明”。
 
 本轮没有把 LLM 改成规则输出。Supervisor 和 Health ReAct 仍由 LLM 驱动；
 程序只接管不可由模型自证的系统事实、上下文预算、授权范围、修复次数和失败状态。
+
+---
+
+## 14. 2026-07-18 领域运行中心与 Monitor Run 对齐
+
+### 14.1 审计结论
+
+原 `EldercareDashboard.vue` 并非纯静态演示。健康摘要、风险、设备状态和动作
+记录都来自真实 API。但是页面把不同成熟度的能力混在一起：
+
+1. “Monitor 运行中”是写死的绿色状态，未调用已经存在的
+   `/monitor/status`；
+2. API 生命周期只启动 outbox 消费者，独立 Monitor 必须另行启动；
+3. 手动数据输入先写入 WoT/MCP 仿真设备，返回 `monitor_pending`，并不直接
+   产生风险；
+4. Monitor outbox 此前进入旧 `EldercareRuntime.process_event()`，没有形成
+   新版 Run/Task/AgentRun；
+5. 前端测试只 Mock 了 API 成功响应，因此没有覆盖 Simulator、Monitor、
+   Outbox 和 RunCoordinator 的完整链路；
+6. 养老 REST 看板允许选择所有居民，没有使用 Agent 链路已经具备的居民关系
+   Scope。
+
+### 14.2 本轮改动
+
+新增平台级 Domain Operations 契约：
+
+```text
+DomainManifest
+→ Subject
+→ Resource
+→ Telemetry
+→ Monitor Rule
+→ Domain Event
+→ Agent Run
+→ Action / Verification
+```
+
+养老领域通过 `EldercareOperations` 将居民、健康指标、设备、风险和照护动作
+投影到通用契约。Vue 顶层页面改为“领域运行中心”，不再把 WoTAgent 定义成
+养老设备系统。当前注册领域仍只有 `eldercare`，但平台壳不包含心率、血氧或
+居民等硬编码数据结构。
+
+Monitor 事件生产链改为：
+
+```text
+EldercareMonitorService
+→ durable outbox
+→ DomainEventConsumer
+→ RunService.create_event_run()
+→ RunCoordinator
+→ Supervisor / Task DAG
+→ Specialist Agent
+```
+
+事件 Run 使用独立 Conversation，避免多个高频 Monitor 事件共享历史导致上下文
+膨胀。Run 持久化 `source=monitor`、`domain_id`、`source_event_id` 和受信任
+`source_context`。居民规范 ID 由 Monitor 事件上下文提供，模型不能重新猜测；
+Task 创建时仍经过关系授权和 MCP Scope。
+
+### 14.3 本轮踩坑
+
+| 现象 | 根因 | 处理 |
+| --- | --- | --- |
+| 页面始终显示 Monitor 运行中 | 前端状态写死 | 改为读取持久化 heartbeat，离线时明确显示 |
+| 提交读数后没有告警 | 数据只写入仿真设备，独立 Monitor 未启动 | 页面明确标注“仿真数据注入”和“等待 Monitor” |
+| 有处置动作但无新版 Run | outbox 消费者调用旧养老图 | 新增应用层 `DomainEventConsumer` 创建正式 Run |
+| JH-2 可在看板选择张爷爷 | 看板 API 没有关系 Scope | 通用领域 API 按 demo principal 过滤 Subject，并返回 403 |
+| 通知和真实设备动作都显示成功 | 前端丢失执行模式 | 显示 `wot_mcp`、`simulated`、`recorded` 与 `verified` |
+| 事件 Run 测试第一次返回空结果 | 测试 Supervisor 无 Finding 直接 finish，Coordinator 正确判定为 failed | 测试改为真实创建 Care Task 和 Finding，避免伪造成功 |
+| 浏览器自动化无法初始化 | 当前桌面浏览器运行时无法写入 kernel assets | 保留 HTTP 200、前端测试、typecheck 和生产构建证据，未声称完成截图验收 |
+
+### 14.4 验证结果
+
+```text
+Backend: 178 passed, 2 skipped
+Frontend: 15 passed
+Frontend typecheck: passed
+Frontend production build: passed
+Simulator/API/Frontend local HTTP: 200/200/200
+```
+
+本轮本地 API 验收显式设置
+`ELDERCARE_EVENT_CONSUMER_ENABLED=false`，防止历史 outbox 在界面检查期间触发
+真实模型调用。没有进行新的真实模型测试，也没有产生用于本轮验收的外部模型
+Token。

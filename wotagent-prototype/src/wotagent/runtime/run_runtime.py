@@ -12,7 +12,7 @@ from uuid import uuid4
 from langgraph.types import Command
 
 from ..agents import AGENT_SPECS, AgentFinding, AgentFindingPayload, Evidence
-from ..auth import RelationshipAuthorizationService
+from ..auth import DEMO_RESIDENT_ASSIGNMENTS, RelationshipAuthorizationService
 from ..domains.eldercare.entity_resolution import ResidentEntityResolver
 from ..orchestration import (
     AgentTask,
@@ -22,6 +22,7 @@ from ..orchestration import (
     SupervisorDecision,
     TaskFailure,
     TaskPreparationError,
+    TaskTarget,
     TaskScheduler,
 )
 from ..domain.entity_resolution import EntityResolutionError
@@ -100,6 +101,7 @@ def _compact_supervisor_context(context: dict[str, Any]) -> dict[str, Any]:
             "user_id": context.get("user_id", "local-user"),
             "role": context.get("role", "operator"),
         },
+        "source": _bounded_value(context.get("source", {})),
         "history": compact_history(
             context.get("history", []),
             max_messages=SUPERVISOR_HISTORY_MESSAGES,
@@ -323,11 +325,9 @@ def _compact_agent_messages(messages: list[Any]) -> list[dict[str, Any]]:
 
 def _task_preparer(runtime: Any) -> Callable[[AgentTask, str, dict[str, Any]], Any]:
     resolver = ResidentEntityResolver(runtime.eldercare_store)
-    authorization = RelationshipAuthorizationService({
-        "JH-1": {"elderly-001"},
-        "JH-2": {"elderly-002"},
-        "local-user": {"elderly-001", "elderly-002"},
-    })
+    authorization = RelationshipAuthorizationService(
+        DEMO_RESIDENT_ASSIGNMENTS
+    )
     default_capabilities = {
         "health_agent": "health.status.read",
         "care_agent": "care.coordinate",
@@ -336,7 +336,7 @@ def _task_preparer(runtime: Any) -> Callable[[AgentTask, str, dict[str, Any]], A
     async def prepare(
         task: AgentTask,
         message: str,
-        _context: dict[str, Any],
+        task_context: dict[str, Any],
     ) -> AgentTask:
         capability = (
             default_capabilities.get(task.agent_id)
@@ -347,20 +347,32 @@ def _task_preparer(runtime: Any) -> Callable[[AgentTask, str, dict[str, Any]], A
             return task
         target_type = "resident"
         task.target_type = target_type
-        try:
-            task.target = resolver.resolve(
-                target_type=target_type,
-                mention=task.target_mention,
-                text=f"{message}\n{task.objective}",
-            )
-        except EntityResolutionError as exc:
-            raise TaskPreparationError(_task_failure(
-                task,
-                category="entity_resolution",
-                code=exc.code,
-                message=str(exc),
-                retryable=exc.retryable,
-            )) from exc
+        trusted_target = (
+            task_context.get("source", {}).get("target")
+            if isinstance(task_context.get("source"), dict)
+            else None
+        )
+        if (
+            isinstance(trusted_target, dict)
+            and trusted_target.get("type") == target_type
+            and trusted_target.get("id")
+        ):
+            task.target = TaskTarget.model_validate(trusted_target)
+        else:
+            try:
+                task.target = resolver.resolve(
+                    target_type=target_type,
+                    mention=task.target_mention,
+                    text=f"{message}\n{task.objective}",
+                )
+            except EntityResolutionError as exc:
+                raise TaskPreparationError(_task_failure(
+                    task,
+                    category="entity_resolution",
+                    code=exc.code,
+                    message=str(exc),
+                    retryable=exc.retryable,
+                )) from exc
         if task.principal is None:
             raise TaskPreparationError(_task_failure(
                 task,
@@ -425,7 +437,7 @@ def _care_executor(
                 role=context.get("role", "operator"),
                 thinking=context.get("thinking", False),
                 routed_agent="care_agent",
-                resident_id=None,
+                resident_id=task.target.id if task.target else None,
             ),
             timeout=runtime.settings.total_timeout_seconds,
         )

@@ -16,7 +16,7 @@ const emit = defineEmits<{ login: [account: LoginAccount] }>()
       <div class="login-account-list">
         <button v-for="account in accounts" :key="account.accountId" type="button" @click="emit('login', account)">
           <span class="account-icon"><ShieldCheck v-if="account.role === 'operator'" :size="21" /><Eye v-else :size="21" /></span>
-          <span class="account-copy"><strong>{{ account.accountId }}</strong><small>{{ account.displayName }}</small><em>{{ account.residentName }} · {{ account.role }}</em></span>
+          <span class="account-copy"><strong>{{ account.accountId }}</strong><small>{{ account.displayName }}</small><em>{{ account.subjectName }} · {{ account.role }}</em></span>
           <LogIn :size="17" />
         </button>
       </div>

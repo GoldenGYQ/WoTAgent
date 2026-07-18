@@ -4,8 +4,8 @@ export interface LoginAccount {
   accountId: 'JH-1' | 'JH-2'
   displayName: string
   role: AgentRole
-  residentId: string
-  residentName: string
+  subjectId: string
+  subjectName: string
 }
 
 export interface UsageSummary {
@@ -49,6 +49,10 @@ export interface RunRecord {
   role: string
   user_id: string
   thinking: boolean
+  source: 'user' | 'monitor' | 'system'
+  domain_id: string | null
+  source_event_id: string | null
+  source_context: Record<string, unknown>
   status: string
   execution_strategy: 'sequential' | 'parallel_when_safe'
   success_criteria: string[]
@@ -56,6 +60,107 @@ export interface RunRecord {
   final_response: string
   created_at: string
   updated_at: string
+}
+
+export interface DomainTelemetrySignal {
+  key: string
+  label: string
+  unit: string
+  value_type: 'number' | 'boolean' | 'string'
+  default_value: string
+}
+
+export interface DomainScenario {
+  key: string
+  label: string
+}
+
+export interface DomainMonitorRule {
+  key: string
+  label: string
+  condition: string
+  freshness: string
+  default_response: string
+}
+
+export interface DomainManifest {
+  domain_id: string
+  title: string
+  description: string
+  subject_label: string
+  subject_label_plural: string
+  telemetry_signals: DomainTelemetrySignal[]
+  scenarios: DomainScenario[]
+  monitor_rules: DomainMonitorRule[]
+}
+
+export interface DomainSubject {
+  subject_id: string
+  label: string
+  subtitle: string
+  metadata: Record<string, unknown>
+}
+
+export interface DomainMetric {
+  key: string
+  label: string
+  value: number | boolean | string | null
+  unit: string
+  observed_at: string | null
+  source: string | null
+}
+
+export interface DomainOverview {
+  subject: DomainSubject
+  metrics: DomainMetric[]
+  open_event_count: number
+  generated_at: string
+}
+
+export interface DomainResource {
+  resource_id: string
+  label: string
+  resource_type: string
+  kind: string
+  transport: string
+  status: 'online' | 'stale' | 'no_data' | 'offline'
+  last_seen: string | null
+  capabilities: string[]
+  state: Record<string, unknown>
+  error: string | null
+}
+
+export interface DomainEvent {
+  event_id: string
+  subject_id: string
+  event_type: string
+  severity: 'medium' | 'high' | 'critical'
+  message: string
+  status: string
+  occurred_at: string
+  source: string
+  run_id: string | null
+}
+
+export interface DomainAction {
+  action_id: string
+  resident_id: string
+  agent_id: string
+  action: string
+  arguments: Record<string, unknown>
+  result: Record<string, unknown>
+  execution_mode: string
+  verified: boolean
+  created_at: string
+}
+
+export interface MonitorStatus {
+  service_id: string
+  status: 'online' | 'offline'
+  reported_status: string
+  details: Record<string, unknown>
+  updated_at: string | null
+  age_seconds: number | null
 }
 
 export interface AgentTaskRecord {

@@ -63,6 +63,7 @@ class EldercareStore:
                     message TEXT NOT NULL,
                     source TEXT NOT NULL,
                     status TEXT NOT NULL,
+                    run_id TEXT,
                     occurred_at TEXT NOT NULL,
                     context_json TEXT NOT NULL DEFAULT '{}'
                 );
@@ -114,6 +115,16 @@ class EldercareStore:
             ):
                 if name not in columns:
                     connection.execute(f"ALTER TABLE residents ADD COLUMN {name} TEXT")
+            risk_columns = {
+                row["name"]
+                for row in connection.execute(
+                    "PRAGMA table_info(risk_events)"
+                )
+            }
+            if "run_id" not in risk_columns:
+                connection.execute(
+                    "ALTER TABLE risk_events ADD COLUMN run_id TEXT"
+                )
 
     def upsert_resident(self, resident: Resident) -> Resident:
         with self._lock, self._connect() as connection:
@@ -472,6 +483,15 @@ class EldercareStore:
             ).fetchone()
         return self._risk(row) if row else None
 
+    def link_risk_run(self, event_id: str, run_id: str) -> None:
+        with self._lock, self._connect() as connection:
+            cursor = connection.execute(
+                "UPDATE risk_events SET run_id = ? WHERE event_id = ?",
+                (run_id, event_id),
+            )
+            if cursor.rowcount == 0:
+                raise KeyError(f"risk event '{event_id}' not found")
+
     def summary(self, resident_id: str) -> HealthSummary:
         resident = self.get_resident(resident_id)
         if resident is None:
@@ -571,6 +591,7 @@ class EldercareStore:
             message=row["message"],
             source=row["source"],
             status=row["status"],
+            run_id=row["run_id"],
             occurred_at=datetime.fromisoformat(row["occurred_at"]),
             context=json.loads(row["context_json"]),
         )

@@ -86,6 +86,10 @@ function createRuntimeRun(record: RunRecord, roleValue: AgentRole, thinkingValue
   }
 }
 
+function normalizedRole(value: string): AgentRole {
+  return value === 'viewer' || value === 'admin' ? value : 'operator'
+}
+
 function applyRecord(run: RuntimeRun, record: RunRecord): void {
   run.status = record.status
   run.response = record.final_response || run.response
@@ -232,6 +236,39 @@ async function restoreRun(stored: StoredRun): Promise<void> {
   } catch {
     // In-memory backend state may have been reset between frontend sessions.
   }
+}
+
+async function inspectRun(runId: string): Promise<void> {
+  const existing = runById(runId)
+  if (existing) {
+    activeConversationId.value = existing.conversationId
+    activeRunId.value = runId
+    return
+  }
+  const record = await agentV2Api.getRun(runId)
+  let conversation = conversationById(record.conversation_id)
+  if (!conversation) {
+    const response = await agentV2Api.getConversationTurns(record.conversation_id)
+    conversation = {
+      conversation_id: record.conversation_id,
+      user_id: record.user_id,
+      role: normalizedRole(record.role),
+      title: record.source === 'monitor' ? 'Monitor 事件处置' : record.root_goal.slice(0, 36),
+      created_at: record.created_at,
+      updated_at: record.updated_at,
+      turn_count: response.turns.length,
+      turns: response.turns,
+      loading: false,
+    }
+    conversations.unshift(conversation)
+  }
+  const run = createRuntimeRun(record, normalizedRole(record.role), record.thinking)
+  runs.unshift(run)
+  const replay = await agentV2Api.getEvents(run.id)
+  replay.events.forEach((event) => addEvent(run, event))
+  await refreshRun(run.id)
+  activeConversationId.value = run.conversationId
+  activeRunId.value = run.id
 }
 
 async function restoreConversationRuns(conversation: RuntimeConversation): Promise<void> {
@@ -394,5 +431,6 @@ export function useAgentRuntime() {
     hydrateRuntime,
     switchIdentity,
     clearIdentity,
+    inspectRun,
   }
 }

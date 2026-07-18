@@ -2,7 +2,8 @@
 
 Last updated: 2026-07-18
 Current branch: `codex/run-task-dag`
-Current implementation baseline: `54e2528 feat: bind task identity scope and failures`
+Current implementation baseline: Domain Operations and Monitor Run refactor,
+successor to `99afb3d feat: harden agent context and real model health flow`
 
 ## 中文快速交接摘要
 
@@ -32,12 +33,17 @@ Conversation → Turn → Run → 多个 Task → AgentRun → Loop → ToolCall
 4. LangGraph 原生 `interrupt()` 与 `Command(resume=...)`；
 5. SQLite 持久化 Run、Task、AgentRun、事件和确认负载；
 6. 服务重启后恢复同一个 Task checkpoint；
-7. 后端 `176 passed, 2 skipped`，前端 `15 passed`，生产构建通过；
+7. 后端 `178 passed, 2 skipped`，前端 `15 passed`，生产构建通过；
 8. 模型 Finding Payload 与运行时 Finding Envelope 已拆分；
 9. Task 已增加 Principal、Target、Capability、Effective Scope 和 Failure；
 10. 张爷爷等居民名称在 Task 执行前解析为 canonical resident ID；
 11. Health MCP 已执行居民 Scope 二次检查；
 12. 相同不可恢复失败已由 Coordinator 阻止重复执行。
+13. 前端已由养老专用看板改为平台级“领域运行中心”；
+14. 已增加 DomainManifest、Subject、Resource、Telemetry、Monitor、Event 和
+    Action 通用领域契约，养老作为首个领域适配器；
+15. Monitor outbox 已通过应用层 DomainEventConsumer 创建正式 Run，并将
+    `run_id` 回写风险事件。
 
 但真实模型测试暴露了尚未解决的问题：
 
@@ -80,7 +86,7 @@ P1 居民级授权
 P2 统一智能体架构
 → 评估把 RunCoordinator 改为 LangGraph 主图
 → Care Agent 迁移到统一 AgentSpec + create_agent/subgraph
-→ Monitor 事件统一进入 Run
+→ Monitor 事件进入 Run 已完成，下一步统一专业 Agent 内部事件投影
 ```
 
 ## 1. Purpose Of This Document
@@ -266,7 +272,7 @@ LLM timeout: 12 seconds
 | `energy_agent` | Device LangGraph with scoped AgentSpec | Yes + deterministic execution | Active |
 | `housekeeping_agent` | Device LangGraph with scoped AgentSpec | Yes + deterministic execution | Active |
 | `device_ops_agent` | Device LangGraph with scoped AgentSpec | Yes + deterministic execution | Active |
-| Monitor | Deterministic long-running eldercare service | No | Exists, but events are not yet uniformly submitted as Runs |
+| Monitor | Deterministic long-running domain service | No | Active; outbox events are submitted as source-attested Runs |
 
 The device graph contains:
 
@@ -335,7 +341,9 @@ The Vue console:
 - groups events by Run and Task;
 - shows Task status and Agent execution;
 - supports confirmation actions;
-- provides eldercare dashboard views;
+- provides a generic Domain Operations Center driven by DomainManifest;
+- displays real Monitor heartbeat, domain resources, telemetry, events and
+  linked Agent Runs;
 - persists the selected demo account in local storage.
 
 Current demo identities are hard-coded in the frontend:
@@ -613,21 +621,27 @@ The intended Monitor is not an LLM Agent. It should:
 - submit a structured event to the Butler;
 - never send high-frequency raw telemetry directly to the LLM.
 
-The eldercare package contains collector, monitor, monitor service and outbox
-consumer behavior. However:
+The eldercare package contains collector, monitor and monitor service behavior.
+The application-layer `DomainEventConsumer` now claims the durable outbox and
+creates a normal Run through `RunService`. Event Runs persist:
 
-- Monitor events still use domain-specific paths;
-- they are not yet consistently converted into the same public Run/Task model
-  used for user queries;
-- event-origin Runs and user-origin Runs therefore do not yet share one complete
-  observable lifecycle.
+```text
+source=monitor
+domain_id=eldercare
+source_event_id=<risk id>
+source_context.target=<canonical resident target>
+```
+
+Each Monitor event uses an isolated Conversation to prevent unrelated sensor
+events from accumulating shared LLM history. The event stores its linked
+`run_id`, so the Domain Operations Center can open the same Run timeline.
 
 ## 14. Tests And Their Actual Meaning
 
 Last verified automated results before this handoff:
 
 ```text
-Backend: 176 passed, 2 skipped
+Backend: 178 passed, 2 skipped
 Frontend: 15 passed
 Frontend production build: passed
 ```
@@ -722,9 +736,11 @@ After the user reported suspected account compromise:
 Current service status at handoff:
 
 ```text
-Frontend: stopped
-Backend: stopped
-Simulator: stopped
+Frontend: local only on 127.0.0.1:5174
+Backend: local only on 127.0.0.1:8000
+Simulator: local only on 127.0.0.1:18080
+Domain event consumer: disabled for token-safe UI QA
+Independent Monitor: not running continuously
 Cloudflare tunnel: stopped
 ```
 
@@ -792,7 +808,8 @@ without checking with the user.
 2. Convert Care into the same AgentSpec + create_agent/subgraph contract.
 3. Normalize all specialist output and error contracts.
 4. Project specialist loops, tool calls, model usage and TTFT into RunEvents.
-5. Submit Monitor events through the same Run API/application service.
+5. Convert remaining legacy Care execution to the uniform AgentSpec/create_agent
+   specialist contract.
 6. Restore a real rule baseline and shadow-mode comparison for the Run runtime.
 
 ### P3: Operational Hardening

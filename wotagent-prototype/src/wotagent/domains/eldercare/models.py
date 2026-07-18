@@ -65,6 +65,7 @@ class RiskEvent(BaseModel):
     message: str
     source: str = "health-monitor"
     status: Literal["open", "handled"] = "open"
+    run_id: str | None = None
     occurred_at: datetime = Field(default_factory=utc_now)
     context: dict[str, Any] = Field(default_factory=dict)
 

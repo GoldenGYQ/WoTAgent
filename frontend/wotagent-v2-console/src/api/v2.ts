@@ -8,7 +8,14 @@ import type {
   ConversationTurn,
   EldercareDevice,
   EldercareSimulationResult,
+  DomainAction,
+  DomainEvent,
+  DomainManifest,
+  DomainOverview,
+  DomainResource,
+  DomainSubject,
   HealthSummary,
+  MonitorStatus,
   Resident,
   RiskEvent,
   RunRecord,
@@ -40,6 +47,35 @@ function websocketUrl(path: string): string {
 export const agentV2Api = {
   health: (): Promise<{ status: string; pipeline: string }> => request('/api/health'),
   capabilities: (): Promise<ApiCapabilities> => request('/api/v2/capabilities'),
+
+  listDomains: (): Promise<{ domains: DomainManifest[] }> => request('/api/v2/domains'),
+  listDomainSubjects(domainId: string, principalId: string): Promise<{ domain_id: string; subjects: DomainSubject[] }> {
+    return request(`/api/v2/domains/${encodeURIComponent(domainId)}/subjects?principal_id=${encodeURIComponent(principalId)}`)
+  },
+  getDomainOverview(domainId: string, subjectId: string, principalId: string): Promise<DomainOverview> {
+    return request(`/api/v2/domains/${encodeURIComponent(domainId)}/subjects/${encodeURIComponent(subjectId)}/overview?principal_id=${encodeURIComponent(principalId)}`)
+  },
+  listDomainResources(domainId: string, subjectId: string, principalId: string): Promise<{ resources: DomainResource[] }> {
+    return request(`/api/v2/domains/${encodeURIComponent(domainId)}/subjects/${encodeURIComponent(subjectId)}/resources?principal_id=${encodeURIComponent(principalId)}`)
+  },
+  listDomainEvents(domainId: string, subjectId: string, principalId: string): Promise<{ events: DomainEvent[] }> {
+    return request(`/api/v2/domains/${encodeURIComponent(domainId)}/subjects/${encodeURIComponent(subjectId)}/events?principal_id=${encodeURIComponent(principalId)}`)
+  },
+  listDomainActions(domainId: string, subjectId: string, principalId: string): Promise<{ actions: DomainAction[] }> {
+    return request(`/api/v2/domains/${encodeURIComponent(domainId)}/subjects/${encodeURIComponent(subjectId)}/actions?principal_id=${encodeURIComponent(principalId)}`)
+  },
+  getDomainMonitorStatus(domainId: string): Promise<MonitorStatus> {
+    return request(`/api/v2/domains/${encodeURIComponent(domainId)}/monitor/status`)
+  },
+  ingestDomainTelemetry(domainId: string, payload: { subject_id: string; signal: string; value: number | boolean | string; unit: string; source: string; principal_id: string }): Promise<Record<string, unknown>> {
+    return request(`/api/v2/domains/${encodeURIComponent(domainId)}/telemetry`, { method: 'POST', body: JSON.stringify(payload) })
+  },
+  simulateDomainScenario(domainId: string, payload: { subject_id: string; scenario: string; principal_id: string }): Promise<Record<string, unknown>> {
+    return request(`/api/v2/domains/${encodeURIComponent(domainId)}/scenarios`, { method: 'POST', body: JSON.stringify(payload) })
+  },
+  acknowledgeDomainEvent(domainId: string, eventId: string, principalId: string): Promise<Record<string, unknown>> {
+    return request(`/api/v2/domains/${encodeURIComponent(domainId)}/events/${encodeURIComponent(eventId)}/acknowledge`, { method: 'POST', body: JSON.stringify({ principal_id: principalId }) })
+  },
 
   createConversation(role: AgentRole, userId = 'local-user'): Promise<ConversationRecord> {
     return request('/api/v2/conversations', {

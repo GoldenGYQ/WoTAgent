@@ -72,6 +72,67 @@ class RunService:
         )
         return run
 
+    async def create_event_run(
+        self,
+        *,
+        message: str,
+        domain_id: str,
+        source_event_id: str,
+        source_context: dict[str, object],
+        user_id: str,
+        role: str = "operator",
+        on_created: Callable[[RunRecord], None] | None = None,
+    ) -> RunRecord:
+        """Create and execute an isolated Run for one trusted domain event."""
+        conversation_id = f"conv_event_{source_event_id}"
+        conversation_id = self._resolve_conversation(
+            conversation_id,
+            user_id=user_id,
+            role=role,
+        )
+        run_id = f"run_{uuid4().hex[:12]}"
+        turn = self.conversation_store.start_turn(
+            conversation_id=conversation_id,
+            run_id=run_id,
+            user_message=message,
+            role=role,
+        )
+        run = await self.run_store.create_run(RunRecord(
+            run_id=run_id,
+            conversation_id=conversation_id,
+            turn_id=turn["turn_id"],
+            root_goal=message,
+            role=role,
+            user_id=user_id,
+            thinking=False,
+            source="monitor",
+            domain_id=domain_id,
+            source_event_id=source_event_id,
+            source_context=source_context,
+            status="accepted",
+        ))
+        if on_created is not None:
+            on_created(run)
+        await self.run_store.record_event(
+            run_id,
+            "run.source.received",
+            node="domain_event_consumer",
+            data={
+                "source": "monitor",
+                "domain_id": domain_id,
+                "source_event_id": source_event_id,
+                "context": source_context,
+            },
+        )
+        await self.execute(
+            run_id=run_id,
+            message=message,
+            role=role,
+            user_id=user_id,
+            thinking=False,
+        )
+        return await self.require_run(run_id)
+
     async def execute(
         self,
         *,
@@ -130,6 +191,12 @@ class RunService:
                 current_role=run.role,
                 exclude_run_id=run.run_id,
             ),
+            "source": {
+                "type": run.source,
+                "domain_id": run.domain_id,
+                "event_id": run.source_event_id,
+                **run.source_context,
+            },
         }
 
     async def confirm(

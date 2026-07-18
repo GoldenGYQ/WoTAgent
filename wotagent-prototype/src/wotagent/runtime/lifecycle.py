@@ -20,7 +20,7 @@ def create_lifespan(
     get_domain_graphs: Callable[[], dict[str, Any]],
     build_domain_graphs: Callable[[Any], dict[str, Any]],
     set_graphs: Callable[[Any, dict[str, Any]], None],
-    get_eldercare_runtime: Callable[[], Any],
+    get_domain_event_consumer: Callable[[], Any],
     bool_env: Callable[[str, bool], bool],
 ):
     @asynccontextmanager
@@ -49,7 +49,7 @@ def create_lifespan(
 
         if bool_env("ELDERCARE_EVENT_CONSUMER_ENABLED", True):
             consumer_task = asyncio.create_task(
-                get_eldercare_runtime().consume_outbox_forever(
+                get_domain_event_consumer().run_forever(
                     runtime_stop,
                     interval_seconds=float(os.getenv(
                         "ELDERCARE_EVENT_CONSUMER_INTERVAL_SECONDS",

@@ -10,7 +10,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from langgraph.checkpoint.memory import InMemorySaver
 
-from ..application import RunService
+from ..application import DomainEventConsumer, RunService
+from ..domain import DomainOperationsRegistry
+from ..domains.eldercare import EldercareOperations
 from ..orchestration import SQLiteRunStore
 from ..paths import data_path, project_root
 from ..runtime import (
@@ -19,6 +21,7 @@ from ..runtime import (
     create_runtime_container,
 )
 from .routers.conversations import create_conversation_router
+from .routers.domains import create_domain_router
 from .routers.eldercare import create_eldercare_router
 from .routers.runs import create_run_router, create_run_websocket_handler
 from .routers.system import create_system_router
@@ -53,6 +56,17 @@ _run_service = RunService(
     ),
     thinking_supported=lambda: _runtime.pipeline.thinking_planner is not None,
 )
+_domain_event_consumer = DomainEventConsumer(
+    _runtime.eldercare_store,
+    _run_service,
+)
+_domain_registry = DomainOperationsRegistry([
+    EldercareOperations(
+        get_store=lambda: _runtime.eldercare_store,
+        get_runtime=lambda: _runtime.eldercare_runtime,
+        get_gateway=lambda: _runtime.gateway,
+    )
+])
 
 
 def _build_domain_graphs(checkpointer: Any) -> dict[str, Any]:
@@ -70,7 +84,7 @@ _lifespan = create_lifespan(
     get_domain_graphs=lambda: _domain_graphs,
     build_domain_graphs=_build_domain_graphs,
     set_graphs=_set_graphs,
-    get_eldercare_runtime=lambda: _runtime.eldercare_runtime,
+    get_domain_event_consumer=lambda: _domain_event_consumer,
     bool_env=lambda key, default: _bool_env(key, default=default),
 )
 
@@ -83,6 +97,7 @@ app = FastAPI(
 app.state.runtime = _runtime
 app.state.run_store = _run_store
 app.state.run_service = _run_service
+app.state.domain_registry = _domain_registry
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.getenv(
@@ -105,6 +120,9 @@ app.include_router(create_eldercare_router(
     get_store=lambda: _runtime.eldercare_store,
     get_runtime=lambda: _runtime.eldercare_runtime,
     get_gateway=lambda: _runtime.gateway,
+))
+app.include_router(create_domain_router(
+    lambda: _domain_registry
 ))
 app.include_router(create_conversation_router(
     lambda: _runtime.conversation_store

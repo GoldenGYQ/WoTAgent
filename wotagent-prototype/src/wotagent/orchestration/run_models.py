@@ -38,6 +38,7 @@ AgentRunStatus = Literal[
 ]
 ExecutionStrategy = Literal["sequential", "parallel_when_safe"]
 ResourceMode = Literal["read", "write"]
+RunSource = Literal["user", "monitor", "system"]
 FailureCategory = Literal[
     "budget",
     "contract",
@@ -222,6 +223,10 @@ class RunRecord(BaseModel):
     role: str = "operator"
     user_id: str = "local-user"
     thinking: bool = False
+    source: RunSource = "user"
+    domain_id: str | None = None
+    source_event_id: str | None = None
+    source_context: dict[str, object] = Field(default_factory=dict)
     status: RunStatus = "accepted"
     execution_strategy: ExecutionStrategy = "parallel_when_safe"
     success_criteria: list[str] = Field(default_factory=list)
@@ -276,6 +281,7 @@ __all__ = [
     "ResourceClaim",
     "ResourceScope",
     "RunRecord",
+    "RunSource",
     "RunEvent",
     "RunStatus",
     "SupervisorDecision",

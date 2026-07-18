@@ -2,8 +2,8 @@
 import { computed, nextTick, onMounted, ref } from 'vue'
 import {
   Activity,
+  Boxes,
   BrainCircuit,
-  HeartPulse,
   LogOut,
   MessageSquare,
   PanelLeft,
@@ -13,7 +13,7 @@ import {
   X,
 } from 'lucide-vue-next'
 import TaskSidebar from './components/TaskSidebar.vue'
-import EldercareDashboard from './components/EldercareDashboard.vue'
+import DomainOperationsCenter from './components/DomainOperationsCenter.vue'
 import LoginScreen from './components/LoginScreen.vue'
 import TaskWorkspace from './components/TaskWorkspace.vue'
 import { useAgentRuntime } from './composables/useAgentRuntime'
@@ -21,8 +21,8 @@ import type { LoginAccount } from './types/agent'
 
 const LOGIN_KEY = 'wotagent-v2-console.account'
 const accounts: LoginAccount[] = [
-  { accountId: 'JH-1', displayName: '王护理员', role: 'operator', residentId: 'elderly-001', residentName: '张爷爷' },
-  { accountId: 'JH-2', displayName: '赵观察员', role: 'viewer', residentId: 'elderly-002', residentName: '李奶奶' },
+  { accountId: 'JH-1', displayName: '王护理员', role: 'operator', subjectId: 'elderly-001', subjectName: '张爷爷' },
+  { accountId: 'JH-2', displayName: '赵观察员', role: 'viewer', subjectId: 'elderly-002', subjectName: '李奶奶' },
 ]
 
 function savedAccount(): LoginAccount | null {
@@ -49,6 +49,7 @@ const {
   deleteConversation,
   switchIdentity,
   clearIdentity,
+  inspectRun,
 } = useAgentRuntime()
 
 const draft = ref('')
@@ -56,7 +57,7 @@ const submitting = ref(false)
 const submitError = ref('')
 const drawerOpen = ref(false)
 const sidebarCollapsed = ref(false)
-const appView = ref<'agent' | 'eldercare'>('agent')
+const appView = ref<'agent' | 'domains'>('agent')
 const currentAccount = ref<LoginAccount | null>(savedAccount())
 const composer = ref<HTMLTextAreaElement | null>(null)
 const conversationRuns = computed(() => runs.filter(
@@ -127,6 +128,11 @@ async function removeConversation(conversationId: string): Promise<void> {
   await deleteConversation(conversationId)
 }
 
+async function inspectDomainRun(runId: string): Promise<void> {
+  await inspectRun(runId)
+  appView.value = 'agent'
+}
+
 onMounted(async () => {
   await checkBackend()
   if (currentAccount.value) {
@@ -149,7 +155,7 @@ onMounted(async () => {
       </div>
       <nav class="app-view-switch" aria-label="工作视图">
         <button type="button" :class="{ active: appView === 'agent' }" @click="appView = 'agent'"><MessageSquare :size="14" />Agent 会话</button>
-        <button type="button" :class="{ active: appView === 'eldercare' }" @click="appView = 'eldercare'"><HeartPulse :size="14" />养老监测</button>
+        <button type="button" :class="{ active: appView === 'domains' }" @click="appView = 'domains'"><Boxes :size="14" />领域运行</button>
       </nav>
       <div class="header-status">
         <span class="backend-status" :data-state="backendState">
@@ -233,7 +239,13 @@ onMounted(async () => {
 
     </div>
 
-    <EldercareDashboard v-else :initial-resident-id="currentAccount.residentId" />
+    <DomainOperationsCenter
+      v-else
+      initial-domain-id="eldercare"
+      :initial-subject-id="currentAccount.subjectId"
+      :principal-id="currentAccount.accountId"
+      @inspect-run="inspectDomainRun"
+    />
 
     <div v-if="drawerOpen && appView === 'agent'" class="drawer-backdrop" @click="drawerOpen = false">
       <div class="mobile-drawer" @click.stop>
