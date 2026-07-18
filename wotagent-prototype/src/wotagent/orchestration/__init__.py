@@ -6,12 +6,20 @@ from .run_models import (
     AgentTask,
     ProposedTask,
     ResourceClaim,
+    ResourceScope,
     RunEvent,
     RunRecord,
     SupervisorDecision,
     SupervisorTaskPlan,
+    TaskFailure,
+    TaskPrincipal,
+    TaskTarget,
 )
-from .run_coordinator import PendingConfirmation, RunCoordinator
+from .run_coordinator import (
+    PendingConfirmation,
+    RunCoordinator,
+    TaskPreparationError,
+)
 from .run_store import InMemoryRunStore, RunStore, SQLiteRunStore
 from .scheduler import TaskScheduler
 
@@ -22,6 +30,7 @@ __all__ = [
     "PendingConfirmation",
     "ProposedTask",
     "ResourceClaim",
+    "ResourceScope",
     "RunEvent",
     "RunRecord",
     "RunStore",
@@ -30,5 +39,9 @@ __all__ = [
     "SupervisorDecision",
     "SupervisorTaskPlan",
     "TaskOrchestrator",
+    "TaskPreparationError",
     "TaskScheduler",
+    "TaskFailure",
+    "TaskPrincipal",
+    "TaskTarget",
 ]

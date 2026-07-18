@@ -30,6 +30,9 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+markers = [
+  "real_model: opt-in tests that call the configured external LLM",
+]
 
 [project.scripts]
 wotagent = "wotagent.cli:main"

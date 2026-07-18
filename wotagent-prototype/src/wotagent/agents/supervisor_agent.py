@@ -35,7 +35,10 @@ def build_run_supervisor_agent(
             "确定性 Scheduler 拥有最终并行裁决权。信息不足时返回 clarify；已有"
             "证据满足目标时返回 finish；否则返回 create_tasks。local_id 只在本次"
             "决策内唯一，系统会分配真实 task_id。不得创建未注册 Agent，不得用"
-            "任务拆分绕过 RBAC、MCP Scope、TD、人工确认或医疗硬规则。\n\n"
+            "任务拆分绕过 RBAC、MCP Scope、TD、人工确认或医疗硬规则。涉及居民"
+            "等领域对象时，只在 target_mention 中填写用户使用的名称，并填写"
+            "target_type；不得猜测内部规范 ID。requested_capability 是能力请求，"
+            "最终 effective_scope 只能由后端授权模块签发。\n\n"
             f"当前可用专业 Agent：\n{agent_catalog}"
         ),
         checkpointer=checkpointer,

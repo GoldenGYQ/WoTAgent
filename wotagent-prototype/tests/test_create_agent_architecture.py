@@ -11,6 +11,7 @@ from pydantic import Field
 
 from wotagent.agents import (
     AgentFinding,
+    AgentFindingPayload,
     Evidence,
     ToolExecutionResult,
     build_delegation_tool,
@@ -89,9 +90,7 @@ def unlock_medicine_cabinet(resident_id: str) -> dict[str, Any]:
 
 
 def _finding_payload() -> dict[str, Any]:
-    return AgentFinding(
-        agent="health_agent",
-        objective="检查张爷爷当前健康状态",
+    return AgentFindingPayload(
         status="completed",
         finding="摘要已过期，最新心率为 104 bpm，需要护理人员复核。",
         confidence=0.9,
@@ -155,7 +154,7 @@ def test_specialist_create_agent_runs_multi_step_react_and_returns_finding() -> 
         AIMessage(
             content="",
             tool_calls=[{
-                "name": "AgentFinding",
+                "name": "AgentFindingPayload",
                 "args": _finding_payload(),
                 "id": "finding-call",
                 "type": "tool_call",
@@ -176,7 +175,7 @@ def test_specialist_create_agent_runs_multi_step_react_and_returns_finding() -> 
         "messages": [{"role": "user", "content": "检查张爷爷当前健康状态"}],
     })
 
-    finding = AgentFinding.model_validate(result["structured_response"])
+    finding = AgentFindingPayload.model_validate(result["structured_response"])
     assert finding.status == "completed"
     assert [item.source for item in finding.evidence] == [
         "read_health_summary",
@@ -194,7 +193,7 @@ def test_supervisor_create_agent_delegates_to_specialist() -> None:
         AIMessage(
             content="",
             tool_calls=[{
-                "name": "AgentFinding",
+                "name": "AgentFindingPayload",
                 "args": _finding_payload(),
                 "id": "finding-call",
                 "type": "tool_call",

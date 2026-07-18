@@ -3,7 +3,12 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from wotagent.agents import AgentFinding, Evidence
+from wotagent.agents import (
+    AgentFinding,
+    AgentFindingPayload,
+    Evidence,
+    ToolExecutionResult,
+)
 from wotagent.orchestration import (
     InMemoryRunStore,
     PendingConfirmation,
@@ -316,3 +321,140 @@ def test_confirmation_rejection_does_not_resume_device_graph() -> None:
 
     assert rejected.status == "failed"
     assert resumed is False
+
+
+def test_coordinator_attests_payload_identity_from_runtime() -> None:
+    async def scenario():
+        decisions = iter([
+            _decision([_task(
+                "health",
+                "health_agent",
+                "resident:elderly-001",
+            )]),
+            SupervisorDecision(
+                action="finish",
+                goal="健康检查",
+                final_response="检查完成",
+                reason="证据充分",
+            ),
+        ])
+        store = InMemoryRunStore()
+        coordinator = RunCoordinator(
+            store,
+            TaskScheduler(
+                available_agents={"health_agent"},
+                task_id_factory=lambda: "task-health",
+            ),
+            lambda _state: next(decisions),
+            {
+                "health_agent": lambda _task: AgentFindingPayload(
+                    status="completed",
+                    finding="健康数据已读取。",
+                    confidence=1,
+                ),
+            },
+            run_id_factory=lambda: "run-health",
+        )
+        run = await coordinator.execute(
+            conversation_id="conv-1",
+            turn_id="turn-1",
+            message="查看健康状态",
+        )
+        task = await store.get_task("task-health")
+        return run, task
+
+    run, task = asyncio.run(scenario())
+
+    assert run.status == "completed"
+    assert task is not None and task.finding is not None
+    assert task.finding.agent == "health_agent"
+    assert task.finding.task_id == "task-health"
+    assert task.finding.agent_run_id is not None
+
+
+def test_non_retryable_failure_is_not_executed_twice() -> None:
+    async def scenario():
+        calls = 0
+
+        async def fail(_task):
+            nonlocal calls
+            calls += 1
+            raise RuntimeError("broken specialist contract")
+
+        decisions = iter([
+            _decision([_task("health-1", "health_agent", "resident:001")]),
+            _decision([_task("health-2", "health_agent", "resident:001")]),
+        ])
+        store = InMemoryRunStore()
+        ids = iter(["task-1", "task-2"])
+        coordinator = RunCoordinator(
+            store,
+            TaskScheduler(
+                available_agents={"health_agent"},
+                task_id_factory=lambda: next(ids),
+            ),
+            lambda _state: next(decisions),
+            {"health_agent": fail},
+            run_id_factory=lambda: "run-repeat",
+        )
+        run = await coordinator.execute(
+            conversation_id="conv-1",
+            turn_id="turn-1",
+            message="检查健康状态",
+        )
+        return run, calls, await store.tasks_for_run(run.run_id)
+
+    run, calls, tasks = asyncio.run(scenario())
+
+    assert run.status == "failed"
+    assert calls == 1
+    assert tasks[0].failure is not None
+    assert tasks[0].failure.retryable is False
+    assert tasks[1].failure is not None
+    assert tasks[1].failure.code == "REPEATED_FAILURE"
+
+
+def test_failed_payload_becomes_structured_task_failure() -> None:
+    async def scenario():
+        store = InMemoryRunStore()
+        coordinator = RunCoordinator(
+            store,
+            TaskScheduler(
+                available_agents={"health_agent"},
+                task_id_factory=lambda: "task-scope",
+            ),
+            lambda _state: _decision([
+                _task("health", "health_agent", "resident:001"),
+            ]),
+            {
+                "health_agent": lambda _task: AgentFindingPayload(
+                    status="failed",
+                    finding="居民范围不允许。",
+                    confidence=1,
+                    tool_calls=[ToolExecutionResult(
+                        success=False,
+                        verified=False,
+                        tool_name="read_health_summary",
+                        error_code="RESOURCE_SCOPE_DENIED",
+                        error_message="resident is outside effective scope",
+                        retryable=False,
+                    )],
+                ),
+            },
+            max_supervisor_iterations=1,
+            run_id_factory=lambda: "run-scope",
+        )
+        await coordinator.execute(
+            conversation_id="conv-1",
+            turn_id="turn-1",
+            message="查看健康状态",
+        )
+        return await store.get_task("task-scope")
+
+    task = asyncio.run(scenario())
+
+    assert task is not None
+    assert task.failure is not None
+    assert task.failure.category == "resource_scope"
+    assert task.failure.code == "RESOURCE_SCOPE_DENIED"
+    assert task.failure.retryable is False

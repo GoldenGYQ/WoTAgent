@@ -72,7 +72,30 @@ export interface AgentTaskRecord {
   depends_on: string[]
   parallel_candidate: boolean
   priority: number
+  principal: {
+    principal_id: string
+    roles: string[]
+  } | null
+  target_type: string | null
+  target_mention: string | null
+  target: {
+    type: string
+    id: string
+    display_name: string | null
+  } | null
+  requested_capability: string
+  effective_scope: {
+    resource_ids: string[]
+    capabilities: string[]
+  } | null
   finding: Record<string, unknown> | null
+  failure: {
+    category: string
+    code: string
+    message: string
+    retryable: boolean
+    fingerprint: string
+  } | null
   confirmation: Record<string, unknown> | null
   created_at: string
   updated_at: string

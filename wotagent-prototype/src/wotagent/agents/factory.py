@@ -8,7 +8,12 @@ from typing import Any
 from langchain.agents import create_agent
 from langchain_core.tools import BaseTool, StructuredTool
 
-from .contracts import AgentFinding, AgentSpec, DelegationRequest
+from .contracts import (
+    AgentFinding,
+    AgentFindingPayload,
+    AgentSpec,
+    DelegationRequest,
+)
 
 
 def build_specialist_agent(
@@ -18,20 +23,23 @@ def build_specialist_agent(
     *,
     checkpointer: Any = None,
 ):
-    """Create a bounded ReAct specialist with an AgentFinding output contract."""
+    """Create a bounded ReAct specialist with a business-only output contract."""
     scoped_tools = _scope_tools(spec, tools)
     prompt = (
         f"{spec.system_prompt}\n\n"
         f"职责：{spec.responsibility}\n"
         "你只能调用当前暴露的工具。工具返回成功不等于目标完成；涉及状态改变时，"
-        "必须检查 verified。最终必须返回符合 AgentFinding 的结构化结果，finding "
-        "中的结论必须能由 evidence 支撑，不得声称未验证的动作已经成功。"
+        "必须检查 verified。最终只返回符合 AgentFindingPayload 的业务结果："
+        "status、finding、confidence、evidence、recommended_actions、"
+        "unresolved_questions 和 tool_calls。不要生成 agent、task_id 或 "
+        "agent_run_id；这些身份字段由运行时注入。finding 中的结论必须能由 "
+        "evidence 支撑，不得声称未验证的动作已经成功。"
     )
     return create_agent(
         model=model,
         tools=scoped_tools,
         system_prompt=prompt,
-        response_format=AgentFinding,
+        response_format=AgentFindingPayload,
         checkpointer=checkpointer,
         name=spec.agent_id,
     )
@@ -60,12 +68,14 @@ def build_delegation_tool(
                 ),
             }],
         })
-        finding = AgentFinding.model_validate(result.get("structured_response"))
-        if finding.agent != spec.agent_id:
-            raise ValueError(
-                f"specialist returned agent={finding.agent!r}, "
-                f"expected {spec.agent_id!r}"
-            )
+        payload = AgentFindingPayload.model_validate(
+            result.get("structured_response")
+        )
+        finding = AgentFinding(
+            agent=spec.agent_id,
+            objective=request.objective,
+            **payload.model_dump(),
+        )
         return finding.model_dump(mode="json")
 
     return StructuredTool.from_function(

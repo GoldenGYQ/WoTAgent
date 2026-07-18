@@ -1,5 +1,6 @@
 from .contracts import (
     AgentFinding,
+    AgentFindingPayload,
     AgentSpec,
     Delegation,
     DelegationRequest,
@@ -41,6 +42,7 @@ def build_run_supervisor_agent(*args, **kwargs):
 __all__ = [
     "AGENT_SPECS",
     "AgentFinding",
+    "AgentFindingPayload",
     "AgentSpec",
     "Delegation",
     "DelegationRequest",

@@ -1,0 +1,115 @@
+from __future__ import annotations
+
+import asyncio
+from types import SimpleNamespace
+
+import pytest
+
+from wotagent.domains.eldercare.entity_resolution import ResidentEntityResolver
+from wotagent.domains.eldercare.health_gateway import ScopedHealthMCPClient
+from wotagent.domains.eldercare.store import EldercareStore
+from wotagent.orchestration import (
+    AgentTask,
+    ResourceScope,
+    TaskPreparationError,
+    TaskPrincipal,
+)
+from wotagent.runtime.run_runtime import _task_preparer
+
+
+def _store(tmp_path) -> EldercareStore:
+    store = EldercareStore(tmp_path / "eldercare.db")
+    store.seed_demo()
+    return store
+
+
+def _health_task(principal_id: str) -> AgentTask:
+    return AgentTask(
+        task_id=f"task-{principal_id}",
+        run_id="run-1",
+        local_id="health",
+        agent_id="health_agent",
+        objective="查看张爷爷今天的健康状态",
+        reason="用户请求",
+        success_criteria=["获得健康摘要"],
+        principal=TaskPrincipal(
+            principal_id=principal_id,
+            roles=["operator" if principal_id == "JH-1" else "viewer"],
+        ),
+        target_type="resident",
+        target_mention="张爷爷",
+        requested_capability="health.status.read",
+    )
+
+
+def test_resident_entity_resolver_returns_canonical_id(tmp_path) -> None:
+    target = ResidentEntityResolver(_store(tmp_path)).resolve(
+        target_type="resident",
+        mention="张爷爷",
+        text="查看张爷爷今天的健康状态",
+    )
+
+    assert target.id == "elderly-001"
+    assert target.display_name == "张爷爷"
+
+
+def test_task_preparer_issues_scope_for_assigned_resident(tmp_path) -> None:
+    async def scenario():
+        prepare = _task_preparer(SimpleNamespace(
+            eldercare_store=_store(tmp_path),
+        ))
+        return await prepare(
+            _health_task("JH-1"),
+            "查看张爷爷今天的健康状态",
+            {},
+        )
+
+    task = asyncio.run(scenario())
+
+    assert task.target is not None
+    assert task.target.id == "elderly-001"
+    assert task.effective_scope is not None
+    assert task.effective_scope.resource_ids == ["resident:elderly-001"]
+
+
+def test_task_preparer_denies_cross_resident_access(tmp_path) -> None:
+    async def scenario():
+        prepare = _task_preparer(SimpleNamespace(
+            eldercare_store=_store(tmp_path),
+        ))
+        return await prepare(
+            _health_task("JH-2"),
+            "查看张爷爷今天的健康状态",
+            {},
+        )
+
+    with pytest.raises(TaskPreparationError) as captured:
+        asyncio.run(scenario())
+
+    assert captured.value.failure.category == "authorization"
+    assert captured.value.failure.code == "RESOURCE_ACCESS_DENIED"
+    assert captured.value.failure.retryable is False
+
+
+def test_health_gateway_rejects_resident_outside_effective_scope(
+    tmp_path,
+) -> None:
+    async def scenario():
+        gateway = ScopedHealthMCPClient(
+            _store(tmp_path),
+            require_scope=True,
+        )
+        with gateway.authorized_scope(ResourceScope(
+            resource_ids=["resident:elderly-001"],
+            capabilities=["health.status.read"],
+        )):
+            return await gateway.call(
+                "read_health_summary",
+                {"resident_id": "elderly-002"},
+            )
+
+    result = asyncio.run(scenario())
+
+    assert result.success is False
+    assert result.error_code == "RESOURCE_SCOPE_DENIED"
+    assert result.retryable is False

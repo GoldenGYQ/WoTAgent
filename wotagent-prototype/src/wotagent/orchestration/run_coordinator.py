@@ -3,17 +3,22 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
-from ..agents.contracts import AgentFinding
+from pydantic import ValidationError
+
+from ..agents.contracts import AgentFinding, AgentFindingPayload
 from .run_models import (
     AgentRunRecord,
     AgentTask,
     RunRecord,
     SupervisorDecision,
+    TaskFailure,
+    TaskPrincipal,
     utc_now,
 )
 from .run_store import RunStore
@@ -26,7 +31,10 @@ SupervisorDecider = Callable[
 ]
 TaskExecutor = Callable[
     [AgentTask],
-    "AgentFinding | PendingConfirmation | Awaitable[AgentFinding | PendingConfirmation]",
+    (
+        "AgentFinding | AgentFindingPayload | PendingConfirmation | "
+        "Awaitable[AgentFinding | AgentFindingPayload | PendingConfirmation]"
+    ),
 ]
 
 
@@ -39,6 +47,16 @@ TaskResumer = Callable[
     [AgentTask, bool],
     AgentFinding | Awaitable[AgentFinding],
 ]
+TaskPreparer = Callable[
+    [AgentTask, str, dict[str, Any]],
+    AgentTask | Awaitable[AgentTask],
+]
+
+
+class TaskPreparationError(ValueError):
+    def __init__(self, failure: TaskFailure) -> None:
+        super().__init__(failure.message)
+        self.failure = failure
 
 
 class RunCoordinator:
@@ -49,6 +67,7 @@ class RunCoordinator:
         supervisor: SupervisorDecider,
         executors: dict[str, TaskExecutor],
         resumers: dict[str, TaskResumer] | None = None,
+        task_preparer: TaskPreparer | None = None,
         *,
         max_supervisor_iterations: int = 4,
         run_id_factory: Callable[[], str] | None = None,
@@ -58,6 +77,7 @@ class RunCoordinator:
         self.supervisor = supervisor
         self.executors = executors
         self.resumers = resumers or {}
+        self.task_preparer = task_preparer
         self.max_supervisor_iterations = max_supervisor_iterations
         self.run_id_factory = run_id_factory or (
             lambda: f"run_{uuid4().hex[:12]}"
@@ -146,7 +166,23 @@ class RunCoordinator:
                 )
 
             plan = decision.task_plan()
-            tasks = self.scheduler.materialize(run.run_id, plan)
+            tasks = self.scheduler.materialize(
+                run.run_id,
+                plan,
+                principal=TaskPrincipal(
+                    principal_id=run.user_id,
+                    roles=[run.role],
+                ),
+            )
+            tasks = await self._prepare_tasks(
+                tasks,
+                message=message,
+                context=context,
+            )
+            tasks, repeated_failure = await self._reject_repeated_failures(
+                run.run_id,
+                tasks,
+            )
             await self.store.add_tasks(run.run_id, tasks)
             for task in tasks:
                 await self.store.record_event(
@@ -163,6 +199,23 @@ class RunCoordinator:
                             item.model_dump(mode="json")
                             for item in task.resource_claims
                         ],
+                        "principal": (
+                            task.principal.model_dump(mode="json")
+                            if task.principal else None
+                        ),
+                        "target": (
+                            task.target.model_dump(mode="json")
+                            if task.target else None
+                        ),
+                        "requested_capability": task.requested_capability,
+                        "effective_scope": (
+                            task.effective_scope.model_dump(mode="json")
+                            if task.effective_scope else None
+                        ),
+                        "failure": (
+                            task.failure.model_dump(mode="json")
+                            if task.failure else None
+                        ),
                     },
                 )
             await self.store.update_run(
@@ -173,6 +226,14 @@ class RunCoordinator:
                 run.run_id,
                 plan.execution_strategy,
             )
+            if repeated_failure:
+                return await self._finish_run(
+                    run.run_id,
+                    status="failed",
+                    response=(
+                        "检测到相同目标上的重复失败，已停止无效重调度。"
+                    ),
+                )
             run = await self.store.get_run(run.run_id) or run
             if run.status == "waiting_confirmation":
                 return run
@@ -185,6 +246,65 @@ class RunCoordinator:
                 "Supervisor 达到最大决策轮次，已返回当前任务结果。"
             ),
         )
+
+    async def _prepare_tasks(
+        self,
+        tasks: list[AgentTask],
+        *,
+        message: str,
+        context: dict[str, Any],
+    ) -> list[AgentTask]:
+        if self.task_preparer is None:
+            return tasks
+        prepared: list[AgentTask] = []
+        for task in tasks:
+            try:
+                prepared.append(
+                    await _resolve(self.task_preparer(task, message, context))
+                )
+            except TaskPreparationError as exc:
+                task.status = "failed"
+                task.failure = exc.failure
+                task.finding = _failure_finding(task, exc.failure)
+                prepared.append(task)
+        return prepared
+
+    async def _reject_repeated_failures(
+        self,
+        run_id: str,
+        tasks: list[AgentTask],
+    ) -> tuple[list[AgentTask], bool]:
+        previous = await self.store.tasks_for_run(run_id)
+        repeated = False
+        for task in tasks:
+            if task.failure is not None:
+                continue
+            matches = [
+                item.failure
+                for item in previous
+                if item.failure is not None
+                and _task_subject(item) == _task_subject(task)
+            ]
+            should_stop = any(not item.retryable for item in matches) or (
+                len(matches) >= 2
+            )
+            if not should_stop:
+                continue
+            repeated = True
+            failure = _make_failure(
+                task,
+                category="contract",
+                code="REPEATED_FAILURE",
+                message=(
+                    "相同 Agent、能力和目标已经发生不可恢复或超限失败，"
+                    "拒绝再次执行。"
+                ),
+                retryable=False,
+            )
+            task.status = "failed"
+            task.failure = failure
+            task.finding = _failure_finding(task, failure)
+        return tasks, repeated
 
     async def confirm(
         self,
@@ -215,18 +335,36 @@ class RunCoordinator:
         if waiting_agent_run is None:
             raise LookupError("waiting agent run not found")
         if approved:
+            failure: TaskFailure | None = None
             resumer = self.resumers.get(task.agent_id)
             if resumer is None:
                 raise LookupError(
                     f"no confirmation resumer registered for {task.agent_id}"
                 )
             try:
-                finding = AgentFinding.model_validate(
-                    await _resolve(resumer(task, True))
+                finding = _attest_finding(
+                    task,
+                    waiting_agent_run.agent_run_id,
+                    await _resolve(resumer(task, True)),
                 )
             except Exception as exc:
-                finding = _failed_finding(task, str(exc))
+                failure = _classify_failure(task, exc)
+                finding = _failure_finding(
+                    task,
+                    failure,
+                    waiting_agent_run.agent_run_id,
+                )
         else:
+            failure = TaskFailure(
+                category="authorization",
+                code="USER_REJECTED",
+                message="用户拒绝了高风险操作，设备未执行。",
+                retryable=False,
+                fingerprint=_fingerprint(
+                    task,
+                    "USER_REJECTED",
+                ),
+            )
             finding = AgentFinding(
                 agent=task.agent_id,
                 objective=task.objective,
@@ -234,11 +372,18 @@ class RunCoordinator:
                 finding="用户拒绝了高风险操作，设备未执行。",
                 confidence=1,
                 unresolved_questions=task.success_criteria,
+                task_id=task.task_id,
+                agent_run_id=waiting_agent_run.agent_run_id,
             )
         status = _task_status(finding)
         await self.store.update_task(
             task_id,
-            lambda item: _complete_task(item, finding, status),
+            lambda item: _complete_task(
+                item,
+                finding,
+                status,
+                failure=failure,
+            ),
         )
         await self.store.update_agent_run(
             waiting_agent_run.agent_run_id,
@@ -341,10 +486,19 @@ class RunCoordinator:
             data={"objective": task.objective},
         )
         executor = self.executors.get(task.agent_id)
+        failure: TaskFailure | None = None
         if executor is None:
-            finding = _failed_finding(
+            failure = _make_failure(
                 task,
-                f"no executor registered for {task.agent_id}",
+                category="contract",
+                code="EXECUTOR_NOT_REGISTERED",
+                message=f"no executor registered for {task.agent_id}",
+                retryable=False,
+            )
+            finding = _failure_finding(
+                task,
+                failure,
+                agent_run.agent_run_id,
             )
         else:
             try:
@@ -382,14 +536,30 @@ class RunCoordinator:
                         data={"confirmation": outcome.payload},
                     )
                     return None
-                finding = AgentFinding.model_validate(outcome)
+                finding = _attest_finding(
+                    task,
+                    agent_run.agent_run_id,
+                    outcome,
+                )
+                if finding.status == "failed":
+                    failure = _failure_from_finding(task, finding)
             except Exception as exc:
-                finding = _failed_finding(task, str(exc))
+                failure = _classify_failure(task, exc)
+                finding = _failure_finding(
+                    task,
+                    failure,
+                    agent_run.agent_run_id,
+                )
         status = _task_status(finding)
 
         await self.store.update_task(
             task.task_id,
-            lambda item: _complete_task(item, finding, status),
+            lambda item: _complete_task(
+                item,
+                finding,
+                status,
+                failure=failure,
+            ),
         )
         await self.store.update_agent_run(
             agent_run.agent_run_id,
@@ -480,13 +650,36 @@ def _completion_status(findings: list[AgentFinding]) -> str:
     return "failed"
 
 
-def _failed_finding(task: AgentTask, error: str) -> AgentFinding:
+def _attest_finding(
+    task: AgentTask,
+    agent_run_id: str,
+    value: Any,
+) -> AgentFinding:
+    if hasattr(value, "model_dump"):
+        value = value.model_dump(mode="python")
+    payload = AgentFindingPayload.model_validate(value)
     return AgentFinding(
         agent=task.agent_id,
         objective=task.objective,
+        task_id=task.task_id,
+        agent_run_id=agent_run_id,
+        **payload.model_dump(),
+    )
+
+
+def _failure_finding(
+    task: AgentTask,
+    failure: TaskFailure,
+    agent_run_id: str | None = None,
+) -> AgentFinding:
+    return AgentFinding(
+        agent=task.agent_id,
+        objective=task.objective,
+        task_id=task.task_id,
+        agent_run_id=agent_run_id,
         status="failed",
-        finding=f"专业 Agent 执行失败：{error}",
-        confidence=0,
+        finding=failure.message,
+        confidence=1,
         unresolved_questions=[task.objective],
     )
 
@@ -512,9 +705,12 @@ def _complete_task(
     task: AgentTask,
     finding: AgentFinding,
     status: str,
+    *,
+    failure: TaskFailure | None = None,
 ) -> None:
     task.status = status  # type: ignore[assignment]
     task.finding = finding
+    task.failure = failure
     task.confirmation = None
 
 
@@ -526,10 +722,117 @@ def _wait_for_confirmation(
     task.confirmation = payload
 
 
+def _classify_failure(task: AgentTask, exc: Exception) -> TaskFailure:
+    message = str(exc)
+    if isinstance(exc, ValidationError):
+        return _make_failure(
+            task,
+            category="model_output",
+            code="MODEL_OUTPUT_INVALID",
+            message=message,
+            retryable=True,
+        )
+    if isinstance(exc, TimeoutError | asyncio.TimeoutError):
+        return _make_failure(
+            task,
+            category="infrastructure",
+            code="SPECIALIST_TIMEOUT",
+            message=message or "specialist execution timed out",
+            retryable=True,
+        )
+    if "RESOURCE_SCOPE_DENIED" in message:
+        return _make_failure(
+            task,
+            category="resource_scope",
+            code="RESOURCE_SCOPE_DENIED",
+            message=message,
+            retryable=False,
+        )
+    return _make_failure(
+        task,
+        category="infrastructure",
+        code="SPECIALIST_EXECUTION_ERROR",
+        message=message or exc.__class__.__name__,
+        retryable=False,
+    )
+
+
+def _failure_from_finding(
+    task: AgentTask,
+    finding: AgentFinding,
+) -> TaskFailure:
+    failed_call = next(
+        (
+            item
+            for item in reversed(finding.tool_calls)
+            if not item.success and item.error_code
+        ),
+        None,
+    )
+    if failed_call is not None:
+        code = str(failed_call.error_code)
+        category = (
+            "resource_scope"
+            if code == "RESOURCE_SCOPE_DENIED"
+            else ("tool_transient" if failed_call.retryable else "tool_permanent")
+        )
+        return _make_failure(
+            task,
+            category=category,
+            code=code,
+            message=failed_call.error_message or finding.finding,
+            retryable=failed_call.retryable,
+        )
+    return _make_failure(
+        task,
+        category="infrastructure",
+        code="SPECIALIST_REPORTED_FAILURE",
+        message=finding.finding,
+        retryable=False,
+    )
+
+
+def _make_failure(
+    task: AgentTask,
+    *,
+    category: Any,
+    code: str,
+    message: str,
+    retryable: bool,
+) -> TaskFailure:
+    return TaskFailure(
+        category=category,
+        code=code,
+        message=message,
+        retryable=retryable,
+        fingerprint=_fingerprint(task, code),
+    )
+
+
+def _fingerprint(task: AgentTask, code: str) -> str:
+    value = f"{_task_subject(task)}|{code}"
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:24]
+
+
+def _task_subject(task: AgentTask) -> str:
+    target = (
+        task.target.id
+        if task.target is not None
+        else (task.target_mention or "").strip().lower()
+    )
+    return "|".join([
+        task.agent_id,
+        task.requested_capability,
+        target,
+    ])
+
+
 __all__ = [
     "PendingConfirmation",
     "RunCoordinator",
     "SupervisorDecider",
     "TaskExecutor",
+    "TaskPreparationError",
+    "TaskPreparer",
     "TaskResumer",
 ]

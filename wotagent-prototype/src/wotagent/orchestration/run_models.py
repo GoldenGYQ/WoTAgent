@@ -38,6 +38,17 @@ AgentRunStatus = Literal[
 ]
 ExecutionStrategy = Literal["sequential", "parallel_when_safe"]
 ResourceMode = Literal["read", "write"]
+FailureCategory = Literal[
+    "contract",
+    "model_output",
+    "entity_resolution",
+    "authorization",
+    "resource_scope",
+    "tool_transient",
+    "tool_permanent",
+    "insufficient_evidence",
+    "infrastructure",
+]
 
 
 def utc_now() -> datetime:
@@ -47,6 +58,30 @@ def utc_now() -> datetime:
 class ResourceClaim(BaseModel):
     key: str = Field(min_length=1)
     mode: ResourceMode
+
+
+class TaskPrincipal(BaseModel):
+    principal_id: str = Field(min_length=1)
+    roles: list[str] = Field(default_factory=list, min_length=1)
+
+
+class TaskTarget(BaseModel):
+    type: str = Field(min_length=1)
+    id: str = Field(min_length=1)
+    display_name: str | None = None
+
+
+class ResourceScope(BaseModel):
+    resource_ids: list[str] = Field(default_factory=list)
+    capabilities: list[str] = Field(default_factory=list)
+
+
+class TaskFailure(BaseModel):
+    category: FailureCategory
+    code: str = Field(min_length=1)
+    message: str = Field(min_length=1)
+    retryable: bool
+    fingerprint: str = Field(min_length=1)
 
 
 class ProposedTask(BaseModel):
@@ -62,6 +97,9 @@ class ProposedTask(BaseModel):
     resource_claims: list[ResourceClaim] = Field(default_factory=list)
     parallel_candidate: bool = True
     priority: int = Field(default=1, ge=1, le=10)
+    target_type: str | None = None
+    target_mention: str | None = None
+    requested_capability: str = ""
 
 
 class SupervisorTaskPlan(BaseModel):
@@ -148,7 +186,14 @@ class AgentTask(BaseModel):
     resource_claims: list[ResourceClaim] = Field(default_factory=list)
     parallel_candidate: bool = True
     priority: int = 1
+    principal: TaskPrincipal | None = None
+    target_type: str | None = None
+    target_mention: str | None = None
+    target: TaskTarget | None = None
+    requested_capability: str = ""
+    effective_scope: ResourceScope | None = None
     finding: AgentFinding | None = None
+    failure: TaskFailure | None = None
     confirmation: dict[str, object] | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
@@ -224,13 +269,18 @@ __all__ = [
     "AgentRunStatus",
     "AgentTask",
     "ExecutionStrategy",
+    "FailureCategory",
     "ProposedTask",
     "ResourceClaim",
+    "ResourceScope",
     "RunRecord",
     "RunEvent",
     "RunStatus",
     "SupervisorDecision",
     "SupervisorTaskPlan",
+    "TaskFailure",
+    "TaskPrincipal",
     "TaskStatus",
+    "TaskTarget",
     "utc_now",
 ]

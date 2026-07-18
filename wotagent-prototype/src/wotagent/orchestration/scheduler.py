@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from uuid import uuid4
 
-from .run_models import AgentTask, SupervisorTaskPlan
+from .run_models import AgentTask, SupervisorTaskPlan, TaskPrincipal
 
 
 TaskIdFactory = Callable[[], str]
@@ -33,6 +33,7 @@ class TaskScheduler:
         plan: SupervisorTaskPlan,
         *,
         parent_task_id: str | None = None,
+        principal: TaskPrincipal | None = None,
     ) -> list[AgentTask]:
         if len(plan.tasks) > self.max_tasks_per_run:
             raise ValueError(
@@ -65,6 +66,10 @@ class TaskScheduler:
                 resource_claims=item.resource_claims,
                 parallel_candidate=item.parallel_candidate,
                 priority=item.priority,
+                principal=principal,
+                target_type=item.target_type,
+                target_mention=item.target_mention,
+                requested_capability=item.requested_capability,
             )
             for item in plan.tasks
         ]

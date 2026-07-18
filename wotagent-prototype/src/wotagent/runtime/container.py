@@ -66,6 +66,7 @@ class RuntimeContainer:
     eldercare_runtime: EldercareRuntime
     eldercare_chat_agent: EldercareChatAgent
     health_react_agent: Any
+    health_gateway: ScopedHealthMCPClient
     conditional_plan_review_runnable: Any
 
     def build_graph(
@@ -200,9 +201,13 @@ def create_runtime_container(
         ),
         trace_store=trace_store,
     )
+    health_gateway = ScopedHealthMCPClient(
+        eldercare_store,
+        require_scope=True,
+    )
     health_react_agent = build_health_react_agent(
         pipeline.response_model,
-        ScopedHealthMCPClient(eldercare_store),
+        health_gateway,
     )
     return RuntimeContainer(
         pipeline=pipeline,
@@ -215,6 +220,7 @@ def create_runtime_container(
         eldercare_runtime=eldercare_runtime,
         eldercare_chat_agent=eldercare_chat_agent,
         health_react_agent=health_react_agent,
+        health_gateway=health_gateway,
         conditional_plan_review_runnable=conditional_plan_review_runnable,
     )
 

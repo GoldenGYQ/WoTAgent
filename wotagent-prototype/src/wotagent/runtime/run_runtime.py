@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from collections.abc import Callable
 from typing import Any
@@ -10,15 +11,20 @@ from uuid import uuid4
 
 from langgraph.types import Command
 
-from ..agents import AGENT_SPECS, AgentFinding, Evidence
+from ..agents import AGENT_SPECS, AgentFinding, AgentFindingPayload, Evidence
+from ..auth import RelationshipAuthorizationService
+from ..domains.eldercare.entity_resolution import ResidentEntityResolver
 from ..orchestration import (
     AgentTask,
     PendingConfirmation,
     RunCoordinator,
     RunStore,
     SupervisorDecision,
+    TaskFailure,
+    TaskPreparationError,
     TaskScheduler,
 )
+from ..domain.entity_resolution import EntityResolutionError
 
 
 def build_run_coordinator(
@@ -40,6 +46,7 @@ def build_run_coordinator(
             agent_id: _device_resumer(runtime, graph)
             for agent_id, graph in domain_graphs.items()
         },
+        task_preparer=_task_preparer(runtime),
         max_supervisor_iterations=runtime.settings.butler_max_iterations,
     )
 
@@ -90,23 +97,117 @@ def _specialist_executors(
 
 
 def _health_executor(runtime: Any) -> Callable[[AgentTask], Any]:
-    async def execute(task: AgentTask) -> AgentFinding:
-        result = await asyncio.wait_for(
-            runtime.health_react_agent.ainvoke({
-                "messages": [{
-                    "role": "user",
-                    "content": (
-                        f"任务目标：{task.objective}\n"
-                        f"期望证据：{task.expected_evidence}\n"
-                        f"成功条件：{task.success_criteria}"
-                    ),
-                }],
-            }),
-            timeout=runtime.settings.total_timeout_seconds,
+    async def execute(task: AgentTask) -> AgentFindingPayload:
+        with runtime.health_gateway.authorized_scope(task.effective_scope):
+            result = await asyncio.wait_for(
+                runtime.health_react_agent.ainvoke({
+                    "messages": [{
+                        "role": "user",
+                        "content": (
+                            f"任务目标：{task.objective}\n"
+                            f"规范居民 ID："
+                            f"{task.target.id if task.target else ''}\n"
+                            f"期望证据：{task.expected_evidence}\n"
+                            f"成功条件：{task.success_criteria}"
+                        ),
+                    }],
+                }),
+                timeout=runtime.settings.total_timeout_seconds,
+            )
+        return AgentFindingPayload.model_validate(
+            result.get("structured_response")
         )
-        return _validate_finding(task, result.get("structured_response"))
 
     return execute
+
+
+def _task_preparer(runtime: Any) -> Callable[[AgentTask, str, dict[str, Any]], Any]:
+    resolver = ResidentEntityResolver(runtime.eldercare_store)
+    authorization = RelationshipAuthorizationService({
+        "JH-1": {"elderly-001"},
+        "JH-2": {"elderly-002"},
+        "local-user": {"elderly-001", "elderly-002"},
+    })
+    default_capabilities = {
+        "health_agent": "health.status.read",
+        "care_agent": "care.coordinate",
+    }
+
+    async def prepare(
+        task: AgentTask,
+        message: str,
+        _context: dict[str, Any],
+    ) -> AgentTask:
+        capability = (
+            task.requested_capability
+            or default_capabilities.get(task.agent_id, "")
+        )
+        task.requested_capability = capability
+        if task.agent_id not in {"health_agent", "care_agent"}:
+            return task
+        target_type = task.target_type or "resident"
+        try:
+            task.target = resolver.resolve(
+                target_type=target_type,
+                mention=task.target_mention,
+                text=f"{message}\n{task.objective}",
+            )
+        except EntityResolutionError as exc:
+            raise TaskPreparationError(_task_failure(
+                task,
+                category="entity_resolution",
+                code=exc.code,
+                message=str(exc),
+                retryable=exc.retryable,
+            )) from exc
+        if task.principal is None:
+            raise TaskPreparationError(_task_failure(
+                task,
+                category="authorization",
+                code="PRINCIPAL_MISSING",
+                message="Task 缺少经过运行时认证的 Principal。",
+                retryable=False,
+            ))
+        decision = authorization.check(
+            principal=task.principal,
+            capability=capability,
+            target=task.target,
+        )
+        if decision.effect != "allow" or decision.effective_scope is None:
+            raise TaskPreparationError(_task_failure(
+                task,
+                category="authorization",
+                code="RESOURCE_ACCESS_DENIED",
+                message=decision.reason,
+                retryable=False,
+            ))
+        task.effective_scope = decision.effective_scope
+        return task
+
+    return prepare
+
+
+def _task_failure(
+    task: AgentTask,
+    *,
+    category: str,
+    code: str,
+    message: str,
+    retryable: bool,
+) -> TaskFailure:
+    subject = "|".join([
+        task.agent_id,
+        task.requested_capability,
+        task.target.id if task.target else (task.target_mention or ""),
+        code,
+    ])
+    return TaskFailure(
+        category=category,
+        code=code,
+        message=message,
+        retryable=retryable,
+        fingerprint=hashlib.sha256(subject.encode("utf-8")).hexdigest()[:24],
+    )
 
 
 def _care_executor(
@@ -201,16 +302,6 @@ async def _ensure_legacy_trace(runtime: Any, task: AgentTask) -> None:
             session_id=task.run_id,
             request_id=f"req_{uuid4().hex[:12]}",
         )
-
-
-def _validate_finding(task: AgentTask, value: Any) -> AgentFinding:
-    finding = AgentFinding.model_validate(value)
-    if finding.agent != task.agent_id:
-        raise ValueError(
-            f"specialist returned agent={finding.agent!r}; "
-            f"expected {task.agent_id!r}"
-        )
-    return finding
 
 
 def _result_finding(task: AgentTask, result: dict[str, Any]) -> AgentFinding:
