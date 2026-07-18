@@ -21,6 +21,7 @@ const thinkingSupported = ref(false)
 const backendState = ref<'checking' | 'online' | 'offline'>('checking')
 const subscriptions = new Map<string, TraceSubscription>()
 const pollers = new Map<string, ReturnType<typeof setInterval>>()
+const restorePromises = new Map<string, Promise<void>>()
 const STORAGE_KEY = 'wotagent-v2-console.runs'
 const ACTIVE_CONVERSATION_KEY = 'wotagent-v2-console.active-conversation'
 let hydrated = false
@@ -41,7 +42,11 @@ const conversationById = (id: string): RuntimeConversation | undefined => conver
 function readStoredRuns(): StoredRun[] {
   try {
     const value = JSON.parse(localStorage.getItem(`${STORAGE_KEY}.${userId.value}`) ?? '[]')
-    return Array.isArray(value) ? value.slice(0, 30) : []
+    if (!Array.isArray(value)) return []
+    return value
+      .filter((item): item is StoredRun => Boolean(item && typeof item.id === 'string'))
+      .filter((item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index)
+      .slice(0, 30)
   } catch {
     return []
   }
@@ -132,12 +137,15 @@ async function refreshRun(runId: string): Promise<void> {
   const run = runById(runId)
   if (!run) return
   try {
-    const [record, taskResponse] = await Promise.all([
+    const shouldReplay = run.events.length === 0
+    const [record, taskResponse, replay] = await Promise.all([
       agentV2Api.getRun(runId),
       agentV2Api.getRunTasks(runId),
+      shouldReplay ? agentV2Api.getEvents(runId, 0) : Promise.resolve(null),
     ])
     applyRecord(run, record)
     run.tasks = taskResponse.tasks
+    replay?.events.forEach((event) => addEvent(run, event, false))
     run.loopCount = run.events.filter((event) => event.type === 'supervisor.decision.completed').length
     syncTurn(run)
     if (!ACTIVE_STATUSES.has(run.status)) {
@@ -149,7 +157,7 @@ async function refreshRun(runId: string): Promise<void> {
   }
 }
 
-function addEvent(run: RuntimeRun, event: TraceEvent): void {
+function addEvent(run: RuntimeRun, event: TraceEvent, refresh = true): void {
   if (run.events.some((item) => item.sequence === event.sequence)) return
   run.events.push(event)
   run.events.sort((a, b) => a.sequence - b.sequence)
@@ -172,7 +180,9 @@ function addEvent(run: RuntimeRun, event: TraceEvent): void {
     run.response = String(event.data.response ?? run.response)
   }
   if (event.type === 'run.failed') run.error = String(event.data.error ?? '运行失败')
-  if (event.type.startsWith('task.') || event.type.startsWith('run.')) void refreshRun(run.id)
+  if (refresh && (event.type.startsWith('task.') || event.type.startsWith('run.'))) {
+    void refreshRun(run.id)
+  }
   syncTurn(run)
 }
 
@@ -223,19 +233,32 @@ function stopTransport(runId: string): void {
   if (run) run.streamState = 'closed'
 }
 
-async function restoreRun(stored: StoredRun): Promise<void> {
-  if (runById(stored.id) || !conversationById(stored.conversationId)) return
-  try {
-    const record = await agentV2Api.getRun(stored.id)
-    const run = createRuntimeRun(record, stored.role, stored.thinking)
-    runs.push(run)
-    const replay = await agentV2Api.getEvents(run.id)
-    replay.events.forEach((event) => addEvent(run, event))
-    await refreshRun(run.id)
-    if (ACTIVE_STATUSES.has(run.status)) startTrace(run.id)
-  } catch {
-    // In-memory backend state may have been reset between frontend sessions.
-  }
+function restoreRun(stored: StoredRun): Promise<void> {
+  const inFlight = restorePromises.get(stored.id)
+  if (inFlight) return inFlight
+
+  const restore = (async () => {
+    if (!conversationById(stored.conversationId)) return
+    try {
+      const record = await agentV2Api.getRun(stored.id)
+      let run = runById(stored.id)
+      if (!run) {
+        run = createRuntimeRun(record, stored.role, stored.thinking)
+        runs.push(run)
+      } else {
+        applyRecord(run, record)
+      }
+      await refreshRun(run.id)
+      if (ACTIVE_STATUSES.has(run.status)) startTrace(run.id)
+    } catch {
+      // The backend may have been reset between frontend sessions.
+    }
+  })().finally(() => {
+    restorePromises.delete(stored.id)
+  })
+
+  restorePromises.set(stored.id, restore)
+  return restore
 }
 
 async function inspectRun(runId: string): Promise<void> {
@@ -383,6 +406,7 @@ function resetRuntimeState(): void {
   pollers.forEach((item) => clearInterval(item))
   subscriptions.clear()
   pollers.clear()
+  restorePromises.clear()
   runs.splice(0)
   conversations.splice(0)
   activeConversationId.value = null

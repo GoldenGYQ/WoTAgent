@@ -1433,3 +1433,46 @@ run_id: run_0d64c3802791
 Task count: 0
 Run: completed
 ```
+
+## 17. 页面刷新后的 RunEvent 回放恢复
+
+### 17.1 现象与排查结论
+
+手机页面刷新后，历史 Run 的状态和 Task 列表能够恢复，但内联时间线显示
+“0 个事件”并持续等待第一个运行事件。数据库与 HTTP 接口中的事件没有丢失：
+
+```text
+run_b71ff2a4d2e2
+SQLite RunEvent count: 12
+GET /api/v2/runs/{run_id}/events?after=0: 12 events
+```
+
+因此故障位于前端恢复过程，而不是 Agent、RunStore 或 WebSocket。
+
+### 17.2 根因与修复
+
+旧实现把本地缓存恢复和会话 Turn 恢复都交给 `restoreRun()`，但其幂等检查发生在
+异步请求之前，且本地缓存本身没有按 `run_id` 去重。重复恢复可能产生多个同 ID
+的 `RuntimeRun`，或留下只恢复了 Task、尚未恢复 Events 的对象。
+
+修复后：
+
+- 本地 StoredRun 按 `run_id` 去重；
+- `restorePromises` 合并同一 Run 的并发恢复；
+- 异步获取 RunRecord 后再次执行 upsert，只允许一个 RuntimeRun；
+- `refreshRun()` 发现 Events 为空时，主动从 cursor 0 回放持久化事件；
+- 批量回放事件时不再为每个事件触发一次额外刷新。
+
+### 17.3 回归验证
+
+新增前端测试模拟“重复本地缓存 + 页面刷新 + 完成态历史 Run”，验证：
+
+```text
+RuntimeRun count: 1
+Replayed event sequences: [1, 2]
+Completed Run stream state: closed
+Replay cursor: 0
+
+Frontend tests: 16 passed
+Frontend typecheck/build: passed
+```
