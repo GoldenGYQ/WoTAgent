@@ -6,7 +6,11 @@ from types import SimpleNamespace
 
 from langgraph.types import Command
 
-from wotagent.agents import AgentFindingPayload, Evidence
+from wotagent.agents import (
+    AgentFindingPayload,
+    Evidence,
+    ToolExecutionResult,
+)
 from wotagent.orchestration import (
     AgentTask,
     PendingConfirmation,
@@ -175,3 +179,82 @@ def test_health_executor_repairs_missing_structured_response_once() -> None:
     assert agent.calls == 1
     assert repair.calls == 1
     assert "read_latest_vitals" in repair.input[1]["content"]
+
+
+def test_health_executor_attests_verified_tool_transcript_without_repair() -> None:
+    async def scenario():
+        class Gateway:
+            @contextmanager
+            def authorized_scope(self, _scope):
+                yield
+
+        tool_result = ToolExecutionResult(
+            success=True,
+            verified=True,
+            tool_name="read_latest_vitals",
+            arguments={"resident_id": "elderly-001"},
+            result={"spo2": 89, "heart_rate": 78},
+            observed_state={"spo2": 89, "heart_rate": 78},
+        )
+
+        class HealthAgent:
+            async def ainvoke(self, _value):
+                return {
+                    "structured_response": None,
+                    "messages": [
+                        {
+                            "role": "tool",
+                            "name": "read_latest_vitals",
+                            "content": tool_result.model_dump_json(),
+                        },
+                        {
+                            "role": "assistant",
+                            "content": "当前血氧为 89%，需要护理人员复核。",
+                        },
+                    ],
+                }
+
+        class RepairRunnable:
+            calls = 0
+
+            async def ainvoke(self, _value):
+                self.calls += 1
+                raise AssertionError("verified transcript should not be repaired")
+
+        repair = RepairRunnable()
+        runtime = SimpleNamespace(
+            health_gateway=Gateway(),
+            health_react_agent=HealthAgent(),
+            health_finding_repair_runnable=repair,
+            settings=SimpleNamespace(
+                total_timeout_seconds=2,
+                llm_timeout_seconds=2,
+            ),
+        )
+        task = AgentTask(
+            task_id="task-health-transcript",
+            run_id="run-health-transcript",
+            local_id="health",
+            agent_id="health_agent",
+            objective="核查张爷爷当前血氧",
+            source_request="处理血氧过低事件",
+            reason="Monitor 风险事件",
+            target=TaskTarget(
+                type="resident",
+                id="elderly-001",
+                display_name="张爷爷",
+            ),
+            effective_scope=ResourceScope(
+                resource_ids=["resident:elderly-001"],
+                capabilities=["health.status.read"],
+            ),
+        )
+        return await _health_executor(runtime)(task), repair
+
+    result, repair = asyncio.run(scenario())
+
+    assert result.status == "completed"
+    assert result.finding == "当前血氧为 89%，需要护理人员复核。"
+    assert result.evidence[0].value == {"spo2": 89, "heart_rate": 78}
+    assert result.tool_calls[0].verified is True
+    assert repair.calls == 0

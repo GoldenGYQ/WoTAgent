@@ -23,6 +23,34 @@ class DomainEventConsumer:
                     raise KeyError(
                         f"resident '{event['resident_id']}' not found"
                     )
+                risk = self.store.get_risk(event["event_id"])
+                if risk is not None and risk.run_id:
+                    existing = await self.run_service.require_run(risk.run_id)
+                    if existing.status in {
+                        "accepted",
+                        "running",
+                        "waiting_confirmation",
+                    }:
+                        self.store.retry_event(
+                            item["outbox_id"],
+                            f"linked Run {existing.run_id} is still active",
+                            delay_seconds=30,
+                        )
+                    elif existing.status == "failed":
+                        self.store.retry_event(
+                            item["outbox_id"],
+                            existing.final_response
+                            or f"linked Run {existing.run_id} failed",
+                        )
+                    else:
+                        self.store.complete_event(item["outbox_id"])
+                        results.append({
+                            "event_id": event["event_id"],
+                            "run_id": existing.run_id,
+                            "status": existing.status,
+                            "reused": True,
+                        })
+                    continue
                 source_context: dict[str, object] = {
                     "target": {
                         "type": "resident",

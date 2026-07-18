@@ -14,6 +14,7 @@ from wotagent.domains.eldercare import (
 from wotagent.orchestration import (
     InMemoryRunStore,
     RunCoordinator,
+    RunRecord,
     SupervisorDecision,
     TaskScheduler,
 )
@@ -106,3 +107,59 @@ def test_monitor_outbox_creates_a_source_attested_run(tmp_path) -> None:
     assert store.list_outbox()[0]["status"] == "processed"
     source_event = asyncio.run(runs.events(run.run_id))[0]
     assert source_event.type == "run.source.received"
+
+
+def test_failed_event_retry_does_not_create_a_second_run(tmp_path) -> None:
+    store = EldercareStore(tmp_path / "eldercare.db")
+    store.upsert_resident(Resident(
+        resident_id="elderly-001",
+        name="张爷爷",
+        room="A-101",
+    ))
+    monitor = EldercareMonitorService(store, EmptyGateway())
+    asyncio.run(monitor.ingest(SensorReading(
+        resident_id="elderly-001",
+        sensor_type="spo2",
+        value=89,
+    )))
+    runs = InMemoryRunStore()
+
+    class FailingRunService:
+        calls = 0
+
+        async def create_event_run(self, **kwargs):
+            self.calls += 1
+            run = RunRecord(
+                run_id="run-event-failed",
+                conversation_id="conv-event-failed",
+                turn_id="turn-event-failed",
+                root_goal=kwargs["message"],
+                source="monitor",
+                source_event_id=kwargs["source_event_id"],
+                status="failed",
+                final_response="health finding contract failed",
+            )
+            await runs.create_run(run)
+            kwargs["on_created"](run)
+            return run
+
+        async def require_run(self, run_id):
+            return await runs.get_run(run_id)
+
+    service = FailingRunService()
+    consumer = DomainEventConsumer(store, service)
+
+    first = asyncio.run(consumer.consume_once())
+    outbox = store.list_outbox()[0]
+    store.retry_event(
+        outbox["outbox_id"],
+        outbox["last_error"],
+        delay_seconds=0,
+    )
+    second = asyncio.run(consumer.consume_once())
+
+    assert first == []
+    assert second == []
+    assert service.calls == 1
+    assert store.list_risks("elderly-001")[0].run_id == "run-event-failed"
+    assert store.list_outbox()[0]["attempts"] == 2

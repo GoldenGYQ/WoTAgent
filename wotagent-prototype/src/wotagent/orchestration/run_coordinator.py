@@ -164,9 +164,14 @@ class RunCoordinator:
                     response=decision.clarification,
                 )
             if decision.action == "finish":
+                completion_status = (
+                    _completion_status(findings)
+                    if findings
+                    else "completed"
+                )
                 return await self._finish_run(
                     run.run_id,
-                    status=_completion_status(findings),
+                    status=completion_status,
                     response=decision.final_response,
                 )
 

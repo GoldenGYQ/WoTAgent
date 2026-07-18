@@ -33,7 +33,7 @@ Conversation → Turn → Run → 多个 Task → AgentRun → Loop → ToolCall
 4. LangGraph 原生 `interrupt()` 与 `Command(resume=...)`；
 5. SQLite 持久化 Run、Task、AgentRun、事件和确认负载；
 6. 服务重启后恢复同一个 Task checkpoint；
-7. 后端 `178 passed, 2 skipped`，前端 `15 passed`，生产构建通过；
+7. 后端 `181 passed, 2 skipped`，前端 `15 passed`，生产构建通过；
 8. 模型 Finding Payload 与运行时 Finding Envelope 已拆分；
 9. Task 已增加 Principal、Target、Capability、Effective Scope 和 Failure；
 10. 张爷爷等居民名称在 Task 执行前解析为 canonical resident ID；
@@ -44,6 +44,10 @@ Conversation → Turn → Run → 多个 Task → AgentRun → Loop → ToolCall
     Action 通用领域契约，养老作为首个领域适配器；
 15. Monitor outbox 已通过应用层 DomainEventConsumer 创建正式 Run，并将
     `run_id` 回写风险事件。
+16. Health Agent 缺少原生 structured response 时，可由已验证 MCP
+    ToolMessage 确定性封装 Finding，不再依赖 Repair LLM 才能完成；
+17. Domain Event 已实施一事件一 Run，outbox 重试不再重复创建 Run；
+18. Supervisor 直接回答的零 Task `finish` 已修复为 `run.completed`。
 
 但真实模型测试暴露了尚未解决的问题：
 

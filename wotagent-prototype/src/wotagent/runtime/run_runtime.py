@@ -11,7 +11,13 @@ from uuid import uuid4
 
 from langgraph.types import Command
 
-from ..agents import AGENT_SPECS, AgentFinding, AgentFindingPayload, Evidence
+from ..agents import (
+    AGENT_SPECS,
+    AgentFinding,
+    AgentFindingPayload,
+    Evidence,
+    ToolExecutionResult,
+)
 from ..auth import DEMO_RESIDENT_ASSIGNMENTS, RelationshipAuthorizationService
 from ..domains.eldercare.entity_resolution import ResidentEntityResolver
 from ..orchestration import (
@@ -241,6 +247,12 @@ def _health_executor(runtime: Any) -> Callable[[AgentTask], Any]:
         structured = result.get("structured_response")
         if structured is not None:
             return AgentFindingPayload.model_validate(structured)
+        transcript_finding = _finding_from_health_messages(
+            result.get("messages", []),
+            objective=task.objective,
+        )
+        if transcript_finding is not None:
+            return transcript_finding
         try:
             repaired = await asyncio.wait_for(
                 runtime.health_finding_repair_runnable.ainvoke([
@@ -281,6 +293,85 @@ def _health_executor(runtime: Any) -> Callable[[AgentTask], Any]:
             raise HealthFindingRepairError(str(exc)) from exc
 
     return execute
+
+
+def _finding_from_health_messages(
+    messages: list[Any],
+    *,
+    objective: str,
+) -> AgentFindingPayload | None:
+    tool_calls: list[ToolExecutionResult] = []
+    final_summary = ""
+    for message in messages:
+        message_type = str(
+            getattr(message, "type", None)
+            or (
+                message.get("role", "")
+                if isinstance(message, dict)
+                else ""
+            )
+        )
+        content = (
+            message.get("content")
+            if isinstance(message, dict)
+            else getattr(message, "content", None)
+        )
+        if message_type in {"tool", "ToolMessage"}:
+            payload = _strict_json_object(content)
+            if payload is None:
+                continue
+            try:
+                tool_calls.append(ToolExecutionResult.model_validate(payload))
+            except ValueError:
+                continue
+        elif message_type in {"ai", "assistant", "AIMessage"}:
+            if isinstance(content, str) and content.strip():
+                final_summary = content.strip()
+
+    if not tool_calls:
+        return None
+
+    successful = [
+        item for item in tool_calls
+        if item.success and item.verified
+    ]
+    evidence = [
+        Evidence(
+            source=item.tool_name,
+            value=item.observed_state or item.result,
+            reliability=1,
+            description=f"{item.tool_name} 返回的已验证健康数据",
+        )
+        for item in successful
+    ]
+    complete = bool(successful) and len(successful) == len(tool_calls)
+    return AgentFindingPayload(
+        status="completed" if complete else "needs_more_information",
+        finding=(
+            final_summary
+            or (
+                "已读取并验证回答目标所需的健康数据。"
+                if complete
+                else "部分健康数据读取失败，当前证据不足。"
+            )
+        ),
+        confidence=0.85 if complete else 0.5,
+        evidence=evidence,
+        unresolved_questions=[] if complete else [objective],
+        tool_calls=tool_calls,
+    )
+
+
+def _strict_json_object(content: Any) -> dict[str, Any] | None:
+    if isinstance(content, dict):
+        return content
+    if not isinstance(content, str) or not content.strip():
+        return None
+    try:
+        payload = json.loads(content)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
 def _structured_tool_arguments(result: Any) -> Any:

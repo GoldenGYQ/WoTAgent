@@ -137,6 +137,36 @@ def test_coordinator_executes_independent_agents_concurrently() -> None:
     assert events[2].task_id == "task-a"
 
 
+def test_coordinator_marks_direct_finish_without_tasks_completed() -> None:
+    async def scenario():
+        store = InMemoryRunStore()
+        coordinator = RunCoordinator(
+            store,
+            TaskScheduler(available_agents={"health_agent"}),
+            lambda _context: SupervisorDecision(
+                action="finish",
+                goal="介绍系统能力",
+                final_response="我可以协调健康、照护和设备专业 Agent。",
+                reason="一般能力问题无需创建 Task",
+            ),
+            {},
+            run_id_factory=lambda: "run-direct-finish",
+        )
+        run = await coordinator.execute(
+            conversation_id="conv-direct-finish",
+            turn_id="turn-direct-finish",
+            message="你都能干啥",
+        )
+        return run, await store.events(run.run_id)
+
+    run, events = asyncio.run(scenario())
+
+    assert run.status == "completed"
+    assert run.task_ids == []
+    assert run.final_response == "我可以协调健康、照护和设备专业 Agent。"
+    assert events[-1].type == "run.completed"
+
+
 def test_coordinator_serializes_resource_conflicts() -> None:
     async def scenario():
         active = 0

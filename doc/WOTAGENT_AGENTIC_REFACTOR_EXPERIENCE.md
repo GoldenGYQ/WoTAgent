@@ -1362,3 +1362,74 @@ Monitor heartbeat: online/running
 Quick Tunnel frontend: HTTP 200
 Quick Tunnel proxied /api/health: ok
 ```
+
+## 16. Monitor Event Run 结构化尾包与事件幂等
+
+### 16.1 真实故障
+
+领域运行中心注入低血氧场景后，Monitor 正确生成风险事件和 Run，但
+`run_ba6001910ffc` 最终失败：
+
+```text
+Health ReAct 已调用 MCP Resource
+→ structured_response 缺失
+→ Finding Repair LLM 返回普通文本而非 tool call
+→ MODEL_OUTPUT_REPAIR_FAILED
+→ Health Task failed
+→ 依赖 Health 的 Care Task blocked
+→ Supervisor 重建相同任务
+→ REPEATED_FAILURE
+→ Run failed
+```
+
+同时发现 outbox 将失败解释为“重新创建 Run”。同一个
+`risk_51fa13bbdfaf` 被多次消费并创建多个 Run，既破坏
+`Event → Run` 幂等关系，也造成额外模型调用和 Token 消耗。
+
+### 16.2 修复
+
+Health Agent 的可信结果优先级调整为：
+
+```text
+原生 AgentFindingPayload
+→ 已验证 ToolMessage 的确定性 Finding Envelope
+→ 最多一次 Repair LLM
+→ 结构化失败
+```
+
+确定性封装只读取可校验的 `ToolExecutionResult` JSON。工具全部
+`success=true` 且 `verified=true` 时，运行时可以证明调查执行成功；Assistant
+文本仅作为 finding 摘要，不能决定状态，也不能伪造 Evidence。
+
+DomainEventConsumer 在创建 Run 前检查风险事件已经绑定的 `run_id`：
+
+- 已有运行中 Run：延后 outbox，不创建新 Run；
+- 已有失败 Run：保留同一 Run 并进入有限 dead-letter 重试；
+- 已有完成 Run：直接完成 outbox；
+- 只有没有绑定 Run 时才创建新 Run。
+
+同时修复 Supervisor 第一轮直接 `finish` 的零 Task 场景。没有 Task 和 Finding
+不再天然等于失败；直接问答生成有效结构化 `final_response` 时记为
+`run.completed`。执行型 Run 仍按 Finding 和验证证据判定，不能靠一段回答冒充
+执行成功。
+
+### 16.3 测试与真实复验
+
+```text
+Targeted backend tests: 14 passed
+Full backend tests: 181 passed, 2 skipped
+
+Real low-SpO2 event:
+event_id: risk_ef1827670ca5
+run_id: run_d522081907d3
+Event-to-Run count: 1
+Health Task: completed, 5 verified tool calls
+Care Task: completed
+Outbox: processed, attempts=1
+Run: completed
+
+Real direct finish:
+run_id: run_0d64c3802791
+Task count: 0
+Run: completed
+```

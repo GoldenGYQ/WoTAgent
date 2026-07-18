@@ -469,6 +469,14 @@ class EldercareStore:
             rows = connection.execute(query, params).fetchall()
         return [self._risk(row) for row in rows]
 
+    def get_risk(self, event_id: str) -> RiskEvent | None:
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM risk_events WHERE event_id = ?",
+                (event_id,),
+            ).fetchone()
+        return self._risk(row) if row else None
+
     def handle_risk(self, event_id: str) -> RiskEvent | None:
         with self._lock, self._connect() as connection:
             cursor = connection.execute(
