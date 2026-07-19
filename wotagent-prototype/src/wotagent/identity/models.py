@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 
 PrincipalType = Literal["human", "service"]
+LoginMode = Literal["one_click", "pin", "disabled"]
 
 
 class PrincipalRelationship(BaseModel):
@@ -36,7 +37,28 @@ class PrincipalProfile(BaseModel):
     principal_type: PrincipalType = "human"
     display_name: str = Field(min_length=1)
     login_enabled: bool = False
+    login_mode: LoginMode = "disabled"
     bindings: list[DomainRoleBinding] = Field(default_factory=list)
+
+
+class RoleTemplate(BaseModel):
+    template_id: str = Field(min_length=1)
+    domain_id: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    platform_role: Literal["viewer", "operator", "admin"]
+    roles: list[str] = Field(min_length=1)
+    capabilities: list[str] = Field(default_factory=list)
+    target_type: str = Field(min_length=1)
+    relation: str = Field(min_length=1)
+    self_register: bool = True
+
+
+class RegistrationTarget(BaseModel):
+    domain_id: str = Field(min_length=1)
+    target_type: str = Field(min_length=1)
+    target_id: str = Field(min_length=1)
+    label: str = Field(min_length=1)
 
 
 class TaskPrincipal(BaseModel):
@@ -68,8 +90,11 @@ class TaskPrincipal(BaseModel):
 
 __all__ = [
     "DomainRoleBinding",
+    "LoginMode",
     "PrincipalProfile",
     "PrincipalRelationship",
     "PrincipalType",
+    "RegistrationTarget",
+    "RoleTemplate",
     "TaskPrincipal",
 ]

@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from fastapi import APIRouter, BackgroundTasks, WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Header,
+    WebSocket,
+    WebSocketDisconnect,
+)
 
 from ...application import RunService
 from ...orchestration import RunStore
@@ -19,6 +25,7 @@ def create_run_router(
     async def create_run(
         request: RunCreateRequest,
         background_tasks: BackgroundTasks,
+        authorization: str | None = Header(default=None),
     ):
         return await get_service().create(
             message=request.message,
@@ -27,6 +34,7 @@ def create_run_router(
             user_id=request.user_id,
             thinking=request.thinking,
             profile_id=request.profile_id,
+            auth_token=_bearer_token(authorization),
             background_tasks=background_tasks,
         )
 
@@ -74,6 +82,13 @@ def create_run_router(
         }
 
     return router
+
+
+def _bearer_token(authorization: str | None) -> str | None:
+    if not authorization:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    return token.strip() if scheme.lower() == "bearer" and token else None
 
 
 def create_run_websocket_handler(

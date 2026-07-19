@@ -91,6 +91,11 @@ GET /api/v2/deployment/profiles
 PUT /api/v2/deployment/active
 GET /api/v2/principals?domain_id=<domain_id>&login_only=true
 GET /api/v2/principals/{principal_id}/context?domain_id=<domain_id>
+GET /api/v2/principals/role-templates?domain_id=<domain_id>
+GET /api/v2/principals/registration-targets?domain_id=<domain_id>
+POST /api/v2/principals/register
+POST /api/v2/principals/login
+GET /api/v2/principals/session?domain_id=<domain_id>
 
 GET /api/scenes
 GET /api/scenes/active
@@ -150,3 +155,8 @@ INTERSECT TD and Policy constraints
 
 The resulting `effective_scope` is issued by the backend. A Supervisor may
 request a capability, but it cannot issue or widen that scope.
+
+Registration uses the same boundary. The frontend selects a backend-owned role
+template and resource target; it cannot submit raw capabilities. Seeded demo
+Principals use one-click login. Persisted user-created Principals use a PIN and
+must present their Bearer session to Run and Domain Operations endpoints.

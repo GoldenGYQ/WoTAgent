@@ -14,7 +14,7 @@ from ..application import DomainEventConsumer, RunService
 from ..domain import DeploymentProfileRegistry, DomainOperationsRegistry
 from ..domains.eldercare import EldercareOperations
 from ..domains.smart_home import SmartHomeOperations
-from ..identity import DEFAULT_PRINCIPAL_DIRECTORY
+from ..identity import DEMO_PRINCIPALS, PrincipalStore
 from ..orchestration import SQLiteRunStore
 from ..paths import data_path, project_root
 from ..runtime import (
@@ -52,6 +52,10 @@ _run_store = SQLiteRunStore(
     os.getenv("WOTAGENT_RUN_DB") or data_path("agent_runs.db")
 )
 _deployment_profiles = DeploymentProfileRegistry.load()
+_principal_store = PrincipalStore(
+    os.getenv("WOTAGENT_PRINCIPAL_DB") or data_path("principals.db"),
+    seed_profiles=DEMO_PRINCIPALS,
+)
 _run_service = RunService(
     conversation_store=_runtime.conversation_store,
     run_store=_run_store,
@@ -63,7 +67,7 @@ _run_service = RunService(
     ),
     thinking_supported=lambda: _runtime.pipeline.thinking_planner is not None,
     deployment_profiles=_deployment_profiles,
-    principal_directory=DEFAULT_PRINCIPAL_DIRECTORY,
+    principal_directory=_principal_store,
 )
 _domain_event_consumer = DomainEventConsumer(
     _runtime.eldercare_store,
@@ -75,10 +79,12 @@ _domain_registry = DomainOperationsRegistry([
         get_store=lambda: _runtime.eldercare_store,
         get_runtime=lambda: _runtime.eldercare_runtime,
         get_gateway=lambda: _runtime.gateway,
+        principals=_principal_store,
     ),
     SmartHomeOperations(
         get_gateway=lambda: _runtime.gateway,
         get_profile=lambda: _deployment_profiles.require("villa"),
+        principals=_principal_store,
     ),
 ])
 
@@ -113,6 +119,7 @@ app.state.run_store = _run_store
 app.state.run_service = _run_service
 app.state.domain_registry = _domain_registry
 app.state.deployment_profiles = _deployment_profiles
+app.state.principal_store = _principal_store
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.getenv(
@@ -137,13 +144,14 @@ app.include_router(create_eldercare_router(
     get_gateway=lambda: _runtime.gateway,
 ))
 app.include_router(create_domain_router(
-    lambda: _domain_registry
+    lambda: _domain_registry,
+    lambda: _principal_store,
 ))
 app.include_router(create_deployment_router(
     lambda: _deployment_profiles
 ))
 app.include_router(create_principal_router(
-    lambda: DEFAULT_PRINCIPAL_DIRECTORY
+    lambda: _principal_store
 ))
 app.include_router(create_conversation_router(
     lambda: _runtime.conversation_store

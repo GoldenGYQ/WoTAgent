@@ -24,10 +24,19 @@ import TaskWorkspace from './components/TaskWorkspace.vue'
 import { agentV2Api } from './api/v2'
 import { useAgentRuntime } from './composables/useAgentRuntime'
 import { useVoiceInput } from './composables/useVoiceInput'
-import type { LoginAccount, PrincipalContext } from './types/agent'
+import type {
+  LoginAccount,
+  PrincipalContext,
+  PrincipalRegistration,
+  RegistrationTarget,
+  RoleTemplate,
+} from './types/agent'
 
 const LOGIN_KEY = 'wotagent-v2-console.account'
+const SESSION_KEY = 'wotagent-v2-console.session'
 const savedAccountId = localStorage.getItem(LOGIN_KEY)
+const savedSessionToken = localStorage.getItem(SESSION_KEY)
+agentV2Api.setSessionToken(savedSessionToken)
 
 const {
   runs,
@@ -58,7 +67,15 @@ const activeDeployment = computed(() => deploymentProfiles.value.find(
   (item) => item.profile_id === activeProfileId.value,
 ) ?? null)
 const principalContexts = ref<PrincipalContext[]>([])
-const accounts = computed<LoginAccount[]>(() => principalContexts.value.map((principal) => {
+const roleTemplates = ref<RoleTemplate[]>([])
+const registrationTargets = ref<RegistrationTarget[]>([])
+const authBusy = ref(false)
+const authError = ref('')
+
+function accountFromPrincipal(
+  principal: PrincipalContext,
+  loginMode = principal.login_mode ?? 'pin',
+): LoginAccount {
   const subject = principal.relationships.find((item) => item.target_type === 'resident')
   return {
     accountId: principal.principal_id,
@@ -68,10 +85,15 @@ const accounts = computed<LoginAccount[]>(() => principalContexts.value.map((pri
     roleLabels: principal.role_labels,
     capabilities: principal.granted_capabilities,
     relationships: principal.relationships,
+    loginMode,
     subjectId: subject?.target_id,
     subjectName: subject?.target_label ?? undefined,
   }
-}))
+}
+
+const accounts = computed<LoginAccount[]>(() => principalContexts.value.map(
+  (principal) => accountFromPrincipal(principal),
+))
 const currentAccount = ref<LoginAccount | null>(null)
 const principalResourceLabel = computed(() => (
   currentAccount.value?.relationships[0]?.target_label
@@ -210,16 +232,64 @@ function toggleSidebar(): void {
   sidebarCollapsed.value = !sidebarCollapsed.value
 }
 
-async function login(account: LoginAccount): Promise<void> {
-  currentAccount.value = account
+async function activateAccount(
+  account: LoginAccount,
+  token: string,
+): Promise<void> {
+  agentV2Api.setSessionToken(token)
+  localStorage.setItem(SESSION_KEY, token)
   localStorage.setItem(LOGIN_KEY, account.accountId)
+  currentAccount.value = account
   await switchIdentity(account.accountId, account.role)
+}
+
+async function login(account: LoginAccount, pin?: string): Promise<void> {
+  const domainId = activeDeployment.value?.domain_id
+  if (!domainId) return
+  authBusy.value = true
+  authError.value = ''
+  try {
+    const session = await agentV2Api.loginPrincipal(
+      account.accountId,
+      domainId,
+      pin,
+    )
+    await activateAccount(
+      accountFromPrincipal(session.principal, session.login_mode),
+      session.token ?? '',
+    )
+  } catch (error) {
+    authError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    authBusy.value = false
+  }
+}
+
+async function register(payload: PrincipalRegistration): Promise<void> {
+  authBusy.value = true
+  authError.value = ''
+  try {
+    const session = await agentV2Api.registerPrincipal(payload)
+    const token = session.token ?? ''
+    agentV2Api.setSessionToken(token)
+    await loadPrincipalContexts()
+    await activateAccount(
+      accountFromPrincipal(session.principal, session.login_mode),
+      token,
+    )
+  } catch (error) {
+    authError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    authBusy.value = false
+  }
 }
 
 function logout(): void {
   clearIdentity()
   currentAccount.value = null
+  agentV2Api.setSessionToken(null)
   localStorage.removeItem(LOGIN_KEY)
+  localStorage.removeItem(SESSION_KEY)
 }
 
 async function removeConversation(conversationId: string): Promise<void> {
@@ -231,11 +301,18 @@ async function loadPrincipalContexts(): Promise<void> {
   const domainId = activeDeployment.value?.domain_id
   if (!domainId || backendState.value !== 'online') {
     principalContexts.value = []
+    roleTemplates.value = []
+    registrationTargets.value = []
     return
   }
-  principalContexts.value = (
-    await agentV2Api.listPrincipals(domainId)
-  ).principals
+  const [principalResponse, templateResponse, targetResponse] = await Promise.all([
+    agentV2Api.listPrincipals(domainId),
+    agentV2Api.listRoleTemplates(domainId),
+    agentV2Api.listRegistrationTargets(domainId),
+  ])
+  principalContexts.value = principalResponse.principals
+  roleTemplates.value = templateResponse.templates
+  registrationTargets.value = targetResponse.targets
 }
 
 async function inspectDomainRun(runId: string): Promise<void> {
@@ -251,13 +328,17 @@ async function changeDeployment(event: Event): Promise<void> {
     await switchDeploymentProfile(profileId)
     await loadPrincipalContexts()
     if (accountId) {
-      const nextAccount = accounts.value.find(
-        (item) => item.accountId === accountId,
-      )
-      if (nextAccount) {
+      try {
+        const session = await agentV2Api.currentPrincipalSession(
+          activeDeployment.value?.domain_id ?? '',
+        )
+        const nextAccount = accountFromPrincipal(
+          session.principal,
+          session.login_mode,
+        )
         currentAccount.value = nextAccount
         await switchIdentity(nextAccount.accountId, nextAccount.role)
-      } else {
+      } catch {
         logout()
       }
     }
@@ -270,12 +351,27 @@ async function changeDeployment(event: Event): Promise<void> {
 onMounted(async () => {
   await checkBackend()
   await loadPrincipalContexts()
-  const saved = accounts.value.find(
-    (item) => item.accountId === savedAccountId,
-  )
-  if (saved) {
-    currentAccount.value = saved
-    await switchIdentity(saved.accountId, saved.role)
+  if (savedAccountId && savedSessionToken) {
+    try {
+      const session = await agentV2Api.currentPrincipalSession(
+        activeDeployment.value?.domain_id ?? '',
+      )
+      if (session.principal.principal_id === savedAccountId) {
+        const account = accountFromPrincipal(
+          session.principal,
+          session.login_mode,
+        )
+        currentAccount.value = account
+        await switchIdentity(account.accountId, account.role)
+      }
+    } catch {
+      logout()
+    }
+  } else {
+    const saved = accounts.value.find(
+      (item) => item.accountId === savedAccountId,
+    )
+    if (saved?.loginMode === 'one_click') await login(saved)
   }
 })
 </script>
@@ -285,7 +381,13 @@ onMounted(async () => {
     v-if="!currentAccount"
     :accounts="accounts"
     :scene-title="activeDeployment?.title"
+    :domain-id="activeDeployment?.domain_id ?? ''"
+    :role-templates="roleTemplates"
+    :registration-targets="registrationTargets"
+    :busy="authBusy"
+    :error="authError"
     @login="login"
+    @register="register"
   />
   <div v-else class="app-shell">
     <header class="app-header">

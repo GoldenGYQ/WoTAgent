@@ -41,6 +41,7 @@ wotagent-prototype/data/conversations.db*
 wotagent-prototype/data/agent_checkpoints.db*
 wotagent-prototype/data/agent_runs.db*
 wotagent-prototype/data/eldercare.db*
+wotagent-prototype/data/principals.db*
 chroma_db/
 
 # --- Model files ---

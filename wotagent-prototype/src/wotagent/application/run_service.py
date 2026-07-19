@@ -12,6 +12,7 @@ from ..conversation import ConversationStore
 from ..domain import DeploymentProfile, DeploymentProfileRegistry
 from ..identity import (
     DEFAULT_PRINCIPAL_DIRECTORY,
+    PrincipalAuthenticationError,
     PrincipalDirectory,
     PrincipalNotAssigned,
     TaskPrincipal,
@@ -49,6 +50,7 @@ class RunService:
         user_id: str,
         thinking: bool,
         profile_id: str | None = None,
+        auth_token: str | None = None,
         background_tasks: BackgroundTasks,
     ) -> RunRecord:
         if thinking and not self.thinking_supported():
@@ -61,6 +63,7 @@ class RunService:
             user_id,
             profile.domain_id,
             fallback_role=role,
+            auth_token=auth_token,
         )
         role = principal.roles[0]
         conversation_id = self._resolve_conversation(
@@ -253,13 +256,28 @@ class RunService:
         domain_id: str,
         *,
         fallback_role: str,
+        auth_token: str | None = None,
     ) -> TaskPrincipal:
         try:
+            resolver = getattr(
+                self.principal_directory,
+                "resolve_for_request",
+                None,
+            )
+            if callable(resolver):
+                return resolver(
+                    principal_id=principal_id,
+                    domain_id=domain_id,
+                    token=auth_token,
+                    fallback_role=fallback_role,
+                )
             return self.principal_directory.resolve(
                 principal_id,
                 domain_id,
                 fallback_role=fallback_role,
             )
+        except PrincipalAuthenticationError as exc:
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
         except PrincipalNotAssigned as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
 

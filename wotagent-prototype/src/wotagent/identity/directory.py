@@ -23,6 +23,13 @@ class PrincipalDirectory:
             for profile in profiles
         }
 
+    def get_profile(self, principal_id: str) -> PrincipalProfile | None:
+        return self._profiles.get(principal_id)
+
+    def login_mode(self, principal_id: str) -> str:
+        profile = self.get_profile(principal_id)
+        return profile.login_mode if profile else "disabled"
+
     def resolve(
         self,
         principal_id: str,
@@ -90,6 +97,7 @@ DEMO_PRINCIPALS = [
         principal_id="JH-1",
         display_name="王敏",
         login_enabled=True,
+        login_mode="one_click",
         bindings=[
             DomainRoleBinding(
                 domain_id="eldercare",
@@ -150,6 +158,7 @@ DEMO_PRINCIPALS = [
         principal_id="JH-2",
         display_name="赵强",
         login_enabled=True,
+        login_mode="one_click",
         bindings=[
             DomainRoleBinding(
                 domain_id="eldercare",
@@ -193,6 +202,125 @@ DEMO_PRINCIPALS = [
                 )],
             ),
         ],
+    ),
+    PrincipalProfile(
+        principal_id="JH-3",
+        display_name="张建国",
+        login_enabled=True,
+        login_mode="one_click",
+        bindings=[DomainRoleBinding(
+            domain_id="eldercare",
+            platform_role="viewer",
+            roles=["resident"],
+            role_labels=["居民本人"],
+            capabilities=[
+                "domain.read",
+                "health.status.read",
+                "health.summary.read",
+                "health.vitals.read",
+            ],
+            resource_ids=["resident:elderly-001"],
+            relationships=[PrincipalRelationship(
+                relation="self",
+                target_type="resident",
+                target_id="elderly-001",
+                target_label="张爷爷",
+            )],
+        )],
+    ),
+    PrincipalProfile(
+        principal_id="JH-4",
+        display_name="刘倩",
+        login_enabled=True,
+        login_mode="one_click",
+        bindings=[DomainRoleBinding(
+            domain_id="eldercare",
+            platform_role="operator",
+            roles=["duty_caregiver"],
+            role_labels=["值班护理员"],
+            capabilities=[
+                "domain.read",
+                "device.read",
+                "health.status.read",
+                "health.summary.read",
+                "health.vitals.read",
+                "health.trend.read",
+                "health.data_quality.read",
+                "resident.context.read",
+                "care.coordinate",
+                "environment.control",
+                "scenario.execute",
+                "event.acknowledge",
+            ],
+            resource_ids=[
+                "resident:elderly-001",
+                "resident:elderly-002",
+            ],
+            relationships=[
+                PrincipalRelationship(
+                    relation="duty_caregiver_of",
+                    target_type="resident",
+                    target_id="elderly-001",
+                    target_label="张爷爷",
+                ),
+                PrincipalRelationship(
+                    relation="duty_caregiver_of",
+                    target_type="resident",
+                    target_id="elderly-002",
+                    target_label="李奶奶",
+                ),
+            ],
+        )],
+    ),
+    PrincipalProfile(
+        principal_id="VH-1",
+        display_name="陈悦",
+        login_enabled=True,
+        login_mode="one_click",
+        bindings=[DomainRoleBinding(
+            domain_id="smart_home",
+            platform_role="operator",
+            roles=["family_member"],
+            role_labels=["家庭成员"],
+            capabilities=[
+                "domain.read",
+                "device.read",
+                "device.control",
+                "environment.use",
+            ],
+            resource_ids=["site:villa-demo"],
+            relationships=[PrincipalRelationship(
+                relation="member_of",
+                target_type="site",
+                target_id="villa-demo",
+                target_label="云栖别墅",
+            )],
+        )],
+    ),
+    PrincipalProfile(
+        principal_id="VH-2",
+        display_name="李芳",
+        login_enabled=True,
+        login_mode="one_click",
+        bindings=[DomainRoleBinding(
+            domain_id="smart_home",
+            platform_role="operator",
+            roles=["housekeeper"],
+            role_labels=["家政人员"],
+            capabilities=[
+                "domain.read",
+                "device.read",
+                "device.control",
+                "housekeeping.use",
+            ],
+            resource_ids=["site:villa-demo"],
+            relationships=[PrincipalRelationship(
+                relation="assigned_to",
+                target_type="site",
+                target_id="villa-demo",
+                target_label="云栖别墅",
+            )],
+        )],
     ),
     PrincipalProfile(
         principal_id="elderly-002",

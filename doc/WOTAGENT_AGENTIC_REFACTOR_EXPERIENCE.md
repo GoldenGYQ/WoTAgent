@@ -2193,3 +2193,68 @@ Task 现在同时保留 `model_requested_capability` 供审计，并将
 - 设备运维中文提议规范化为 `device_ops.use`；
 - 原始模型提议进入 Task 审计字段；
 - 安保读任务和写任务按资源声明选择 `security.observe` 或 `security.use`。
+
+## 29. P1 第四阶段：可持久化 Principal 注册与受控权限绑定
+
+### 29.1 注册绑定的不是任意权限
+
+“注册时绑定权限”不能实现成由前端提交 capability 列表，否则用户可以在请求中加入
+`admin` 或 `*` 完成自助提权。本轮把注册输入限制为：
+
+```text
+display_name + PIN + domain_id + role_template_id + target_id
+```
+
+角色模板和可选资源由后端提供。后端根据模板生成领域角色、关系、资源范围和能力集合，
+前端只负责展示和选择。`effective_scope` 仍在创建 Task 时由授权链计算，模型和用户都
+不能直接签发。
+
+### 29.2 两类登录主体
+
+系统保留两类实验账号：
+
+- one-click：后端预置的演示 Principal，便于课堂演示和快速切换；
+- pin：用户注册的持久化 Principal，必须通过 PIN 换取会话。
+
+新增默认主体覆盖养老护理员、观察员、居民本人、值班护理员，以及别墅家庭成员和家政
+人员。它们是人类 Principal，不是软件 Agent。软件 Agent 仍按健康、照护、环境、安防、
+能耗、家务和设备运维等抽象能力划分。
+
+### 29.3 持久化与会话边界
+
+`PrincipalStore` 使用 SQLite 保存 Principal、领域绑定和会话。PIN 使用带随机盐的
+PBKDF2-SHA256 保存，服务端只保存会话 Token 的 SHA-256 摘要。注册成功或登录成功后，
+前端保存原始 Token，并在 Run 与领域操作请求中发送 Bearer Token。
+
+为了兼容既有演示，预置 one-click 账号暂时允许无 Token 使用；注册账号在以下入口必须
+经过服务端会话解析：
+
+```text
+POST /api/v2/runs
+GET/POST /api/v2/domains/...（主体、资源、事件、遥测和场景操作）
+```
+
+### 29.4 本轮踩坑
+
+- 不能把注册表单的“权限绑定”做成 capability 多选框；正确交互是角色模板加资源对象。
+- 静态演示账号与持久化注册账号必须有明确 `login_mode`，否则前端无法判断是一键进入
+  还是要求 PIN。
+- 服务启动时只能幂等写入种子账号，不能重建整张表，否则用户注册数据会在重启后丢失。
+- PIN 和会话 Token 都不能明文落库；原始会话 Token 只在签发时返回客户端。
+- Profile 切换后必须重新解析该 Principal 在新领域的绑定，不能沿用旧领域权限。
+- 只保护登录接口没有意义；Run 创建和领域操作入口必须再次解析服务端会话。
+
+### 29.5 当前限制
+
+这是实验级身份层：没有账号找回、管理员审批、撤销会话、限流、锁定策略和生产级认证
+网关。预置 one-click 账号也刻意保留了低摩擦演示路径。因此它证明的是
+“Principal、关系、资源范围和 Agent 委派边界已经贯通”，不应被描述为生产级用户系统。
+
+测试覆盖 SQLite 重启后注册数据仍存在、错误 PIN 拒绝、无会话 Run/领域请求拒绝、
+角色模板不能越权注入 capability、前端 PIN 登录和注册负载。最终回归结果以本轮实际
+测试输出为准：
+
+```text
+Backend: 214 passed, 3 skipped
+Frontend: 30 passed, typecheck/build passed
+```

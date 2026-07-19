@@ -1,4 +1,5 @@
 export type AgentRole = 'viewer' | 'operator' | 'admin'
+export type LoginMode = 'one_click' | 'pin' | 'disabled'
 
 export interface LoginAccount {
   accountId: string
@@ -8,6 +9,7 @@ export interface LoginAccount {
   roleLabels: string[]
   capabilities: string[]
   relationships: PrincipalRelationship[]
+  loginMode: LoginMode
   subjectId?: string
   subjectName?: string
 }
@@ -30,6 +32,41 @@ export interface PrincipalContext {
   granted_capabilities: string[]
   resource_ids: string[]
   relationships: PrincipalRelationship[]
+  login_mode?: LoginMode
+}
+
+export interface RoleTemplate {
+  template_id: string
+  domain_id: string
+  label: string
+  description: string
+  platform_role: AgentRole
+  roles: string[]
+  capabilities: string[]
+  target_type: string
+  relation: string
+  self_register: boolean
+}
+
+export interface RegistrationTarget {
+  domain_id: string
+  target_type: string
+  target_id: string
+  label: string
+}
+
+export interface PrincipalSession {
+  token?: string
+  login_mode: LoginMode
+  principal: PrincipalContext
+}
+
+export interface PrincipalRegistration {
+  display_name: string
+  pin: string
+  domain_id: string
+  role_template_id: string
+  target_id: string
 }
 
 export interface UsageSummary {

@@ -16,6 +16,17 @@ successor to `99afb3d feat: harden agent context and real model health flow`
 > cards. Latest regression result: backend `210 passed, 3 skipped`; frontend
 > `26 passed`, typecheck/build passed.
 
+> 2026-07-19 registration update: `PrincipalDirectory` now has a SQLite-backed
+> `PrincipalStore`. The backend seeds several one-click demonstration
+> Principals and also supports persistent PIN registration. Registration binds
+> a human Principal to a backend-owned role template and resource target; it
+> never accepts arbitrary capabilities from the client. PINs are stored as
+> salted PBKDF2 hashes, session tokens are stored as SHA-256 hashes, and
+> registered Principals must present a Bearer session when creating Runs or
+> using Domain Operations. This is an experiment-grade identity layer, not a
+> production authentication service. Latest regression: backend
+> `214 passed, 3 skipped`; frontend `30 passed`, typecheck/build passed.
+
 > 2026-07-19 production hotfix: real DeepSeek runs exposed that Supervisor
 > natural-language `requested_capability` values were being compared directly
 > with canonical authorization IDs, and that Supervisor
@@ -222,6 +233,22 @@ Identity terminology:
 | Software Agent | A delegated capability executor, such as health analysis or environment control |
 | Resource/Subject | The resident, site or device affected by the request |
 | Relationship/Policy | The backend rule deciding whether that Principal may delegate that capability over that resource |
+
+Current login and registration model:
+
+```text
+One-click seeded Principal
+  -> backend-owned demo identity and bindings
+
+Registered Principal
+  -> display name + PIN
+  -> choose one backend-owned role template
+  -> choose one domain resource target
+  -> PrincipalStore persists Principal, binding and session
+  -> Run/Domain APIs resolve the Bearer session server-side
+```
+
+The client cannot submit raw capabilities or issue `effective_scope`.
 
 ## 3. Current Repository Layout
 

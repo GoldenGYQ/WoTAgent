@@ -18,7 +18,11 @@ import type {
   HealthSummary,
   MonitorStatus,
   PrincipalContext,
+  PrincipalRegistration,
+  PrincipalSession,
+  RegistrationTarget,
   Resident,
+  RoleTemplate,
   RiskEvent,
   RunRecord,
   SensorType,
@@ -30,12 +34,15 @@ export interface TraceSubscription {
   close: () => void
 }
 
+let sessionToken: string | null = null
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const isFormData = init?.body instanceof FormData
   const response = await fetch(path, {
     ...init,
     headers: {
       ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+      ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
       ...init?.headers,
     },
   })
@@ -52,11 +59,39 @@ function websocketUrl(path: string): string {
 }
 
 export const agentV2Api = {
+  setSessionToken(token: string | null): void {
+    sessionToken = token
+  },
   health: (): Promise<{ status: string; pipeline: string }> => request('/api/health'),
   capabilities: (): Promise<ApiCapabilities> => request('/api/v2/capabilities'),
   listDeploymentProfiles: (): Promise<{ default_profile_id: string; profiles: DeploymentProfile[] }> => request('/api/v2/deployment/profiles'),
   listPrincipals(domainId: string): Promise<{ domain_id: string; principals: PrincipalContext[] }> {
     return request(`/api/v2/principals?domain_id=${encodeURIComponent(domainId)}&login_only=true`)
+  },
+  listRoleTemplates(domainId: string): Promise<{ domain_id: string; templates: RoleTemplate[] }> {
+    return request(`/api/v2/principals/role-templates?domain_id=${encodeURIComponent(domainId)}`)
+  },
+  listRegistrationTargets(domainId: string): Promise<{ domain_id: string; targets: RegistrationTarget[] }> {
+    return request(`/api/v2/principals/registration-targets?domain_id=${encodeURIComponent(domainId)}`)
+  },
+  registerPrincipal(payload: PrincipalRegistration): Promise<PrincipalSession> {
+    return request('/api/v2/principals/register', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+  loginPrincipal(principalId: string, domainId: string, pin?: string): Promise<PrincipalSession> {
+    return request('/api/v2/principals/login', {
+      method: 'POST',
+      body: JSON.stringify({
+        principal_id: principalId,
+        domain_id: domainId,
+        pin: pin || undefined,
+      }),
+    })
+  },
+  currentPrincipalSession(domainId: string): Promise<PrincipalSession> {
+    return request(`/api/v2/principals/session?domain_id=${encodeURIComponent(domainId)}`)
   },
   getPrincipalContext(principalId: string, domainId: string): Promise<PrincipalContext> {
     return request(`/api/v2/principals/${encodeURIComponent(principalId)}/context?domain_id=${encodeURIComponent(domainId)}`)

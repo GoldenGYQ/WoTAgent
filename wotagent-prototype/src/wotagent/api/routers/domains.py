@@ -5,13 +5,18 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
 from ...domain import (
     DomainAccessDenied,
     DomainNotFound,
     DomainOperationsRegistry,
+)
+from ...identity import (
+    PrincipalAuthenticationError,
+    PrincipalDirectory,
+    PrincipalNotAssigned,
 )
 
 
@@ -36,6 +41,7 @@ class EventAcknowledgeRequest(BaseModel):
 
 def create_domain_router(
     get_registry: Callable[[], DomainOperationsRegistry],
+    get_principals: Callable[[], PrincipalDirectory] | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/v2/domains", tags=["domains"])
 
@@ -54,6 +60,30 @@ def create_domain_router(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    def authorized_principal(
+        domain_id: str,
+        principal_id: str,
+        authorization: str | None,
+    ) -> str:
+        if get_principals is None:
+            return principal_id
+        directory = get_principals()
+        resolver = getattr(directory, "resolve_for_request", None)
+        if not callable(resolver):
+            return principal_id
+        try:
+            principal = resolver(
+                principal_id=principal_id,
+                domain_id=domain_id,
+                token=_bearer_token(authorization),
+                fallback_role="viewer",
+            )
+        except PrincipalAuthenticationError as exc:
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
+        except PrincipalNotAssigned as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        return principal.principal_id
 
     async def guarded_async(call: Callable[[], Any]) -> Any:
         try:
@@ -78,7 +108,13 @@ def create_domain_router(
     async def list_subjects(
         domain_id: str,
         principal_id: str = "local-user",
+        authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
+        principal_id = authorized_principal(
+            domain_id,
+            principal_id,
+            authorization,
+        )
         return {
             "domain_id": domain_id,
             "subjects": guarded(
@@ -91,7 +127,13 @@ def create_domain_router(
         domain_id: str,
         subject_id: str,
         principal_id: str = "local-user",
+        authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
+        principal_id = authorized_principal(
+            domain_id,
+            principal_id,
+            authorization,
+        )
         return guarded(
             lambda: adapter(domain_id).overview(
                 subject_id,
@@ -104,7 +146,13 @@ def create_domain_router(
         domain_id: str,
         subject_id: str,
         principal_id: str = "local-user",
+        authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
+        principal_id = authorized_principal(
+            domain_id,
+            principal_id,
+            authorization,
+        )
         return {
             "domain_id": domain_id,
             "subject_id": subject_id,
@@ -121,7 +169,13 @@ def create_domain_router(
         domain_id: str,
         subject_id: str,
         principal_id: str = "local-user",
+        authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
+        principal_id = authorized_principal(
+            domain_id,
+            principal_id,
+            authorization,
+        )
         return {
             "domain_id": domain_id,
             "subject_id": subject_id,
@@ -138,7 +192,13 @@ def create_domain_router(
         domain_id: str,
         subject_id: str,
         principal_id: str = "local-user",
+        authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
+        principal_id = authorized_principal(
+            domain_id,
+            principal_id,
+            authorization,
+        )
         return {
             "domain_id": domain_id,
             "subject_id": subject_id,
@@ -158,11 +218,17 @@ def create_domain_router(
     async def ingest_telemetry(
         domain_id: str,
         request: TelemetryIngestRequest,
+        authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
+        principal_id = authorized_principal(
+            domain_id,
+            request.principal_id,
+            authorization,
+        )
         return await guarded_async(
             lambda: adapter(domain_id).ingest(
                 request.subject_id,
-                request.principal_id,
+                principal_id,
                 request.model_dump(mode="json"),
             )
         )
@@ -171,11 +237,17 @@ def create_domain_router(
     async def simulate(
         domain_id: str,
         request: ScenarioRequest,
+        authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
+        principal_id = authorized_principal(
+            domain_id,
+            request.principal_id,
+            authorization,
+        )
         return await guarded_async(
             lambda: adapter(domain_id).simulate(
                 request.subject_id,
-                request.principal_id,
+                principal_id,
                 request.scenario,
             )
         )
@@ -185,15 +257,28 @@ def create_domain_router(
         domain_id: str,
         event_id: str,
         request: EventAcknowledgeRequest,
+        authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
+        principal_id = authorized_principal(
+            domain_id,
+            request.principal_id,
+            authorization,
+        )
         return guarded(
             lambda: adapter(domain_id).acknowledge(
                 event_id,
-                request.principal_id,
+                principal_id,
             )
         )
 
     return router
+
+
+def _bearer_token(authorization: str | None) -> str | None:
+    if not authorization:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    return token.strip() if scheme.lower() == "bearer" and token else None
 
 
 __all__ = ["create_domain_router"]

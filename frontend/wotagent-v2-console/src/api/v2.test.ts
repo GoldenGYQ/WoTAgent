@@ -120,4 +120,50 @@ describe('agentV2Api', () => {
       '/api/v2/principals?domain_id=smart_home&login_only=true',
     )
   })
+
+  it('registers from a role template without sending raw capabilities', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        token: 'session-token',
+        login_mode: 'pin',
+        principal: { principal_id: 'USR-1' },
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await agentV2Api.registerPrincipal({
+      display_name: '新用户',
+      pin: '2468',
+      domain_id: 'smart_home',
+      role_template_id: 'villa_family_member',
+      target_id: 'villa-demo',
+    })
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body).toEqual({
+      display_name: '新用户',
+      pin: '2468',
+      domain_id: 'smart_home',
+      role_template_id: 'villa_family_member',
+      target_id: 'villa-demo',
+    })
+    expect(body).not.toHaveProperty('capabilities')
+  })
+
+  it('attaches the principal session token to later API requests', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ conversations: [] }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    agentV2Api.setSessionToken('session-token')
+
+    await agentV2Api.listConversations('USR-1')
+
+    expect(fetchMock.mock.calls[0][1].headers).toMatchObject({
+      Authorization: 'Bearer session-token',
+    })
+    agentV2Api.setSessionToken(null)
+  })
 })
