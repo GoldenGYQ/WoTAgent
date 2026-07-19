@@ -767,12 +767,15 @@ button:focus-visible, textarea:focus-visible {
 .guidance-examples button svg { color: var(--teal); }
 
 .composer-region { flex: 0 0 auto; padding: 10px 14px 12px; border-top: 1px solid var(--line); background: #fbfcfd; }
-.composer-shell { min-height: 64px; display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; padding: 9px 10px; border: 1px solid var(--line-strong); border-radius: 7px; background: #fff; box-shadow: 0 2px 9px rgba(30, 48, 65, 0.06); }
+.composer-shell { min-height: 76px; display: flex; flex-direction: column; border: 1px solid var(--line-strong); border-radius: 7px; background: #fff; box-shadow: 0 2px 9px rgba(30, 48, 65, 0.06); overflow: hidden; }
 .composer-shell:focus-within { border-color: #65a7a0; box-shadow: 0 0 0 3px rgba(8, 127, 115, 0.1); }
 .composer-shell[data-recording="true"] { border-color: #d77777; box-shadow: 0 0 0 3px rgba(185, 53, 53, 0.08); }
-.composer-shell textarea { width: 100%; min-height: 42px; max-height: 128px; resize: none; border: 0; outline: 0; color: var(--text); background: transparent; line-height: 1.5; }
+.composer-shell[data-canceling="true"] { border-color: #e59b52; box-shadow: 0 0 0 3px rgba(207, 122, 39, 0.1); }
+.composer-input-area { min-height: 48px; display: flex; padding: 9px 11px 7px; }
+.composer-shell textarea { width: 100%; min-height: 42px; max-height: 128px; field-sizing: content; resize: none; border: 0; outline: 0; color: var(--text); background: transparent; line-height: 1.5; }
 .composer-shell textarea::placeholder { color: #9aa5af; }
-.composer-controls { justify-content: flex-end; gap: 7px; }
+.composer-controls { min-height: 42px; justify-content: space-between; gap: 9px; padding: 6px 7px; border-top: 1px solid #edf0f2; background: #fbfcfd; }
+.composer-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; }
 .principal-context { min-width: 0; height: 30px; display: inline-flex; align-items: center; gap: 5px; padding: 0 7px; border: 1px solid var(--line); border-radius: 5px; color: var(--text-muted); background: var(--surface-subtle); font-size: 9px; white-space: nowrap; }
 .principal-context svg { flex: 0 0 auto; color: var(--teal); }
 .principal-context strong { color: var(--text); font-size: 10px; }
@@ -786,12 +789,46 @@ button:focus-visible, textarea:focus-visible {
 .thinking-toggle.active i::after { transform: translateX(11px); }
 .thinking-toggle:disabled { cursor: not-allowed; opacity: 0.45; }
 .thinking-mode { display: inline-flex; align-items: center; gap: 4px; color: var(--teal); font-size: 10px; font-weight: 600; }
-.voice-button { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--line-strong); border-radius: 5px; color: var(--text-muted); background: #fff; }
-.voice-button:hover:not(:disabled) { color: var(--teal); border-color: #8dbdb7; background: #f1f9f7; }
-.voice-button.recording { color: #fff; border-color: var(--red); background: var(--red); }
-.voice-button:disabled { cursor: wait; opacity: .55; }
-.recording-status { display: inline-flex; align-items: center; gap: 5px; color: var(--red); font-family: "Cascadia Code", Consolas, monospace; font-size: 10px; }
-.recording-status i { width: 7px; height: 7px; border-radius: 50%; background: var(--red); animation: pulse 1s ease-in-out infinite; }
+.input-mode-button { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--line-strong); border-radius: 5px; color: var(--text-muted); background: #fff; }
+.input-mode-button:hover:not(:disabled) { color: var(--teal); border-color: #8dbdb7; background: #f1f9f7; }
+.input-mode-button:disabled { cursor: wait; opacity: .55; }
+.hold-to-talk {
+  position: relative;
+  width: 100%;
+  min-height: 74px;
+  display: grid;
+  grid-template-columns: 24px auto;
+  grid-template-rows: auto auto;
+  align-content: center;
+  justify-content: center;
+  column-gap: 8px;
+  padding: 10px 16px;
+  border: 1px solid #b7c5ca;
+  border-radius: 5px;
+  color: #31434f;
+  background: #f7f9fa;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease, transform 120ms ease;
+}
+.hold-to-talk:hover:not(:disabled) { border-color: #86b7b1; color: var(--teal); background: #f0f8f7; }
+.hold-to-talk:active, .hold-to-talk.recording { transform: translateY(1px); }
+.hold-to-talk > svg { grid-row: 1 / 3; align-self: center; color: var(--teal); }
+.hold-to-talk > span:not(.voice-wave) { align-self: end; font-size: 13px; font-weight: 650; }
+.hold-to-talk small { align-self: start; color: var(--text-muted); font-size: 9px; font-weight: 400; }
+.hold-to-talk.recording { border-color: #cf7777; color: #913b3b; background: #fff4f4; }
+.hold-to-talk.recording > svg { color: var(--red); }
+.hold-to-talk.canceling { border-color: #d48a43; color: #8b531d; background: #fff7ec; }
+.hold-to-talk.canceling > svg { color: #bd6b1f; }
+.hold-to-talk.transcribing { color: var(--teal); background: #f0f8f7; }
+.hold-to-talk:disabled { cursor: wait; opacity: .8; }
+.voice-live-dot { display: inline-block; width: 6px; height: 6px; margin-right: 3px; border-radius: 50%; background: var(--red); animation: pulse 1s ease-in-out infinite; }
+.voice-wave { position: absolute; right: 12px; bottom: 10px; height: 16px; display: flex; align-items: center; gap: 2px; }
+.voice-wave i { width: 2px; height: 5px; border-radius: 1px; background: currentColor; animation: voice-wave 760ms ease-in-out infinite alternate; }
+.voice-wave i:nth-child(2), .voice-wave i:nth-child(6) { animation-delay: 100ms; }
+.voice-wave i:nth-child(3), .voice-wave i:nth-child(5) { animation-delay: 200ms; }
+.voice-wave i:nth-child(4) { animation-delay: 300ms; }
 .send-button { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--teal); border-radius: 5px; color: #fff; background: var(--teal); }
 .send-button:hover:not(:disabled) { background: #076d63; }
 .send-button:disabled { cursor: not-allowed; opacity: 0.45; }
@@ -853,6 +890,10 @@ button:focus-visible, textarea:focus-visible {
 .spin { animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 50% { opacity: 0.45; } }
+@keyframes voice-wave {
+  from { height: 4px; opacity: .45; }
+  to { height: 15px; opacity: 1; }
+}
 @keyframes waiting-dots {
   0% { width: 0; }
   100% { width: 14px; }
@@ -909,10 +950,12 @@ button:focus-visible, textarea:focus-visible {
   .guidance-group { grid-template-columns: 1fr; gap: 9px; padding: 13px 0; }
   .guidance-group > header { padding-top: 0; }
   .composer-region { padding: 8px; }
-  .composer-shell { grid-template-columns: 1fr; }
-  .composer-controls { justify-content: flex-end; }
+  .composer-input-area { padding: 8px; }
+  .composer-controls { align-items: center; }
   .principal-context { margin-right: auto; }
+  .principal-context > span { display: none; }
   .thinking-toggle > span { display: none; }
+  .hold-to-talk { min-height: 68px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

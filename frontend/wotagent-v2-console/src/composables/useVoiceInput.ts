@@ -33,6 +33,7 @@ export function useVoiceInput(
   let chunks: Blob[] = []
   let timer: ReturnType<typeof setInterval> | null = null
   let autoStopTimer: ReturnType<typeof setTimeout> | null = null
+  let discardRecording = false
 
   function clearTimers(): void {
     if (timer) clearInterval(timer)
@@ -71,11 +72,18 @@ export function useVoiceInput(
     recorder.stop()
   }
 
+  function cancelRecording(): void {
+    if (!recorder || recorder.state === 'inactive') return
+    discardRecording = true
+    recorder.stop()
+  }
+
   async function startRecording(): Promise<void> {
     if (!available.value || recording.value || transcribing.value) return
     error.value = ''
     elapsedSeconds.value = 0
     chunks = []
+    discardRecording = false
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -102,9 +110,15 @@ export function useVoiceInput(
         const blob = new Blob(chunks, {
           type: recorder?.mimeType || mimeType || 'audio/webm',
         })
+        const shouldDiscard = discardRecording
         recording.value = false
         clearTimers()
         releaseStream()
+        if (shouldDiscard) {
+          chunks = []
+          elapsedSeconds.value = 0
+          return
+        }
         void transcribe(blob)
       }
       recorder.start(250)
@@ -132,7 +146,10 @@ export function useVoiceInput(
 
   onBeforeUnmount(() => {
     clearTimers()
-    if (recorder?.state !== 'inactive') recorder?.stop()
+    if (recorder?.state !== 'inactive') {
+      discardRecording = true
+      recorder?.stop()
+    }
     releaseStream()
   })
 
@@ -142,6 +159,9 @@ export function useVoiceInput(
     transcribing,
     elapsedSeconds,
     error,
+    startRecording,
+    stopRecording,
+    cancelRecording,
     toggleRecording,
   }
 }

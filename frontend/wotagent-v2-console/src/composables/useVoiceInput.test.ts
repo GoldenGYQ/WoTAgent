@@ -73,4 +73,37 @@ describe('useVoiceInput', () => {
     expect(voice.transcribing.value).toBe(false)
     wrapper.unmount()
   })
+
+  it('discards a canceled hold-to-talk recording without uploading it', async () => {
+    const stopTrack = vi.fn()
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        getUserMedia: vi.fn().mockResolvedValue({
+          getTracks: () => [{ stop: stopTrack }],
+        }),
+      },
+    })
+    vi.stubGlobal('MediaRecorder', FakeMediaRecorder)
+    const transcribe = vi.spyOn(agentV2Api, 'transcribeSpeech')
+    const onTranscript = vi.fn()
+    let voice!: ReturnType<typeof useVoiceInput>
+    const wrapper = mount(defineComponent({
+      setup() {
+        voice = useVoiceInput(() => true, () => 30, onTranscript)
+        return () => null
+      },
+    }))
+
+    await voice.startRecording()
+    expect(voice.recording.value).toBe(true)
+    voice.cancelRecording()
+    await flushPromises()
+
+    expect(transcribe).not.toHaveBeenCalled()
+    expect(onTranscript).not.toHaveBeenCalled()
+    expect(stopTrack).toHaveBeenCalledOnce()
+    expect(voice.elapsedSeconds.value).toBe(0)
+    wrapper.unmount()
+  })
 })

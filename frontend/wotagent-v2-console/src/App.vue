@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue'
 import {
+  AudioLines,
   Boxes,
   BrainCircuit,
+  Keyboard,
   LoaderCircle,
   LogOut,
   MessageSquare,
@@ -11,7 +13,6 @@ import {
   RefreshCw,
   SendHorizontal,
   ShieldCheck,
-  Square,
   SquareTerminal,
   X,
 } from 'lucide-vue-next'
@@ -65,11 +66,17 @@ const sidebarCollapsed = ref(false)
 const appView = ref<'agent' | 'domains'>('agent')
 const currentAccount = ref<LoginAccount | null>(savedAccount())
 const composer = ref<HTMLTextAreaElement | null>(null)
+const inputMode = ref<'text' | 'voice'>('text')
+const voiceGestureActive = ref(false)
+const voiceCancelIntent = ref(false)
+let voiceGestureStartY = 0
+let pendingVoiceOutcome: 'stop' | 'cancel' | null = null
 const voiceInput = useVoiceInput(
   () => speechSupported.value,
   () => speechMaxSeconds.value,
   (transcript) => {
     draft.value = [draft.value.trim(), transcript].filter(Boolean).join(' ')
+    inputMode.value = 'text'
     void nextTick(() => composer.value?.focus())
   },
 )
@@ -101,7 +108,61 @@ function keyboardSubmit(event: KeyboardEvent): void {
 
 function useExample(message: string): void {
   draft.value = message
+  inputMode.value = 'text'
   void nextTick(() => composer.value?.focus())
+}
+
+function setInputMode(mode: 'text' | 'voice'): void {
+  if (voiceInput.recording.value) voiceInput.cancelRecording()
+  voiceGestureActive.value = false
+  voiceCancelIntent.value = false
+  pendingVoiceOutcome = null
+  inputMode.value = mode
+  if (mode === 'text') void nextTick(() => composer.value?.focus())
+}
+
+async function beginVoiceGesture(event: PointerEvent): Promise<void> {
+  if (
+    (event.pointerType === 'mouse' && event.button !== 0)
+    || voiceInput.transcribing.value
+    || submitting.value
+  ) return
+  event.preventDefault()
+  voiceGestureActive.value = true
+  voiceCancelIntent.value = false
+  voiceGestureStartY = event.clientY
+  pendingVoiceOutcome = null
+  ;(event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId)
+  await voiceInput.startRecording()
+  if (pendingVoiceOutcome === 'cancel') voiceInput.cancelRecording()
+  else if (pendingVoiceOutcome === 'stop') voiceInput.stopRecording()
+  pendingVoiceOutcome = null
+}
+
+function moveVoiceGesture(event: PointerEvent): void {
+  if (!voiceGestureActive.value) return
+  voiceCancelIntent.value = voiceGestureStartY - event.clientY >= 56
+}
+
+function endVoiceGesture(): void {
+  if (!voiceGestureActive.value) return
+  voiceGestureActive.value = false
+  const outcome = voiceCancelIntent.value ? 'cancel' : 'stop'
+  if (voiceInput.recording.value) {
+    if (outcome === 'cancel') voiceInput.cancelRecording()
+    else voiceInput.stopRecording()
+  } else {
+    pendingVoiceOutcome = outcome
+  }
+  voiceCancelIntent.value = false
+}
+
+function cancelVoiceGesture(): void {
+  if (!voiceGestureActive.value && !voiceInput.recording.value) return
+  voiceGestureActive.value = false
+  voiceCancelIntent.value = false
+  if (voiceInput.recording.value) voiceInput.cancelRecording()
+  else pendingVoiceOutcome = 'cancel'
 }
 
 function chooseRun(runId: string): void {
@@ -215,16 +276,65 @@ onMounted(async () => {
           <div v-if="submitError || voiceInput.error.value" class="composer-error">
             {{ submitError || voiceInput.error.value }}
           </div>
-          <div class="composer-shell" :data-recording="voiceInput.recording.value">
-            <textarea
-              ref="composer"
-              v-model="draft"
-              rows="1"
-              maxlength="2000"
-              placeholder="向 WoTAgent 下达任务"
-              aria-label="任务指令"
-              @keydown="keyboardSubmit"
-            />
+          <div
+            class="composer-shell"
+            :data-mode="inputMode"
+            :data-recording="voiceInput.recording.value"
+            :data-canceling="voiceCancelIntent"
+          >
+            <div class="composer-input-area">
+              <textarea
+                v-if="inputMode === 'text'"
+                ref="composer"
+                v-model="draft"
+                rows="1"
+                maxlength="2000"
+                placeholder="输入任务，Enter 发送，Shift + Enter 换行"
+                aria-label="任务指令"
+                @keydown="keyboardSubmit"
+              />
+              <button
+                v-else
+                class="hold-to-talk"
+                :class="{
+                  recording: voiceInput.recording.value,
+                  canceling: voiceCancelIntent,
+                  transcribing: voiceInput.transcribing.value,
+                }"
+                type="button"
+                :disabled="voiceInput.transcribing.value || submitting"
+                @contextmenu.prevent
+                @pointerdown="beginVoiceGesture"
+                @pointermove="moveVoiceGesture"
+                @pointerup="endVoiceGesture"
+                @pointercancel="cancelVoiceGesture"
+              >
+                <LoaderCircle
+                  v-if="voiceInput.transcribing.value"
+                  :size="20"
+                  class="spin"
+                />
+                <AudioLines v-else :size="21" />
+                <span v-if="voiceInput.transcribing.value">正在转成文字</span>
+                <span v-else-if="voiceInput.recording.value && voiceCancelIntent">
+                  松开取消
+                </span>
+                <span v-else-if="voiceInput.recording.value">松开转文字</span>
+                <span v-else>按住 说话</span>
+                <small v-if="voiceInput.recording.value">
+                  <i class="voice-live-dot" />
+                  {{ voiceInput.elapsedSeconds.value }}s
+                  · {{ voiceCancelIntent ? '已进入取消区域' : '上滑取消' }}
+                </small>
+                <small v-else-if="voiceInput.transcribing.value">
+                  正在识别中英混合语音
+                </small>
+                <small v-else>支持中英混合，松开后可编辑再发送</small>
+                <span v-if="voiceInput.recording.value" class="voice-wave" aria-hidden="true">
+                  <i v-for="index in 7" :key="index" />
+                </span>
+              </button>
+            </div>
             <div class="composer-controls">
               <span
                 class="principal-context"
@@ -235,41 +345,45 @@ onMounted(async () => {
                 <code>{{ currentAccount.role }}</code>
                 <span>{{ currentAccount.subjectName }}</span>
               </span>
-              <button
-                v-if="thinkingSupported"
-                class="thinking-toggle"
-                type="button"
-                role="switch"
-                :aria-checked="thinking"
-                :class="{ active: thinking }"
-                title="切换深度思考"
-                @click="thinking = !thinking"
-              >
-                <BrainCircuit :size="15" />
-                <span>深度思考</span>
-                <i aria-hidden="true" />
-              </button>
-              <span v-if="voiceInput.recording.value" class="recording-status">
-                <i />{{ voiceInput.elapsedSeconds.value }}s
-              </span>
-              <button
-                v-if="voiceInput.available.value"
-                class="voice-button"
-                :class="{ recording: voiceInput.recording.value }"
-                type="button"
-                :title="voiceInput.recording.value ? '停止并转写' : '语音输入'"
-                :aria-label="voiceInput.recording.value ? '停止录音并转写' : '开始语音输入'"
-                :disabled="voiceInput.transcribing.value || submitting"
-                @click="voiceInput.toggleRecording"
-              >
-                <LoaderCircle v-if="voiceInput.transcribing.value" :size="17" class="spin" />
-                <Square v-else-if="voiceInput.recording.value" :size="14" />
-                <Mic v-else :size="17" />
-              </button>
-              <button class="send-button" type="button" title="发送任务" :disabled="!draft.trim() || submitting || backendState === 'offline'" @click="send">
-                <LoaderCircle v-if="submitting" :size="17" class="spin" />
-                <SendHorizontal v-else :size="17" />
-              </button>
+              <div class="composer-actions">
+                <button
+                  v-if="thinkingSupported"
+                  class="thinking-toggle"
+                  type="button"
+                  role="switch"
+                  :aria-checked="thinking"
+                  :class="{ active: thinking }"
+                  title="切换深度思考"
+                  @click="thinking = !thinking"
+                >
+                  <BrainCircuit :size="15" />
+                  <span>深度思考</span>
+                  <i aria-hidden="true" />
+                </button>
+                <button
+                  v-if="voiceInput.available.value"
+                  class="input-mode-button"
+                  type="button"
+                  :title="inputMode === 'text' ? '切换到按住说话' : '切换到键盘输入'"
+                  :aria-label="inputMode === 'text' ? '切换到语音输入' : '切换到文字输入'"
+                  :disabled="voiceInput.transcribing.value || submitting"
+                  @click="setInputMode(inputMode === 'text' ? 'voice' : 'text')"
+                >
+                  <Mic v-if="inputMode === 'text'" :size="18" />
+                  <Keyboard v-else :size="18" />
+                </button>
+                <button
+                  v-if="inputMode === 'text'"
+                  class="send-button"
+                  type="button"
+                  title="发送任务"
+                  :disabled="!draft.trim() || submitting || backendState === 'offline'"
+                  @click="send"
+                >
+                  <LoaderCircle v-if="submitting" :size="17" class="spin" />
+                  <SendHorizontal v-else :size="17" />
+                </button>
+              </div>
             </div>
           </div>
         </div>
