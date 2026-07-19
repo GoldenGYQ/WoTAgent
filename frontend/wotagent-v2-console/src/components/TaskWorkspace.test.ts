@@ -45,6 +45,8 @@ describe('TaskWorkspace', () => {
         activeRun: null,
         currentAccountId: 'JH-1',
         currentAccountName: '王护理员',
+        currentAccountRole: 'operator',
+        currentSubjectName: '张爷爷',
         sidebarCollapsed: false,
       },
     })
@@ -64,11 +66,42 @@ describe('TaskWorkspace', () => {
         activeRun: null,
         currentAccountId: 'JH-2',
         currentAccountName: '赵观察员',
+        currentAccountRole: 'viewer',
+        currentSubjectName: '李奶奶',
         sidebarCollapsed: false,
       },
     })
 
     expect(wrapper.text()).toContain('JH-2')
-    expect(wrapper.text()).toContain('欢迎赵观察员')
+    expect(wrapper.text()).toContain('新会话')
+    expect(wrapper.text()).toContain('只读观察角色')
+    expect(wrapper.text()).toContain('查看李奶奶今天的健康状态')
+    expect(wrapper.text()).not.toContain('把李奶奶房间温度调到 24 度')
+  })
+
+  it('shows operator capabilities and emits a selected task example', async () => {
+    const wrapper = mount(TaskWorkspace, {
+      props: {
+        conversation: null,
+        runs: [],
+        activeRun: null,
+        currentAccountId: 'JH-1',
+        currentAccountName: '王护理员',
+        currentAccountRole: 'operator',
+        currentSubjectName: '张爷爷',
+        sidebarCollapsed: false,
+      },
+    })
+
+    expect(wrapper.text()).toContain('设备控制')
+    expect(wrapper.text()).toContain('条件联动任务')
+    const example = wrapper.findAll('.guidance-examples button').find(
+      (item) => item.text().includes('奇数就打开空调'),
+    )
+    expect(example).toBeDefined()
+    await example!.trigger('click')
+    expect(wrapper.emitted('example')?.[0]).toEqual([
+      '检查开着的灯数量，奇数就打开空调，偶数就打开加湿器',
+    ])
   })
 })

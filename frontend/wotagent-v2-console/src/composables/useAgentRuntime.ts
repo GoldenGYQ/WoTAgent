@@ -65,7 +65,14 @@ function persistState(): void {
     createdAt: run.createdAt,
   }))
   localStorage.setItem(`${STORAGE_KEY}.${userId.value}`, JSON.stringify(value))
-  if (activeConversationId.value) localStorage.setItem(`${ACTIVE_CONVERSATION_KEY}.${userId.value}`, activeConversationId.value)
+  if (activeConversationId.value) {
+    localStorage.setItem(
+      `${ACTIVE_CONVERSATION_KEY}.${userId.value}`,
+      activeConversationId.value,
+    )
+  } else {
+    localStorage.removeItem(`${ACTIVE_CONVERSATION_KEY}.${userId.value}`)
+  }
 }
 
 function createRuntimeRun(record: RunRecord, roleValue: AgentRole, thinkingValue: boolean): RuntimeRun {
@@ -314,9 +321,9 @@ async function hydrateRuntime(): Promise<void> {
   const response = await agentV2Api.listConversations(userId.value)
   conversations.splice(0, conversations.length, ...response.conversations.map((item) => ({ ...item, turns: [], loading: false })))
   await Promise.all(readStoredRuns().map(restoreRun))
-  const stored = localStorage.getItem(`${ACTIVE_CONVERSATION_KEY}.${userId.value}`)
-  activeConversationId.value = conversationById(stored ?? '')?.conversation_id ?? conversations[0]?.conversation_id ?? null
-  if (activeConversationId.value) await selectConversation(activeConversationId.value)
+  activeConversationId.value = null
+  activeRunId.value = null
+  localStorage.removeItem(`${ACTIVE_CONVERSATION_KEY}.${userId.value}`)
 }
 
 async function ensureConversation(): Promise<RuntimeConversation> {
@@ -377,6 +384,7 @@ async function selectConversation(conversationId: string): Promise<void> {
 function newConversation(): void {
   activeConversationId.value = null
   activeRunId.value = null
+  localStorage.removeItem(`${ACTIVE_CONVERSATION_KEY}.${userId.value}`)
 }
 
 async function deleteConversation(conversationId: string): Promise<void> {

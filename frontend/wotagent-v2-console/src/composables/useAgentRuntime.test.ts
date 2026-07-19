@@ -87,6 +87,10 @@ describe('useAgentRuntime refresh recovery', () => {
         createdAt: run.created_at,
       },
     ]))
+    localStorage.setItem(
+      'wotagent-v2-console.active-conversation.JH-1',
+      run.conversation_id,
+    )
     vi.spyOn(agentV2Api, 'listConversations').mockResolvedValue({
       conversations: [{
         conversation_id: run.conversation_id,
@@ -134,6 +138,11 @@ describe('useAgentRuntime refresh recovery', () => {
     expect(runtime.runs[0].events.map((event) => event.sequence)).toEqual([1, 2])
     expect(runtime.runs[0].streamState).toBe('closed')
     expect(agentV2Api.getEvents).toHaveBeenCalledWith(run.run_id, 0)
+    expect(runtime.activeConversationId.value).toBeNull()
+    expect(runtime.activeRunId.value).toBeNull()
+    expect(localStorage.getItem(
+      'wotagent-v2-console.active-conversation.JH-1',
+    )).toBeNull()
 
     wrapper.unmount()
   })

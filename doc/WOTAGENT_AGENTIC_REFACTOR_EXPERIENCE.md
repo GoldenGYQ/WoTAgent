@@ -1764,3 +1764,47 @@ JSDOM 中。测试验证原始 script 不会成为 DOM、`javascript:` 链接不
 Frontend: 21 passed
 Frontend typecheck/build: passed
 ```
+
+## 22. 登录后默认进入角色化新会话
+
+### 22.1 问题与边界
+
+前端原先在身份切换或页面初始化时，会读取上次选中的会话；找不到时又自动选择
+会话列表中的第一项。这个逻辑把“加载历史会话”和“选择当前会话”绑定在了一起，
+导致用户登录后直接落入旧任务，看不到系统当前能做什么。
+
+本次没有删除历史会话，也没有改变后端 Conversation、Turn、Run 和 Task 的关系。
+初始化仍会加载会话列表和恢复 Run 缓存，但当前会话保持为 `null`。用户发送第一条
+消息时，原有 `ensureConversation()` 再按需创建真实会话。
+
+```text
+登录或切换身份
+→ 加载该身份的历史会话和 Run
+→ 清除旧的 active conversation
+→ 展示新会话操作指南
+→ 用户发送消息
+→ 按需创建 Conversation 和 Run
+```
+
+### 22.2 角色化提示
+
+新会话根据当前账号的真实 `role` 和关联主体生成提示：
+
+- `viewer`：健康读取、环境和设备查询、会话总结；
+- `operator`：健康与照护协同、环境和设备控制、条件联动任务。
+
+界面同时说明当前主体 ID、角色和关联服务对象。`viewer` 明确提示控制请求会被后端
+策略拒绝；`operator` 明确提示高风险动作仍需确认。示例按钮只把文本填入输入框，
+不会自动发送或创建 Run，用户仍可在提交前检查和修改任务。
+
+### 22.3 测试
+
+组件测试验证不同角色不会看到错误能力示例，并验证点击示例只触发输入填充。运行时
+测试验证身份切换后历史 Run 仍可恢复，但不会自动选中旧会话，旧的本地 active
+conversation 记录也会被清除。
+
+```text
+Frontend: 22 passed
+Frontend typecheck/build: passed
+Public frontend HTTP check: 200
+```
