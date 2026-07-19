@@ -188,6 +188,101 @@ button:focus-visible, textarea:focus-visible {
 .turn-task-link { max-width: 150px; overflow: hidden; text-overflow: ellipsis; padding: 0; border: 0; color: #648092; background: transparent; font-family: "Cascadia Code", Consolas, monospace; font-size: 9px; text-transform: none; white-space: nowrap; }
 .turn-task-link:hover { color: var(--teal); text-decoration: underline; }
 .message-block p { margin: 0; font-size: 14px; line-height: 1.7; color: var(--text); white-space: pre-wrap; }
+.markdown-content {
+  min-width: 0;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.markdown-content > :first-child { margin-top: 0; }
+.markdown-content > :last-child { margin-bottom: 0; }
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4 {
+  margin: 1.15em 0 0.45em;
+  color: #1e2d37;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.markdown-content h1 { font-size: 20px; }
+.markdown-content h2 { font-size: 17px; }
+.markdown-content h3 { font-size: 15px; }
+.markdown-content h4 { font-size: 14px; }
+.markdown-content p {
+  margin: 0.55em 0;
+  white-space: normal;
+}
+.markdown-content ul,
+.markdown-content ol {
+  margin: 0.55em 0;
+  padding-left: 1.45em;
+}
+.markdown-content li { margin: 0.2em 0; }
+.markdown-content li::marker { color: var(--teal); }
+.markdown-content strong { color: #172f3a; font-weight: 700; }
+.markdown-content a {
+  color: var(--blue);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.markdown-content blockquote {
+  margin: 0.75em 0;
+  padding: 0.35em 0 0.35em 0.85em;
+  border-left: 3px solid #9fc8c1;
+  color: var(--text-muted);
+  background: #f4f9f8;
+}
+.markdown-content code {
+  padding: 0.12em 0.32em;
+  border: 1px solid #dce3e7;
+  border-radius: 3px;
+  color: #24404c;
+  background: #f2f5f6;
+  font-family: var(--mono);
+  font-size: 0.88em;
+}
+.markdown-content pre {
+  max-width: 100%;
+  margin: 0.75em 0;
+  padding: 10px 11px;
+  overflow: auto;
+  border: 1px solid #dbe2e6;
+  border-left: 3px solid #79a8a0;
+  background: #f2f5f6;
+}
+.markdown-content pre code {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre;
+}
+.markdown-content table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  margin: 0.75em 0;
+  overflow-x: auto;
+  border-spacing: 0;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.markdown-content th,
+.markdown-content td {
+  min-width: 80px;
+  padding: 5px 8px;
+  border: 1px solid #dce3e7;
+  text-align: left;
+}
+.markdown-content th { color: #29414c; background: #edf3f3; }
+.markdown-content hr {
+  margin: 1em 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
 .conversation-loading { padding: 20px 0; color: var(--text-faint); font-size: 11px; text-align: center; }
 
 .inline-trace {

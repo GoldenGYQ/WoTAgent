@@ -1734,3 +1734,33 @@ Task、阶段、事件详情的从属关系。工具执行与状态验证被放�
 
 新增组件断言确认运行中 Task、执行阶段、阶段内事件和 spinner 同时存在，针对测试
 和生产构建均通过。
+
+## 21. 最终回复的安全 Markdown 渲染
+
+最终回复原先通过 Vue 文本插值显示，模型输出中的标题、列表、表格和代码标记会被
+当作普通字符。修复只作用于 `turn.assistant_message`：
+
+```text
+Agent Markdown
+→ markdown-it（关闭原始 HTML）
+→ DOMPurify
+→ MarkdownContent
+```
+
+Trace 继续由 `InlineTraceTimeline` 使用结构化 RunEvent 渲染，两条链路没有共享
+解析器，因此 Markdown 不会改变 Trace 的层级、输入输出或动画。
+
+外部链接统一添加 `target="_blank"` 和
+`rel="noopener noreferrer nofollow"`；禁止 style、iframe、object、embed、form
+和常见事件属性。新增样式覆盖标题、列表、引用、行内代码、代码块和可横向滚动的
+移动端表格。
+
+测试时发现项目默认的 Happy DOM 不属于 DOMPurify 推荐的安全 DOM 实现，会把
+Markdown 生成的标签全部剥离。没有通过 mock 绕过，而是让安全清洗测试单独运行在
+JSDOM 中。测试验证原始 script 不会成为 DOM、`javascript:` 链接不会保留、正常
+链接包含安全属性。
+
+```text
+Frontend: 21 passed
+Frontend typecheck/build: passed
+```

@@ -13,6 +13,7 @@ import {
 } from 'lucide-vue-next'
 import type { ConversationTurn, RuntimeConversation, RuntimeRun } from '../types/agent'
 import InlineTraceTimeline from './InlineTraceTimeline.vue'
+import MarkdownContent from './MarkdownContent.vue'
 import MetricStrip from './MetricStrip.vue'
 import StatusBadge from './StatusBadge.vue'
 
@@ -125,7 +126,7 @@ function runForTurn(turn: ConversationTurn): RuntimeRun | undefined {
             <div class="message-avatar"><Bot :size="17" /></div>
             <div class="message-content">
               <span class="message-role">WoTAgent</span>
-              <p>{{ turn.assistant_message }}</p>
+              <MarkdownContent :content="turn.assistant_message" />
             </div>
           </section>
 
