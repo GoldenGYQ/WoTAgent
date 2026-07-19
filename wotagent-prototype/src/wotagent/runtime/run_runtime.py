@@ -33,6 +33,7 @@ from ..orchestration import (
     TaskScheduler,
 )
 from ..domain.entity_resolution import EntityResolutionError
+from ..gateway import deployment_device_scope
 from ..prompting import compact_history
 from ..telemetry import TraceEvent, extract_usage_with_cost
 
@@ -69,7 +70,7 @@ def build_run_coordinator(
             store,
         ),
         resumers={
-            agent_id: _device_resumer(runtime, graph)
+            agent_id: _device_resumer(runtime, graph, context)
             for agent_id, graph in domain_graphs.items()
         },
         task_preparer=_task_preparer(runtime),
@@ -165,6 +166,7 @@ def _compact_supervisor_context(context: dict[str, Any]) -> dict[str, Any]:
             "role": context.get("role", "operator"),
         },
         "source": _bounded_value(context.get("source", {})),
+        "deployment": _deployment_prompt_context(context),
         "history": compact_history(
             context.get("history", []),
             max_messages=SUPERVISOR_HISTORY_MESSAGES,
@@ -230,6 +232,26 @@ def _compact_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _bounded_text(value: Any, limit: int) -> str:
     return str(value or "")[:limit]
+
+
+def _deployment_prompt_context(context: dict[str, Any]) -> dict[str, Any]:
+    deployment = context.get("deployment", {})
+    if not isinstance(deployment, dict):
+        return {}
+    return {
+        key: _bounded_value(deployment.get(key))
+        for key in (
+            "profile_id",
+            "domain_id",
+            "site_id",
+            "title",
+            "description",
+            "system_prompt",
+            "spaces",
+            "enabled_agents",
+        )
+        if key in deployment
+    }
 
 
 def _bounded_value(value: Any, *, depth: int = 0) -> Any:
@@ -527,6 +549,19 @@ def _task_preparer(runtime: Any) -> Callable[[AgentTask, str, dict[str, Any]], A
             or task.requested_capability
         )
         task.requested_capability = capability
+        deployment = task_context.get("deployment", {})
+        enabled_agents = set(deployment.get("enabled_agents", []))
+        if enabled_agents and task.agent_id not in enabled_agents:
+            raise TaskPreparationError(_task_failure(
+                task,
+                category="resource_scope",
+                code="AGENT_OUTSIDE_DEPLOYMENT_PROFILE",
+                message=(
+                    f"Agent '{task.agent_id}' is not enabled in deployment "
+                    f"profile '{deployment.get('profile_id', '')}'"
+                ),
+                retryable=False,
+            ))
         if task.agent_id not in {"health_agent", "care_agent"}:
             return task
         target_type = "resident"
@@ -652,9 +687,13 @@ def _device_executor(
             store,
             task,
         )
+        deployment = context.get("deployment", {})
         try:
-            result = await asyncio.wait_for(
-                graph.ainvoke(
+            with deployment_device_scope(
+                deployment.get("device_ids")
+            ):
+                result = await asyncio.wait_for(
+                    graph.ainvoke(
                     {
                     "request_id": f"req_{uuid4().hex[:12]}",
                     "task_id": task.task_id,
@@ -665,7 +704,10 @@ def _device_executor(
                     "thinking": context.get("thinking", False),
                     "conversation_history": context.get("history", []),
                     "context": {
-                        "runtime": context.get("runtime", {}),
+                        "runtime": {
+                            **context.get("runtime", {}),
+                            "deployment": _deployment_prompt_context(context),
+                        },
                         "delegated_agent": task.agent_id,
                         "original_message": task.objective,
                         "execution_mode": "observe_act_loop",
@@ -679,8 +721,8 @@ def _device_executor(
                     },
                     config={"configurable": {"thread_id": task.task_id}},
                 ),
-                timeout=runtime.settings.total_timeout_seconds,
-            )
+                    timeout=runtime.settings.total_timeout_seconds,
+                )
         finally:
             unsubscribe()
         interrupts = result.get("__interrupt__", [])
@@ -696,19 +738,25 @@ def _device_executor(
     return execute
 
 
-def _device_resumer(runtime: Any, graph: Any) -> Callable[[AgentTask, bool], Any]:
+def _device_resumer(
+    runtime: Any,
+    graph: Any,
+    context: dict[str, Any] | None = None,
+) -> Callable[[AgentTask, bool], Any]:
     async def resume(task: AgentTask, approved: bool) -> AgentFinding:
-        result = await asyncio.wait_for(
-            graph.ainvoke(
-                Command(resume={"approved": approved}),
-                config={
-                    "configurable": {
-                        "thread_id": task.task_id,
-                    }
-                },
-            ),
-            timeout=runtime.settings.total_timeout_seconds,
-        )
+        device_ids = (context or {}).get("deployment", {}).get("device_ids")
+        with deployment_device_scope(device_ids):
+            result = await asyncio.wait_for(
+                graph.ainvoke(
+                    Command(resume={"approved": approved}),
+                    config={
+                        "configurable": {
+                            "thread_id": task.task_id,
+                        }
+                    },
+                ),
+                timeout=runtime.settings.total_timeout_seconds,
+            )
         return _result_finding(task, result)
 
     return resume

@@ -254,6 +254,8 @@ class RunRecord(BaseModel):
     thinking: bool = False
     source: RunSource = "user"
     domain_id: str | None = None
+    profile_id: str | None = None
+    site_id: str | None = None
     source_event_id: str | None = None
     source_context: dict[str, object] = Field(default_factory=dict)
     status: RunStatus = "accepted"

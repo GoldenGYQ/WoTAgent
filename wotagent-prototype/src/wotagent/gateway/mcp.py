@@ -3,9 +3,31 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
+from contextvars import ContextVar
+from collections.abc import Iterator
 from typing import Any
 
 from ..tools.mcp_client import get_mcp_client
+
+
+_active_device_scope: ContextVar[frozenset[str] | None] = ContextVar(
+    "wotagent_active_device_scope",
+    default=None,
+)
+
+
+@contextmanager
+def deployment_device_scope(
+    device_ids: list[str] | set[str] | None,
+) -> Iterator[None]:
+    token = _active_device_scope.set(
+        frozenset(device_ids) if device_ids is not None else None
+    )
+    try:
+        yield
+    finally:
+        _active_device_scope.reset(token)
 
 
 def _payload(result: dict[str, Any]) -> dict[str, Any]:
@@ -46,6 +68,13 @@ class MCPDeviceGateway:
         await self.initialize()
         client = await self._get_client()
         capabilities = await client.td_capabilities()
+        device_scope = _active_device_scope.get()
+        if device_scope is not None:
+            capabilities = [
+                capability
+                for capability in capabilities
+                if capability.get("device_id") in device_scope
+            ]
         if self.allowed_scopes is None:
             return capabilities
         filtered = []
@@ -128,9 +157,14 @@ class MCPDeviceGateway:
         operation: str,
         affordance: str,
     ) -> None:
+        capabilities = await client.td_capabilities()
+        device_scope = _active_device_scope.get()
+        if device_scope is not None and device_id not in device_scope:
+            raise PermissionError(
+                f"device '{device_id}' is outside active deployment profile"
+            )
         if self.allowed_scopes is None:
             return
-        capabilities = await client.td_capabilities()
         device = next(
             (item for item in capabilities if item.get("device_id") == device_id),
             None,
@@ -149,3 +183,6 @@ class MCPDeviceGateway:
             raise PermissionError(
                 f"{device_id}.{affordance} is outside MCP scopes {sorted(self.allowed_scopes)}"
             )
+
+
+__all__ = ["MCPDeviceGateway", "deployment_device_scope"]

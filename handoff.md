@@ -2,8 +2,29 @@
 
 Last updated: 2026-07-19
 Current branch: `codex/run-task-dag`
+Current release baseline: `v2.8.0`
+Current implementation target: `v3.0.0` scene-scoped P1
 Current implementation baseline: Domain Operations and Monitor Run refactor,
 successor to `99afb3d feat: harden agent context and real model health flow`
+
+## 2026-07-19 Scene-Scoped P1 Update
+
+- `v2.8.0` preserves the stable pre-scene baseline.
+- A shared `DeploymentProfile` catalog now defines the active domain, site,
+  spaces, devices, enabled Agents and domain prompt.
+- `eldercare` and `villa` use disjoint device sets.
+- user Runs persist `profile_id`, `domain_id` and `site_id`.
+- one Conversation cannot mix deployment profiles.
+- the Supervisor and device Planner receive compact scene context without
+  duplicating the full device whitelist in prompts.
+- the Gateway filters TD capabilities by the Run profile, and the simulator
+  independently rejects cross-profile REST and MCP device access.
+- the frontend switches the backend and simulator together and starts a new
+  Conversation after switching.
+- broad room/catalog questions no longer inherit a previous health-device
+  scope from conversation history.
+- current regression: backend `194 passed, 3 skipped`, frontend `24 passed`
+  plus production build, simulator `63 passed`.
 
 ## 2026-07-19 P0.5 Update
 

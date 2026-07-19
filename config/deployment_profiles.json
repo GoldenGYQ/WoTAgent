@@ -1,0 +1,90 @@
+{
+  "default_profile_id": "eldercare",
+  "profiles": [
+    {
+      "profile_id": "eldercare",
+      "domain_id": "eldercare",
+      "site_id": "nursing-home-demo",
+      "title": "养老院照护场景",
+      "description": "面向 A-101 和 A-102 两个房间的健康监测、护理协同与低风险环境调节。",
+      "system_prompt": "当前运行世界是养老院照护区。空间仅包括 A-101 和 A-102；健康数据属于受保护居民资源。优先进行风险感知、证据核查、护理协同和低风险环境调节，不得诊断疾病或调整药物。",
+      "spaces": [
+        "A-101",
+        "A-102"
+      ],
+      "device_ids": [
+        "wristband-001",
+        "mattress-001",
+        "environment-sensor-001",
+        "ac-002",
+        "wristband-002",
+        "mattress-002",
+        "environment-sensor-002",
+        "ac-003"
+      ],
+      "enabled_agents": [
+        "health_agent",
+        "care_agent",
+        "environment_agent",
+        "security_agent",
+        "energy_agent",
+        "housekeeping_agent",
+        "device_ops_agent"
+      ]
+    },
+    {
+      "profile_id": "villa",
+      "domain_id": "smart_home",
+      "site_id": "villa-demo",
+      "title": "别墅智能家居场景",
+      "description": "面向多空间住宅的环境、安防、能耗、家务与设备运维协同。",
+      "system_prompt": "当前运行世界是别墅智能家居。只讨论本场景声明的住宅空间和设备；不要引用养老院居民、健康档案、A-101 或 A-102。根据用户目标在环境、安防、能耗、家务和设备运维 Agent 之间委派。",
+      "spaces": [
+        "living_room",
+        "bedroom1",
+        "bedroom2",
+        "kitchen",
+        "study",
+        "bathroom1",
+        "bathroom2",
+        "entrance",
+        "garage",
+        "ground_floor",
+        "hall",
+        "utility_room"
+      ],
+      "device_ids": [
+        "door-lock-001",
+        "ev-charger-001",
+        "exhaust-001",
+        "exhaust-002",
+        "exhaust-003",
+        "fan-001",
+        "gas_sensor-001",
+        "humidifier-001",
+        "iot-gateway-001",
+        "light-001",
+        "light-002",
+        "light-003",
+        "light-004",
+        "light-005",
+        "light-006",
+        "light-007",
+        "purifier-001",
+        "robot-vacuum-001",
+        "camera-001",
+        "smart-meter-001",
+        "smoke-sensor-001",
+        "ac-001",
+        "tv-001"
+      ],
+      "enabled_agents": [
+        "environment_agent",
+        "security_agent",
+        "energy_agent",
+        "housekeeping_agent",
+        "device_ops_agent"
+      ]
+    }
+  ]
+}

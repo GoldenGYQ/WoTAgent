@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from langgraph.checkpoint.memory import InMemorySaver
 
 from ..application import DomainEventConsumer, RunService
-from ..domain import DomainOperationsRegistry
+from ..domain import DeploymentProfileRegistry, DomainOperationsRegistry
 from ..domains.eldercare import EldercareOperations
 from ..orchestration import SQLiteRunStore
 from ..paths import data_path, project_root
@@ -23,6 +23,7 @@ from ..runtime import (
 from ..speech import SpeechTranscriber
 from .routers.conversations import create_conversation_router
 from .routers.domains import create_domain_router
+from .routers.deployment import create_deployment_router
 from .routers.eldercare import create_eldercare_router
 from .routers.runs import create_run_router, create_run_websocket_handler
 from .routers.speech import create_speech_router
@@ -47,6 +48,7 @@ _bootstrap_graphs = _domain_graphs
 _run_store = SQLiteRunStore(
     os.getenv("WOTAGENT_RUN_DB") or data_path("agent_runs.db")
 )
+_deployment_profiles = DeploymentProfileRegistry.load()
 _run_service = RunService(
     conversation_store=_runtime.conversation_store,
     run_store=_run_store,
@@ -57,6 +59,7 @@ _run_service = RunService(
         _domain_graphs,
     ),
     thinking_supported=lambda: _runtime.pipeline.thinking_planner is not None,
+    deployment_profiles=_deployment_profiles,
 )
 _domain_event_consumer = DomainEventConsumer(
     _runtime.eldercare_store,
@@ -92,15 +95,16 @@ _lifespan = create_lifespan(
 )
 
 app = FastAPI(
-    title="WoTAgent 2.0",
+    title="WoTAgent 3.0",
     description="Goal-driven Run/Task DAG over constrained IoT agents",
-    version="2.1.0",
+    version="3.0.0",
     lifespan=_lifespan,
 )
 app.state.runtime = _runtime
 app.state.run_store = _run_store
 app.state.run_service = _run_service
 app.state.domain_registry = _domain_registry
+app.state.deployment_profiles = _deployment_profiles
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.getenv(
@@ -126,6 +130,9 @@ app.include_router(create_eldercare_router(
 ))
 app.include_router(create_domain_router(
     lambda: _domain_registry
+))
+app.include_router(create_deployment_router(
+    lambda: _deployment_profiles
 ))
 app.include_router(create_conversation_router(
     lambda: _runtime.conversation_store

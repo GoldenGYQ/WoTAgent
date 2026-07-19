@@ -9,6 +9,7 @@ from uuid import uuid4
 from fastapi import BackgroundTasks, HTTPException
 
 from ..conversation import ConversationStore
+from ..domain import DeploymentProfile, DeploymentProfileRegistry
 from ..orchestration import RunCoordinator, RunRecord, RunStore
 
 
@@ -19,11 +20,15 @@ class RunService:
         run_store: RunStore,
         coordinator_factory: Callable[[dict[str, Any]], RunCoordinator],
         thinking_supported: Callable[[], bool] | None = None,
+        deployment_profiles: DeploymentProfileRegistry | None = None,
     ) -> None:
         self.conversation_store = conversation_store
         self.run_store = run_store
         self.coordinator_factory = coordinator_factory
         self.thinking_supported = thinking_supported or (lambda: True)
+        self.deployment_profiles = (
+            deployment_profiles or DeploymentProfileRegistry.load()
+        )
 
     async def create(
         self,
@@ -33,6 +38,7 @@ class RunService:
         role: str,
         user_id: str,
         thinking: bool,
+        profile_id: str | None = None,
         background_tasks: BackgroundTasks,
     ) -> RunRecord:
         if thinking and not self.thinking_supported():
@@ -40,10 +46,15 @@ class RunService:
                 status_code=409,
                 detail="thinking mode is not available on this server",
             )
+        profile = self._require_profile(profile_id)
         conversation_id = self._resolve_conversation(
             conversation_id,
             user_id=user_id,
             role=role,
+        )
+        await self._assert_conversation_profile(
+            conversation_id,
+            profile.profile_id,
         )
         run_id = f"run_{uuid4().hex[:12]}"
         turn = self.conversation_store.start_turn(
@@ -60,6 +71,9 @@ class RunService:
             role=role,
             user_id=user_id,
             thinking=thinking,
+            domain_id=profile.domain_id,
+            profile_id=profile.profile_id,
+            site_id=profile.site_id,
             status="accepted",
         ))
         background_tasks.add_task(
@@ -90,6 +104,7 @@ class RunService:
             user_id=user_id,
             role=role,
         )
+        profile = self._profile_for_domain(domain_id)
         run_id = f"run_{uuid4().hex[:12]}"
         turn = self.conversation_store.start_turn(
             conversation_id=conversation_id,
@@ -107,6 +122,8 @@ class RunService:
             thinking=False,
             source="monitor",
             domain_id=domain_id,
+            profile_id=profile.profile_id,
+            site_id=profile.site_id,
             source_event_id=source_event_id,
             source_context=source_context,
             status="accepted",
@@ -178,6 +195,7 @@ class RunService:
             )
 
     def _build_context(self, run: RunRecord) -> dict[str, Any]:
+        profile = self._require_profile(run.profile_id)
         return {
             "role": run.role,
             "user_id": run.user_id,
@@ -197,6 +215,7 @@ class RunService:
                 "event_id": run.source_event_id,
                 **run.source_context,
             },
+            "deployment": profile.model_dump(mode="json"),
         }
 
     async def confirm(
@@ -259,6 +278,53 @@ class RunService:
                 role=role,
             )
         return conversation_id
+
+    def _require_profile(
+        self,
+        profile_id: str | None,
+    ) -> DeploymentProfile:
+        try:
+            return self.deployment_profiles.require(profile_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    def _profile_for_domain(self, domain_id: str) -> DeploymentProfile:
+        matches = [
+            profile
+            for profile in self.deployment_profiles.list()
+            if profile.domain_id == domain_id
+        ]
+        if len(matches) != 1:
+            raise HTTPException(
+                status_code=422,
+                detail=f"domain '{domain_id}' has no unique deployment profile",
+            )
+        return matches[0]
+
+    async def _assert_conversation_profile(
+        self,
+        conversation_id: str,
+        profile_id: str,
+    ) -> None:
+        turns = self.conversation_store.turns(conversation_id)
+        for turn in turns:
+            run_id = str(turn.get("run_id", ""))
+            if not run_id:
+                continue
+            previous = await self.run_store.get_run(run_id)
+            if (
+                previous is not None
+                and previous.profile_id is not None
+                and previous.profile_id != profile_id
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "conversation belongs to deployment profile "
+                        f"'{previous.profile_id}'; create a new conversation "
+                        f"before switching to '{profile_id}'"
+                    ),
+                )
 
 
 def _fail_run(run: RunRecord, error: str) -> None:

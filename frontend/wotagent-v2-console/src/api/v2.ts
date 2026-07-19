@@ -14,6 +14,7 @@ import type {
   DomainOverview,
   DomainResource,
   DomainSubject,
+  DeploymentProfile,
   HealthSummary,
   MonitorStatus,
   Resident,
@@ -52,6 +53,13 @@ function websocketUrl(path: string): string {
 export const agentV2Api = {
   health: (): Promise<{ status: string; pipeline: string }> => request('/api/health'),
   capabilities: (): Promise<ApiCapabilities> => request('/api/v2/capabilities'),
+  listDeploymentProfiles: (): Promise<{ default_profile_id: string; profiles: DeploymentProfile[] }> => request('/api/v2/deployment/profiles'),
+  activateDeploymentProfile(profileId: string): Promise<{ profile: DeploymentProfile }> {
+    return request('/api/v2/deployment/active', {
+      method: 'PUT',
+      body: JSON.stringify({ profile_id: profileId }),
+    })
+  },
   transcribeSpeech(audio: Blob): Promise<SpeechTranscription> {
     const form = new FormData()
     const suffix = audio.type.includes('mp4') ? 'm4a' : audio.type.includes('ogg') ? 'ogg' : 'webm'
@@ -107,10 +115,10 @@ export const agentV2Api = {
     return request(`/api/v2/conversations/${encodeURIComponent(conversationId)}`, { method: 'DELETE' })
   },
 
-  createRun(message: string, conversationId: string, role: AgentRole, thinking: boolean, userId = 'local-user'): Promise<RunRecord> {
+  createRun(message: string, conversationId: string, role: AgentRole, thinking: boolean, userId = 'local-user', profileId?: string): Promise<RunRecord> {
     return request('/api/v2/runs', {
       method: 'POST',
-      body: JSON.stringify({ message, conversation_id: conversationId, role, thinking, user_id: userId }),
+      body: JSON.stringify({ message, conversation_id: conversationId, role, thinking, user_id: userId, profile_id: profileId }),
     })
   },
   getRun(runId: string): Promise<RunRecord> {

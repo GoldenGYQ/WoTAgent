@@ -25,6 +25,7 @@ import logging
 from typing import Any
 
 from .simulator import DeviceStateStore, get_simulator
+from .scenes import scene_registry
 from .td import find_devices, get_device_by_id, load_tds
 from .td_tools import TDToolDefinition, compile_tool_catalog
 
@@ -40,6 +41,7 @@ def _register_td_tools(mcp, sim, definitions: list[TDToolDefinition]) -> None:
             async def handler(
                 _device_id: str = definition.device_id,
             ) -> dict[str, Any]:
+                scene_registry.assert_allowed(_device_id)
                 DeviceStateStore.initialize()
                 return {
                     "success": True,
@@ -52,6 +54,7 @@ def _register_td_tools(mcp, sim, definitions: list[TDToolDefinition]) -> None:
                 _action: str = definition.affordance,
                 **arguments: Any,
             ) -> dict[str, Any]:
+                scene_registry.assert_allowed(_device_id)
                 return await sim.control_device(
                     device_id=_device_id,
                     action=_action,
@@ -75,6 +78,9 @@ def _register_td_tools(mcp, sim, definitions: list[TDToolDefinition]) -> None:
                     "properties": list(definition.properties),
                     "capabilities": list(definition.capabilities),
                     "mcp_scopes": list(definition.mcp_scopes),
+                    "profile_ids": scene_registry.profiles_for_device(
+                        definition.device_id
+                    ),
                 }
             },
         )
@@ -98,6 +104,10 @@ def _build_server(sim=None):
     def list_devices(location: str | None = None) -> list[dict[str, Any]]:
         logger.info("Sim MCP: list_devices(location=%s)", location)
         devices = find_devices(location=location) if location else find_devices()
+        devices = [
+            device for device in devices
+            if scene_registry.allows(device.device_id)
+        ]
         return [
             {
                 "id": d.device_id,
@@ -113,6 +123,7 @@ def _build_server(sim=None):
     @mcp.tool()
     def get_td(device_id: str) -> dict[str, Any]:
         logger.info("Sim MCP: get_td(device_id=%s)", device_id)
+        scene_registry.assert_allowed(device_id)
         td = get_device_by_id(device_id)
         if td is None:
             return {"success": False, "error": f"TD '{device_id}' not found"}
@@ -121,11 +132,15 @@ def _build_server(sim=None):
     @mcp.tool()
     def download_all_td() -> list[dict[str, Any]]:
         logger.info("Sim MCP: download_all_td()")
-        return [td.raw for td in load_tds()]
+        return [
+            td.raw for td in load_tds()
+            if scene_registry.allows(td.device_id)
+        ]
 
     @mcp.tool()
     def query_state(device_id: str) -> dict[str, Any]:
         logger.info("Sim MCP: query_state(device_id=%s)", device_id)
+        scene_registry.assert_allowed(device_id)
         DeviceStateStore.initialize()
         return {"device_id": device_id, "state": DeviceStateStore.get(device_id)}
 
@@ -134,7 +149,12 @@ def _build_server(sim=None):
         """Return current runtime state for ALL devices in one call."""
         logger.info("Sim MCP: query_all_states()")
         DeviceStateStore.initialize()
-        return DeviceStateStore.get_all()
+        allowed = scene_registry.active().device_ids
+        return {
+            device_id: value
+            for device_id, value in DeviceStateStore.get_all().items()
+            if device_id in allowed
+        }
 
     @mcp.tool()
     def drift() -> dict[str, Any]:
@@ -146,6 +166,7 @@ def _build_server(sim=None):
     @mcp.tool()
     async def control_device(device_id: str, action: str, parameters: dict[str, Any] | None = None) -> dict[str, Any]:
         logger.info("Sim MCP: control_device(device_id=%s, action=%s, params=%s)", device_id, action, parameters)
+        scene_registry.assert_allowed(device_id)
         return await sim.control_device(device_id=device_id, action=action, parameters=parameters or {})
 
     @mcp.tool()
@@ -155,6 +176,7 @@ def _build_server(sim=None):
 
     @mcp.tool()
     async def patch_state(device_id: str, property_name: str, value: Any) -> dict[str, Any]:
+        scene_registry.assert_allowed(device_id)
         return await sim.patch_state(device_id=device_id, property_name=property_name, value=value)
 
     @mcp.tool()

@@ -1954,3 +1954,47 @@ Simulator multi-Agent smoke: 1 passed
 Frontend: 24 passed
 Frontend typecheck/build: passed
 ```
+## 26. P1 第一阶段：Deployment Profile 场景隔离
+
+### 26.1 问题现象
+
+用户在养老对话后询问“我们有几个房间”，系统只回答 A-101 和 A-102，
+但 Simulator 实际同时装载了别墅和养老院设备。Trace 显示 Planner 原本发现
+31 个设备，最终只向模型提供了 4 个健康设备。
+
+根因有两层：
+
+1. 别墅和养老院只是界面概念，没有成为 Run、设备目录和 MCP 的执行边界；
+2. 广义空间查询没有命中具体房间或设备词，能力选择器错误继承上一轮“健康”
+   上下文，把健康设备当成当前世界。
+
+### 26.2 架构修复
+
+新增共享 `DeploymentProfile` 清单，明确区分：
+
+- Profile/Scene：当前世界的领域、站点、空间、设备和领域提示词；
+- AgentSpec/MCP Scope：专业 Agent 可使用的能力类别；
+- RBAC/Relationship：当前 Principal 对具体资源可执行的操作。
+
+同一个 Run 只能属于一个 Profile；同一 Conversation 不允许跨 Profile。
+前端切换 Profile 时同步切换 Simulator 并创建空会话。Simulator 的 REST 和
+MCP 接口都会拒绝当前 Profile 外的设备，不依赖模型自觉遵守。
+
+### 26.3 本轮踩坑
+
+- 为确认恢复函数增加场景上下文后，直接调用内部函数的旧测试缺少参数；
+  最终把上下文设计为可选，并仅在生产 Run 提供时启用设备范围。
+- 前端 `RunRecord` 增加字段后，旧本地记录和测试夹具不含新字段；
+  TypeScript 契约将字段设为可选兼容读取，但新后端始终写入实际值。
+- Conversation 的模型上下文只含 `role/content`，不能用于查找历史 Run；
+  跨场景检查必须读取持久化 Turn 的 `run_id`，再从 RunStore 获取 Profile。
+
+### 26.4 测试原则
+
+场景切换不能只测试下拉框。必须分别验证：
+
+- 两个 Profile 的设备集合互斥；
+- Run 持久化 `profile_id/domain_id/site_id`；
+- 同一 Conversation 跨 Profile 被后端拒绝；
+- Gateway 在 MCP 调用前拒绝场景外设备；
+- 广义房间/空间查询不继承上一轮设备领域词。

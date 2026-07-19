@@ -35,6 +35,7 @@ const props = defineProps<{
   currentAccountName: string | null
   currentAccountRole: AgentRole
   currentSubjectName: string
+  currentDomainId?: string | null
   sidebarCollapsed: boolean
 }>()
 const emit = defineEmits<{
@@ -55,6 +56,59 @@ function responseDuration(turn: ConversationTurn): string | null {
 
 const guidance = computed(() => {
   const subject = props.currentSubjectName
+  if (props.currentDomainId === 'smart_home') {
+    if (props.currentAccountRole === 'viewer') {
+      return [
+        {
+          label: '空间与设备查询',
+          description: '读取当前别墅场景的空间、设备和运行状态',
+          icon: SlidersHorizontal,
+          examples: [
+            '这个场景一共有多少个房间，分别有哪些设备',
+            '检查所有灯、空调和安防设备的当前状态',
+          ],
+        },
+        {
+          label: '能耗与环境',
+          description: '查询环境和能耗数据，不执行控制动作',
+          icon: Activity,
+          examples: [
+            '查看当前别墅的环境和空气质量',
+            '查询今天的用电情况和主要能耗设备',
+          ],
+        },
+      ]
+    }
+    return [
+      {
+        label: '多空间设备控制',
+        description: '按房间或设备组执行动作并验证最终状态',
+        icon: SlidersHorizontal,
+        examples: [
+          '打开客厅灯并调到 45% 亮度，然后确认是否生效',
+          '关闭所有卫生间灯，并打开对应的排风设备',
+        ],
+      },
+      {
+        label: '条件联动任务',
+        description: '让 Agent 查询状态、计算条件并选择后续动作',
+        icon: ShieldCheck,
+        examples: [
+          '检查开着的灯数量，奇数就打开空调，偶数就打开加湿器',
+          '如果厨房燃气异常就关闭相关设备并通知我处理结果',
+        ],
+      },
+      {
+        label: '安防与能耗协同',
+        description: '协调安防、能耗和设备运维专业 Agent',
+        icon: Activity,
+        examples: [
+          '同时检查门锁、摄像头和烟雾传感器的状态',
+          '找出当前高能耗设备，并给出可以执行的节能调整',
+        ],
+      },
+    ]
+  }
   if (props.currentAccountRole === 'viewer') {
     return [
       {

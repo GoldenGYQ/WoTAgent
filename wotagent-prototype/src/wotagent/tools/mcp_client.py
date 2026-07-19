@@ -225,6 +225,7 @@ class MCPToolClient:
                 "read_scopes": [],
                 "aliases": list(binding.get("aliases") or []),
                 "location_aliases": list(binding.get("location_aliases") or []),
+                "profile_ids": list(binding.get("profile_ids") or []),
             })
             if binding.get("operation") == "invoke":
                 device["actions"].append({

@@ -13,8 +13,27 @@ from .task import (
     VerificationResult,
 )
 
+from .deployment import (
+    DeploymentProfile,
+    DeploymentProfileCatalog,
+    DeploymentProfileRegistry,
+)
+from .operations import (
+    DomainAccessDenied,
+    DomainManifest,
+    DomainNotFound,
+    DomainOperationsRegistry,
+)
+
 __all__ = [
     "Condition",
+    "DeploymentProfile",
+    "DeploymentProfileCatalog",
+    "DeploymentProfileRegistry",
+    "DomainAccessDenied",
+    "DomainManifest",
+    "DomainNotFound",
+    "DomainOperationsRegistry",
     "ExecutionResult",
     "PlanStep",
     "PolicyDecision",
@@ -24,17 +43,4 @@ __all__ = [
     "TaskStatus",
     "TaskTrace",
     "VerificationResult",
-]
-from .operations import (
-    DomainAccessDenied,
-    DomainManifest,
-    DomainNotFound,
-    DomainOperationsRegistry,
-)
-
-__all__ = [
-    "DomainAccessDenied",
-    "DomainManifest",
-    "DomainNotFound",
-    "DomainOperationsRegistry",
 ]

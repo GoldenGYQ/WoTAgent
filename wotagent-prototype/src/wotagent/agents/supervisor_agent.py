@@ -63,6 +63,8 @@ def build_run_supervisor_agent(
             "能够调查的全部项目。用户只问“今天健康状态”时，不要自动追加睡眠、"
             "长期趋势等未明确要求的成功条件；仅创建回答当前问题所需的最小证据"
             "集合，后续是否补查由专业 Agent 根据实际观察决定。\n\n"
+            "每次决策必须遵守输入中的 deployment 上下文，只能选择 "
+            "enabled_agents 中的 Agent，不得引用当前场景之外的空间、居民或设备。\n\n"
             f"{SUPERVISOR_TASK_DECOMPOSITION_RULES}"
             f"当前可用专业 Agent：\n{agent_catalog}"
         ),

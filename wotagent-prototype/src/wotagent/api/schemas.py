@@ -14,6 +14,7 @@ class RunCreateRequest(BaseModel):
     role: str = "operator"
     user_id: str = "local-user"
     thinking: bool = False
+    profile_id: str | None = None
 
 
 class RunConfirmationRequest(BaseModel):

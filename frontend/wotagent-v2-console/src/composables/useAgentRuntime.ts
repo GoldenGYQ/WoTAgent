@@ -4,6 +4,7 @@ import {
   ACTIVE_STATUSES,
   EMPTY_USAGE,
   type AgentRole,
+  type DeploymentProfile,
   type RunRecord,
   type RuntimeConversation,
   type RuntimeRun,
@@ -21,6 +22,8 @@ const thinkingSupported = ref(false)
 const speechSupported = ref(false)
 const speechMaxSeconds = ref(30)
 const backendState = ref<'checking' | 'online' | 'offline'>('checking')
+const deploymentProfiles = ref<DeploymentProfile[]>([])
+const activeProfileId = ref(localStorage.getItem('wotagent-v2-console.deployment-profile') ?? '')
 const subscriptions = new Map<string, TraceSubscription>()
 const pollers = new Map<string, ReturnType<typeof setInterval>>()
 const restorePromises = new Map<string, Promise<void>>()
@@ -350,6 +353,7 @@ async function submit(message: string): Promise<RuntimeRun> {
     role.value,
     thinking.value && thinkingSupported.value,
     userId.value,
+    activeProfileId.value || undefined,
   )
   const run = createRuntimeRun(record, role.value, thinking.value && thinkingSupported.value)
   runs.unshift(run)
@@ -408,7 +412,15 @@ async function checkBackend(): Promise<void> {
   backendState.value = 'checking'
   try {
     await agentV2Api.health()
-    const capabilities = await agentV2Api.capabilities()
+    const [capabilities, deployments] = await Promise.all([
+      agentV2Api.capabilities(),
+      agentV2Api.listDeploymentProfiles(),
+    ])
+    deploymentProfiles.value = deployments.profiles
+    if (!deploymentProfiles.value.some((item) => item.profile_id === activeProfileId.value)) {
+      activeProfileId.value = deployments.default_profile_id
+    }
+    await agentV2Api.activateDeploymentProfile(activeProfileId.value)
     thinkingSupported.value = capabilities.thinking.supported
     speechSupported.value = capabilities.speech_transcription?.supported ?? false
     speechMaxSeconds.value = capabilities.speech_transcription?.max_seconds ?? 30
@@ -417,6 +429,17 @@ async function checkBackend(): Promise<void> {
   } catch {
     backendState.value = 'offline'
   }
+}
+
+async function switchDeploymentProfile(profileId: string): Promise<void> {
+  if (profileId === activeProfileId.value) return
+  const response = await agentV2Api.activateDeploymentProfile(profileId)
+  activeProfileId.value = response.profile.profile_id
+  localStorage.setItem(
+    'wotagent-v2-console.deployment-profile',
+    activeProfileId.value,
+  )
+  newConversation()
 }
 
 function resetRuntimeState(): void {
@@ -465,6 +488,8 @@ export function useAgentRuntime() {
     speechSupported,
     speechMaxSeconds,
     backendState,
+    deploymentProfiles,
+    activeProfileId,
     submit,
     confirm,
     selectConversation,
@@ -476,5 +501,6 @@ export function useAgentRuntime() {
     switchIdentity,
     clearIdentity,
     inspectRun,
+    switchDeploymentProfile,
   }
 }

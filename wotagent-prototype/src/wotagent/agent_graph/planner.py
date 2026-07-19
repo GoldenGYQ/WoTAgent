@@ -738,12 +738,34 @@ def _capability_selection_text(
     message: str,
     history: list[dict[str, str]],
 ) -> str:
+    if _mentions_broad_catalog(message):
+        return message
     if _mentions_device_scope(message):
         return message
     for item in reversed(history):
         if item.get("role") == "user" and _mentions_device_scope(item.get("content", "")):
             return f"{message} {item['content']}"
     return message
+
+
+def _mentions_broad_catalog(message: str) -> bool:
+    text = message.lower()
+    return any(
+        term in text
+        for term in (
+            "房间",
+            "空间",
+            "区域",
+            "所有设备",
+            "全部设备",
+            "多少设备",
+            "几个设备",
+            "有哪些设备",
+            "how many rooms",
+            "all rooms",
+            "all devices",
+        )
+    )
 
 
 def _mentions_device_scope(message: str) -> bool:

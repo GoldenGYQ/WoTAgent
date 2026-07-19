@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from wot_device_simulator.mcp_server import _build_server
+from wot_device_simulator.scenes import scene_registry
 from wot_device_simulator.td import TDAction, ThingDescription, get_device_by_id, load_tds
 from wot_device_simulator.td_tools import (
     TDToolCompileError,
@@ -49,6 +50,7 @@ def test_all_repository_tds_compile_without_name_collisions() -> None:
 
 @pytest.mark.asyncio
 async def test_fastmcp_registers_generated_schema_and_executes_it() -> None:
+    scene_registry.activate("villa")
     mcp = _build_server()
     tools = {tool.name: tool for tool in await mcp.list_tools()}
     tool_name = action_tool_name("light-001", "setBrightness")
@@ -63,6 +65,7 @@ async def test_fastmcp_registers_generated_schema_and_executes_it() -> None:
 
 @pytest.mark.asyncio
 async def test_health_sensor_td_is_exposed_and_updates_readable_state() -> None:
+    scene_registry.activate("eldercare")
     mcp = _build_server()
     tools = {tool.name: tool for tool in await mcp.list_tools()}
     tool_name = action_tool_name("wristband-001", "updateVitals")
@@ -90,6 +93,7 @@ async def test_health_sensor_td_is_exposed_and_updates_readable_state() -> None:
 
 @pytest.mark.asyncio
 async def test_professional_domain_tools_have_scopes_and_execute() -> None:
+    scene_registry.activate("villa")
     mcp = _build_server()
     tools = {tool.name: tool for tool in await mcp.list_tools()}
     unlock = tools[action_tool_name("door-lock-001", "unlock")]

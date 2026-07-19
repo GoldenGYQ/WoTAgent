@@ -82,6 +82,8 @@ button:focus-visible, textarea:focus-visible {
 .backend-status[data-state="online"] > span { background: #20a265; box-shadow: 0 0 0 3px #ddf5e8; }
 .backend-status[data-state="offline"] > span { background: var(--red); }
 .header-status { gap: 8px; }
+.deployment-selector { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 7px; border: 1px solid var(--line); border-radius: 5px; color: var(--teal); background: var(--surface-muted); }
+.deployment-selector select { max-width: 150px; border: 0; outline: 0; color: var(--text); background: transparent; font: inherit; font-size: 11px; font-weight: 650; }
 .account-badge { display: inline-flex; align-items: center; gap: 5px; color: var(--text-muted); font-size: 10px; }.account-badge strong { color: var(--teal); font-size: 10px; }
 .app-view-switch { display: flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-muted); }
 .app-view-switch button { height: 26px; display: flex; align-items: center; gap: 5px; border: 0; border-radius: 4px; padding: 0 9px; color: var(--text-muted); background: transparent; font-size: 11px; font-weight: 650; }
@@ -927,6 +929,7 @@ button:focus-visible, textarea:focus-visible {
   .app-view-switch button { width: 32px; padding: 0; justify-content: center; }
   .app-view-switch button { font-size: 0; }
   .account-badge { display: none; }
+  .deployment-selector select { max-width: 92px; }
   .workspace-header { padding: 0 11px; }
   .session-id { display: none; }
   .metric-strip { grid-template-columns: repeat(5, minmax(46px, 1fr)); overflow-x: auto; }

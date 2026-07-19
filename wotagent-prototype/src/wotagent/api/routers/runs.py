@@ -26,6 +26,7 @@ def create_run_router(
             role=request.role,
             user_id=request.user_id,
             thinking=request.thinking,
+            profile_id=request.profile_id,
             background_tasks=background_tasks,
         )
 

@@ -14,6 +14,7 @@ import {
   SendHorizontal,
   ShieldCheck,
   SquareTerminal,
+  MapPinned,
   X,
 } from 'lucide-vue-next'
 import TaskSidebar from './components/TaskSidebar.vue'
@@ -47,6 +48,8 @@ const {
   speechSupported,
   speechMaxSeconds,
   backendState,
+  deploymentProfiles,
+  activeProfileId,
   submit,
   confirm,
   checkBackend,
@@ -56,7 +59,16 @@ const {
   switchIdentity,
   clearIdentity,
   inspectRun,
+  switchDeploymentProfile,
 } = useAgentRuntime()
+const activeDeployment = computed(() => deploymentProfiles.value.find(
+  (item) => item.profile_id === activeProfileId.value,
+) ?? null)
+const principalResourceLabel = computed(() => (
+  activeDeployment.value?.domain_id === 'eldercare'
+    ? currentAccount.value?.subjectName ?? ''
+    : activeDeployment.value?.title ?? ''
+))
 
 const draft = ref('')
 const submitting = ref(false)
@@ -207,6 +219,17 @@ async function inspectDomainRun(runId: string): Promise<void> {
   appView.value = 'agent'
 }
 
+async function changeDeployment(event: Event): Promise<void> {
+  const profileId = (event.target as HTMLSelectElement).value
+  submitError.value = ''
+  try {
+    await switchDeploymentProfile(profileId)
+    appView.value = 'agent'
+  } catch (error) {
+    submitError.value = error instanceof Error ? error.message : String(error)
+  }
+}
+
 onMounted(async () => {
   await checkBackend()
   if (currentAccount.value) {
@@ -225,13 +248,21 @@ onMounted(async () => {
         </button>
         <span class="brand-mark"><SquareTerminal :size="18" /></span>
         <strong>WoTAgent</strong>
-        <span class="version-tag">2.0</span>
+        <span class="version-tag">3.0</span>
       </div>
       <nav class="app-view-switch" aria-label="工作视图">
         <button type="button" :class="{ active: appView === 'agent' }" @click="appView = 'agent'"><MessageSquare :size="14" />Agent 会话</button>
-        <button type="button" :class="{ active: appView === 'domains' }" @click="appView = 'domains'"><Boxes :size="14" />领域运行</button>
+        <button v-if="activeDeployment?.domain_id === 'eldercare'" type="button" :class="{ active: appView === 'domains' }" @click="appView = 'domains'"><Boxes :size="14" />领域运行</button>
       </nav>
       <div class="header-status">
+        <label class="deployment-selector" title="当前设备与空间场景">
+          <MapPinned :size="14" />
+          <select :value="activeProfileId" @change="changeDeployment">
+            <option v-for="profile in deploymentProfiles" :key="profile.profile_id" :value="profile.profile_id">
+              {{ profile.title }}
+            </option>
+          </select>
+        </label>
         <span class="backend-status" :data-state="backendState">
           <span />{{ backendState === 'online' ? '后端在线' : backendState === 'offline' ? '后端离线' : '检测中' }}
         </span>
@@ -265,7 +296,8 @@ onMounted(async () => {
           :current-account-id="currentAccount.accountId"
           :current-account-name="currentAccount.displayName"
           :current-account-role="currentAccount.role"
-          :current-subject-name="currentAccount.subjectName"
+          :current-subject-name="principalResourceLabel"
+          :current-domain-id="activeDeployment?.domain_id ?? null"
           :sidebar-collapsed="sidebarCollapsed"
           @select-run="chooseRun"
           @confirm="confirm"
@@ -338,12 +370,12 @@ onMounted(async () => {
             <div class="composer-controls">
               <span
                 class="principal-context"
-                :title="`权限主体 ${currentAccount.accountId}；角色 ${currentAccount.role}；关联资源 ${currentAccount.subjectName}`"
+                :title="`权限主体 ${currentAccount.accountId}；角色 ${currentAccount.role}；当前范围 ${principalResourceLabel}`"
               >
                 <ShieldCheck :size="14" />
                 <strong>{{ currentAccount.accountId }}</strong>
                 <code>{{ currentAccount.role }}</code>
-                <span>{{ currentAccount.subjectName }}</span>
+                <span>{{ principalResourceLabel }}</span>
               </span>
               <div class="composer-actions">
                 <button
@@ -392,8 +424,8 @@ onMounted(async () => {
     </div>
 
     <DomainOperationsCenter
-      v-else
-      initial-domain-id="eldercare"
+      v-else-if="activeDeployment?.domain_id === 'eldercare'"
+      :initial-domain-id="activeDeployment.domain_id"
       :initial-subject-id="currentAccount.subjectId"
       :principal-id="currentAccount.accountId"
       @inspect-run="inspectDomainRun"

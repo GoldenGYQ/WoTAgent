@@ -15,6 +15,7 @@ from urllib.request import urlopen
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse
 
+from .scenes import scene_registry
 from .simulator import DeviceStateStore, get_simulator
 from .td import find_devices, get_device_by_id, load_tds
 
@@ -110,13 +111,44 @@ async def dashboard_page(request: Request) -> HTMLResponse:
 
 @mcp.custom_route("/api/health", methods=["GET"])
 async def health(request: Request) -> JSONResponse:
-    return JSONResponse({"status": "ok", "engine_running": _sim.is_running})
+    return JSONResponse({
+        "status": "ok",
+        "engine_running": _sim.is_running,
+        "active_profile_id": scene_registry.active().profile_id,
+    })
+
+
+@mcp.custom_route("/api/scenes", methods=["GET"])
+async def list_scenes(request: Request) -> JSONResponse:
+    return JSONResponse({
+        "active_profile_id": scene_registry.active().profile_id,
+        "profiles": [scene.as_dict() for scene in scene_registry.list()],
+    })
+
+
+@mcp.custom_route("/api/scenes/active", methods=["GET"])
+async def active_scene(request: Request) -> JSONResponse:
+    return JSONResponse({"profile": scene_registry.active().as_dict()})
+
+
+@mcp.custom_route("/api/scenes/active", methods=["PUT"])
+async def activate_scene(request: Request) -> JSONResponse:
+    body = await request.json()
+    try:
+        scene = scene_registry.activate(str(body.get("profile_id", "")))
+    except LookupError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=404)
+    return JSONResponse({"profile": scene.as_dict()})
 
 
 @mcp.custom_route("/api/devices", methods=["GET"])
 async def list_devices(request: Request) -> JSONResponse:
     location = request.query_params.get("location")
     devices = find_devices(location=location) if location else find_devices()
+    devices = [
+        device for device in devices
+        if scene_registry.allows(device.device_id)
+    ]
     return JSONResponse({
         "devices": [
             {
@@ -136,16 +168,26 @@ async def list_devices(request: Request) -> JSONResponse:
 @mcp.custom_route("/api/state", methods=["GET"])
 async def state(request: Request) -> JSONResponse:
     DeviceStateStore.initialize()
+    allowed = scene_registry.active().device_ids
     return JSONResponse({
         "summary": _sim.get_context(),
         "stats": _sim.stats,
-        "devices": DeviceStateStore.get_all(),
+        "profile": scene_registry.active().as_dict(),
+        "devices": {
+            device_id: value
+            for device_id, value in DeviceStateStore.get_all().items()
+            if device_id in allowed
+        },
     })
 
 
 @mcp.custom_route("/api/state/{device_id}", methods=["GET"])
 async def state_by_device(request: Request) -> JSONResponse:
     device_id = request.path_params["device_id"]
+    try:
+        scene_registry.assert_allowed(device_id)
+    except PermissionError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=403)
     DeviceStateStore.initialize()
     return JSONResponse({
         "device_id": device_id,
@@ -181,6 +223,10 @@ async def patch_state(request: Request) -> JSONResponse:
     prop = str(body.get("property", ""))
     if not device_id or not prop:
         return JSONResponse({"success": False, "error": "device_id and property are required"})
+    try:
+        scene_registry.assert_allowed(device_id)
+    except PermissionError as exc:
+        return JSONResponse({"success": False, "error": str(exc)}, status_code=403)
     val = _parse_value(body.get("value"))
     result = await _sim.patch_state(device_id=device_id, property_name=prop, value=val)
     return JSONResponse(result)
@@ -239,8 +285,13 @@ async def weather_apply(request: Request) -> JSONResponse:
 @mcp.custom_route("/api/control", methods=["POST"])
 async def control(request: Request) -> JSONResponse:
     body = await request.json()
+    device_id = str(body.get("device_id", ""))
+    try:
+        scene_registry.assert_allowed(device_id)
+    except PermissionError as exc:
+        return JSONResponse({"success": False, "error": str(exc)}, status_code=403)
     result = await _sim.control_device(
-        device_id=str(body.get("device_id", "")),
+        device_id=device_id,
         action=str(body.get("action", "")),
         parameters=body.get("parameters", {}),
     )

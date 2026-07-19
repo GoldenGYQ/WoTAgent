@@ -51,6 +51,8 @@ export interface RunRecord {
   thinking: boolean
   source: 'user' | 'monitor' | 'system'
   domain_id: string | null
+  profile_id?: string | null
+  site_id?: string | null
   source_event_id: string | null
   source_context: Record<string, unknown>
   status: string
@@ -66,6 +68,18 @@ export interface RunRecord {
   finished_at: string | null
   created_at: string
   updated_at: string
+}
+
+export interface DeploymentProfile {
+  profile_id: string
+  domain_id: string
+  site_id: string
+  title: string
+  description: string
+  system_prompt: string
+  spaces: string[]
+  device_ids: string[]
+  enabled_agents: string[]
 }
 
 export interface DomainTelemetrySignal {
