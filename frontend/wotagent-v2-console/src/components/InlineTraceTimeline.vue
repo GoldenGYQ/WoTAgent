@@ -46,11 +46,22 @@ const props = defineProps<{
   selected?: boolean
 }>()
 
+const ACTIVE_RUN_STATUSES = new Set([
+  'accepted',
+  'received',
+  'running',
+  'waiting_confirmation',
+])
+const TERMINAL_RUN_STATUSES = new Set([
+  'completed',
+  'partial_success',
+  'failed',
+  'blocked',
+  'cancelled',
+])
 const expandedEvents = ref(new Set<number>())
 const expandedGroups = ref(new Set<string>())
-const expandedTimeline = ref(
-  props.selected || ['accepted', 'received', 'running', 'waiting_confirmation'].includes(props.run.status),
-)
+const expandedTimeline = ref(ACTIVE_RUN_STATUSES.has(props.run.status))
 
 const orderedEvents = computed(() => (
   [...props.run.events].sort((a, b) => a.sequence - b.sequence)
@@ -110,11 +121,10 @@ const traceGroups = computed<TraceGroup[]>(() => {
 })
 
 watch(
-  () => [props.selected, props.run.status] as const,
-  ([selected, status]) => {
-    if (selected || ['accepted', 'received', 'running', 'waiting_confirmation'].includes(status)) {
-      expandedTimeline.value = true
-    }
+  () => props.run.status,
+  (status) => {
+    if (ACTIVE_RUN_STATUSES.has(status)) expandedTimeline.value = true
+    else if (TERMINAL_RUN_STATUSES.has(status)) expandedTimeline.value = false
   },
   { immediate: true },
 )

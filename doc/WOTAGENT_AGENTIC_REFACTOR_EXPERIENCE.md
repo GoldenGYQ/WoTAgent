@@ -1846,3 +1846,22 @@ Public frontend HTTP check: 200
 
 新增测试覆盖正常录音转写和取消录音不上传。文字输入增加内容自适应高度，移动端
 隐藏次要身份文字并保持主操作区稳定。
+
+## 24. Trace 时间线随 Run 生命周期自动折叠
+
+时间线原先同时根据 Run 状态和 `selected` 状态决定是否展开。当前 Run 在执行完成后
+通常仍处于选中状态，因此 `completed` 会被 `selected` 再次强制展开，挡住紧随其后
+的最终回复。
+
+修复后，外层时间线只根据 Run 生命周期自动切换：
+
+```text
+accepted / received / running / waiting_confirmation
+→ 自动展开，持续观察执行过程
+
+completed / partial_success / failed / blocked / cancelled
+→ 自动折叠，优先展示最终回复或错误结论
+```
+
+`selected` 只继续用于标记当前 Run 和内部 Task 展示，不再控制外层时间线。终态自动
+折叠后，用户仍可点击时间线标题重新展开完整 Trace。

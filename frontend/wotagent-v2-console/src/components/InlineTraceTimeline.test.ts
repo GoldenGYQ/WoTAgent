@@ -87,6 +87,28 @@ describe('InlineTraceTimeline', () => {
     expect(wrapper.find('.inline-trace-body').exists()).toBe(true)
   })
 
+  it('opens while running and folds when the Run reaches a terminal status', async () => {
+    const wrapper = mount(InlineTraceTimeline, {
+      props: { run, selected: true },
+    })
+    expect(wrapper.find('.inline-trace-body').exists()).toBe(true)
+
+    await wrapper.setProps({
+      run: {
+        ...run,
+        status: 'completed',
+        response: '客厅灯当前为关闭状态。',
+        streamState: 'closed',
+      },
+    })
+
+    expect(wrapper.find('.inline-trace-body').exists()).toBe(false)
+    expect(wrapper.find('.inline-trace-header').attributes('aria-expanded')).toBe('false')
+
+    await wrapper.find('.inline-trace-header').trigger('click')
+    expect(wrapper.find('.inline-trace-body').exists()).toBe(true)
+  })
+
   it('nests tool input and output under an active Task event', async () => {
     const toolEvent = {
       ...event(3, 'agent.tool.completed'),
