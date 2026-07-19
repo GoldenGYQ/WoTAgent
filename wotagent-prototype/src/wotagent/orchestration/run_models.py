@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -84,6 +84,33 @@ class TaskFailure(BaseModel):
     message: str = Field(min_length=1)
     retryable: bool
     fingerprint: str = Field(min_length=1)
+
+
+class DependencyObservation(BaseModel):
+    """Compact execution fact passed from an upstream Task."""
+
+    source_task_id: str = Field(min_length=1)
+    step_id: str = ""
+    kind: str = ""
+    device_id: str = ""
+    action: str = ""
+    execution_status: str = ""
+    result: Any | None = None
+    verification: Any | None = None
+    error: str | None = None
+
+
+class DependencyFinding(BaseModel):
+    """Bounded upstream result available to a dependent specialist."""
+
+    task_id: str = Field(min_length=1)
+    agent_id: str = Field(min_length=1)
+    objective: str = Field(min_length=1)
+    status: str = Field(min_length=1)
+    finding: str
+    observations: list[DependencyObservation] = Field(default_factory=list)
+    recommended_actions: list[str] = Field(default_factory=list)
+    unresolved_questions: list[str] = Field(default_factory=list)
 
 
 class ProposedTask(BaseModel):
@@ -195,6 +222,7 @@ class AgentTask(BaseModel):
     target: TaskTarget | None = None
     requested_capability: str = ""
     effective_scope: ResourceScope | None = None
+    dependency_findings: list[DependencyFinding] = Field(default_factory=list)
     finding: AgentFinding | None = None
     failure: TaskFailure | None = None
     confirmation: dict[str, object] | None = None
@@ -275,6 +303,8 @@ __all__ = [
     "AgentRunRecord",
     "AgentRunStatus",
     "AgentTask",
+    "DependencyFinding",
+    "DependencyObservation",
     "ExecutionStrategy",
     "FailureCategory",
     "ProposedTask",

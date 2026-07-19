@@ -4,6 +4,8 @@ from .engine import TaskOrchestrator
 from .run_models import (
     AgentRunRecord,
     AgentTask,
+    DependencyFinding,
+    DependencyObservation,
     ProposedTask,
     ResourceClaim,
     ResourceScope,
@@ -26,6 +28,8 @@ from .scheduler import TaskScheduler
 __all__ = [
     "AgentRunRecord",
     "AgentTask",
+    "DependencyFinding",
+    "DependencyObservation",
     "InMemoryRunStore",
     "PendingConfirmation",
     "ProposedTask",

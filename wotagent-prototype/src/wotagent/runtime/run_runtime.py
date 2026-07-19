@@ -224,6 +224,7 @@ def _specialist_executors(
 
 def _health_executor(runtime: Any) -> Callable[[AgentTask], Any]:
     async def execute(task: AgentTask) -> AgentFindingPayload:
+        dependency_context = _dependency_context(task)
         with runtime.health_gateway.authorized_scope(task.effective_scope):
             result = await asyncio.wait_for(
                 runtime.health_react_agent.ainvoke({
@@ -239,6 +240,7 @@ def _health_executor(runtime: Any) -> Callable[[AgentTask], Any]:
                             "只收集回答原始用户请求所需的最小证据。"
                             "如果委派目标、期望证据或成功条件加入了原始请求"
                             "没有要求的睡眠、趋势、档案等项目，忽略扩张部分。"
+                            f"{dependency_context}"
                         ),
                     }],
                 }),
@@ -523,7 +525,7 @@ def _care_executor(
         result = await asyncio.wait_for(
             runtime.eldercare_chat_agent.run(
                 task_id=task.task_id,
-                message=task.objective,
+                message=f"{task.objective}{_dependency_context(task)}",
                 history=context.get("history", []),
                 role=context.get("role", "operator"),
                 thinking=context.get("thinking", False),
@@ -562,6 +564,10 @@ def _device_executor(
                         "execution_mode": "observe_act_loop",
                         "expected_evidence": task.expected_evidence,
                         "success_criteria": task.success_criteria,
+                        "dependency_findings": [
+                            item.model_dump(mode="json")
+                            for item in task.dependency_findings
+                        ],
                     },
                 },
                 config={"configurable": {"thread_id": task.task_id}},
@@ -597,6 +603,24 @@ def _device_resumer(runtime: Any, graph: Any) -> Callable[[AgentTask, bool], Any
         return _result_finding(task, result)
 
     return resume
+
+
+def _dependency_context(task: AgentTask) -> str:
+    if not task.dependency_findings:
+        return ""
+    return (
+        "\n\n上游 Task 已取得以下结构化事实。优先复用这些事实；只有数据不足、"
+        "过期或需要验证时才重新查询：\n"
+        + json.dumps(
+            [
+                item.model_dump(mode="json")
+                for item in task.dependency_findings
+            ],
+            ensure_ascii=False,
+            separators=(",", ":"),
+            default=str,
+        )
+    )
 
 
 async def _ensure_legacy_trace(runtime: Any, task: AgentTask) -> None:

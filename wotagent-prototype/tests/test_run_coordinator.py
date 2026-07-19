@@ -535,3 +535,103 @@ def test_clarification_after_failed_finding_does_not_mark_run_completed() -> Non
 
     assert run.status == "failed"
     assert run.final_response == "需要更多信息。"
+
+
+def test_dependent_task_receives_compact_upstream_execution_finding() -> None:
+    async def scenario():
+        observed_dependency_findings = []
+
+        async def execute(task):
+            if task.local_id == "observe":
+                return AgentFindingPayload(
+                    status="completed",
+                    finding="7 盏灯均为关闭状态",
+                    confidence=1,
+                    evidence=[Evidence(
+                        source="device_ops_agent.execution_trace",
+                        value={
+                            "task_id": task.task_id,
+                            "steps": [{
+                                "step": {
+                                    "id": f"read-{index}",
+                                    "kind": "query",
+                                    "device_id": f"light-{index:03d}",
+                                    "action": "read_state",
+                                },
+                                "execution": {
+                                    "status": "accepted",
+                                    "raw_result": {"on": False},
+                                    "error": None,
+                                },
+                                "verification": None,
+                                "unrelated_large_field": "x" * 5000,
+                            } for index in range(1, 8)],
+                        },
+                        reliability=1,
+                        description="verified device observations",
+                    )],
+                )
+            observed_dependency_findings.extend(task.dependency_findings)
+            return AgentFindingPayload(
+                status="completed",
+                finding="已根据上游偶数结果打开加湿器",
+                confidence=1,
+            )
+
+        observe = _task("observe", "device_ops_agent", "lights")
+        decide = _task("decide", "environment_agent", "humidifier")
+        decide["depends_on"] = ["observe"]
+        decisions = iter([
+            _decision([observe, decide], strategy="sequential"),
+            SupervisorDecision(
+                action="finish",
+                goal="条件控制",
+                final_response="条件控制完成",
+                reason="上游观察和下游动作均完成",
+            ),
+        ])
+        task_ids = iter(["task-observe", "task-decide"])
+        store = InMemoryRunStore()
+        coordinator = RunCoordinator(
+            store,
+            TaskScheduler(
+                available_agents={
+                    "device_ops_agent",
+                    "environment_agent",
+                },
+                task_id_factory=lambda: next(task_ids),
+            ),
+            lambda _state: next(decisions),
+            {
+                "device_ops_agent": execute,
+                "environment_agent": execute,
+            },
+            run_id_factory=lambda: "run-dependency-data",
+        )
+        run = await coordinator.execute(
+            conversation_id="conv-1",
+            turn_id="turn-1",
+            message="根据灯的数量执行条件控制",
+        )
+        return run, observed_dependency_findings, await store.events(run.run_id)
+
+    run, dependency_findings, events = asyncio.run(scenario())
+
+    assert run.status == "completed"
+    assert len(dependency_findings) == 1
+    upstream = dependency_findings[0]
+    assert upstream.task_id == "task-observe"
+    assert upstream.agent_id == "device_ops_agent"
+    assert upstream.status == "completed"
+    assert len(upstream.observations) == 7
+    assert all(
+        observation.result == {"on": False}
+        for observation in upstream.observations
+    )
+    started = [
+        event for event in events
+        if event.type == "task.started"
+        and event.task_id == "task-decide"
+    ][0]
+    assert started.data["dependency_task_ids"] == ["task-observe"]
+    assert started.data["dependency_finding_count"] == 1

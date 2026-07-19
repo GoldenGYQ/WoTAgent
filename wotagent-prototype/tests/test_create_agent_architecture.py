@@ -441,6 +441,14 @@ def test_run_supervisor_creates_structured_parallel_task_dag() -> None:
     ]
     assert parsed.task_plan().tasks[0].local_id == "health"
     assert "最小必要任务原则" in model.captured_messages[0][0].content
+    assert (
+        "同一个专业 Agent 的能力范围，应优先创建一个"
+        in model.captured_messages[0][0].content
+    )
+    assert (
+        "resource_claims 仍应根据每个 Task 可能访问或改变的资源，由你"
+        in model.captured_messages[0][0].content
+    )
     assert "最小必要证据原则" in get_agent_spec(
         "health_agent"
     ).system_prompt

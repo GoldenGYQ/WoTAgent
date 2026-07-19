@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from typing import Any
 
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
 from wotagent.agent_graph import AgentGraphDependencies, build_agent_graph
+from wotagent.agent_graph.graph import _agent_loop_context
 from wotagent.domain import Condition, PlanStep, TaskPlan, TaskStatus
 from wotagent.orchestration import TaskOrchestrator
 from wotagent.policy import PolicyEngine
@@ -60,6 +62,41 @@ def invoke(graph, role: str = "operator"):
         {"message": "打开客厅灯", "role": role, "session_id": "test-session"},
         config={"configurable": {"thread_id": f"thread-{role}"}},
     ))
+
+
+def test_agent_loop_starts_with_structured_upstream_observations() -> None:
+    upstream_observation = {
+        "source_task_id": "task-observe",
+        "step_id": "read-1",
+        "kind": "query",
+        "device_id": "light-001",
+        "action": "read_state",
+        "execution_status": "accepted",
+        "result": {"on": False},
+    }
+    context = _agent_loop_context(
+        {
+            "message": "偶数时打开加湿器",
+            "context": {
+                "dependency_findings": [{
+                    "task_id": "task-observe",
+                    "agent_id": "device_ops_agent",
+                    "objective": "统计开灯数量",
+                    "status": "completed",
+                    "finding": "开灯数量为 0",
+                    "observations": [upstream_observation],
+                }],
+            },
+            "execution_history": [],
+            "agent_iterations": 0,
+            "tool_call_count": 0,
+        },
+        SimpleNamespace(max_agent_iterations=4, max_tool_calls=16),
+    )
+
+    assert context["upstream_findings"][0]["task_id"] == "task-observe"
+    assert context["observations"] == [upstream_observation]
+    assert context["iteration"] == 1
 
 
 def test_full_control_path_plans_authorizes_executes_and_responds() -> None:

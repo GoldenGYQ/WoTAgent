@@ -1546,3 +1546,75 @@ Frontend typecheck/build: passed
 faster-whisper base CPU int8: model load and WAV decode passed
 Quick Tunnel multipart transcription: passed
 ```
+
+## 19. 条件任务边界与 Task DAG 数据流
+
+### 19.1 真实问题
+
+一个条件控制请求曾被 Supervisor 拆成两个 Task：
+
+```text
+Task A：查询全部灯并统计开灯数量
+Task B：根据奇偶结果打开空调或加湿器
+```
+
+`depends_on` 当时只保证 Task B 在 Task A 之后运行，并不传递 Task A 的结构化
+Finding。结果是 Task B 不知道灯的真实状态，只能重新规划或重复查询。这里的
+问题不是 `resource_claims.mode=write`；资源声明只参与 Scheduler 的冲突裁决，
+不会把查询变成写操作，也不会决定具体调用哪个工具。
+
+### 19.2 修复原则
+
+保留 Supervisor 的 LLM 决策权，包括 Task 拆解和 `resource_claims` 生成，不增加
+关键词路由或确定性任务合并器。新增两层约束：
+
+1. 当“观察 → 计算/判断 → 条件动作 → 验证”均属于同一专业 Agent 时，Supervisor
+   应优先创建一个完整条件 Task，由专业 Agent 在有限循环中根据观察选择动作。
+2. 确实需要拆分时，RunCoordinator 将上游 Finding 投影为结构化
+   `DependencyFinding`，再传给下游专业 Agent。
+
+依赖数据只包含：
+
+```text
+上游 task_id / agent_id / objective / status / finding
+设备步骤的 kind / device_id / action / execution_status
+有界的 result / verification / error
+recommended_actions / unresolved_questions
+```
+
+完整 trace 不会重复进入模型。单个上游最多投影 16 个设备步骤，一个下游 Task
+总共最多接收 32 个设备观察；字符串、列表、字典和嵌套深度也有边界。
+
+### 19.3 实际数据路径
+
+```text
+上游 Task 完成
+→ AgentFinding 持久化
+→ RunCoordinator 读取直接依赖
+→ 生成 DependencyFinding
+→ 下游 AgentTask.dependency_findings
+→ Device LangGraph agent_loop.observations
+→ Planner 根据已有事实选择下一动作
+```
+
+Health 和 Care 执行器也会收到同一份结构化依赖摘要，且提示优先复用有效事实，
+仅在数据不足、过期或需要验证时重新查询。
+
+### 19.4 测试与结论
+
+新增测试覆盖：
+
+- Supervisor 提示明确要求同专业条件链优先使用单 Task；
+- LLM 仍负责输出 `resource_claims`；
+- Coordinator 把 7 盏灯的结构化状态传给依赖 Task；
+- Task 事件记录依赖 Finding 数量和来源 Task ID；
+- 设备 Agent 第 1 轮就能在 `observations` 中看到上游事实。
+
+```text
+Targeted tests: 28 passed
+Full backend tests: 186 passed, 2 skipped
+```
+
+本轮没有调用真实模型，避免在结构契约尚未完成回归前消耗 Token。下一次真实链路
+复验应重点观察 Supervisor 是否生成单个条件 Task，以及 Planner 是否直接基于
+上游观察生成空调或加湿器动作。

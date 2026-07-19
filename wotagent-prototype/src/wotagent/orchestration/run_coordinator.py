@@ -15,6 +15,8 @@ from ..agents.contracts import AgentFinding, AgentFindingPayload
 from .run_models import (
     AgentRunRecord,
     AgentTask,
+    DependencyFinding,
+    DependencyObservation,
     RunRecord,
     SupervisorDecision,
     TaskFailure,
@@ -478,6 +480,7 @@ class RunCoordinator:
             )
 
     async def _execute_task(self, task: AgentTask) -> AgentFinding | None:
+        task = await self._attach_dependency_findings(task)
         agent_run = await self.store.add_agent_run(AgentRunRecord(
             agent_run_id=f"agent_run_{uuid4().hex[:12]}",
             run_id=task.run_id,
@@ -495,7 +498,13 @@ class RunCoordinator:
             parent_task_id=task.parent_task_id,
             agent_run_id=agent_run.agent_run_id,
             node=task.agent_id,
-            data={"objective": task.objective},
+            data={
+                "objective": task.objective,
+                "dependency_finding_count": len(task.dependency_findings),
+                "dependency_task_ids": [
+                    item.task_id for item in task.dependency_findings
+                ],
+            },
         )
         executor = self.executors.get(task.agent_id)
         failure: TaskFailure | None = None
@@ -588,6 +597,29 @@ class RunCoordinator:
         )
         return finding
 
+    async def _attach_dependency_findings(
+        self,
+        task: AgentTask,
+    ) -> AgentTask:
+        findings: list[DependencyFinding] = []
+        observation_budget = 32
+        for dependency_id in task.depends_on:
+            dependency = await self.store.get_task(dependency_id)
+            if dependency is None or dependency.finding is None:
+                continue
+            dependency_finding = _dependency_finding(
+                dependency,
+                observation_limit=observation_budget,
+            )
+            findings.append(dependency_finding)
+            observation_budget = max(
+                0,
+                observation_budget - len(dependency_finding.observations),
+            )
+        if not findings:
+            return task
+        return task.model_copy(update={"dependency_findings": findings})
+
     async def _run_findings(self, run_id: str) -> list[AgentFinding]:
         return [
             task.finding
@@ -677,6 +709,84 @@ def _attest_finding(
         agent_run_id=agent_run_id,
         **payload.model_dump(),
     )
+
+
+def _dependency_finding(
+    task: AgentTask,
+    *,
+    observation_limit: int = 16,
+) -> DependencyFinding:
+    finding = task.finding
+    if finding is None:
+        raise ValueError(f"dependency task '{task.task_id}' has no finding")
+    observations: list[DependencyObservation] = []
+    for evidence in finding.evidence:
+        remaining = observation_limit - len(observations)
+        if remaining <= 0:
+            break
+        value = evidence.value
+        if not evidence.source.endswith(".execution_trace"):
+            continue
+        if hasattr(value, "model_dump"):
+            value = value.model_dump(mode="python")
+        if not isinstance(value, dict):
+            continue
+        for item in value.get("steps", [])[:min(16, remaining)]:
+            if not isinstance(item, dict):
+                continue
+            step = item.get("step") if isinstance(item.get("step"), dict) else {}
+            execution = (
+                item.get("execution")
+                if isinstance(item.get("execution"), dict)
+                else {}
+            )
+            observations.append(DependencyObservation(
+                source_task_id=task.task_id,
+                step_id=str(step.get("id", "")),
+                kind=str(step.get("kind", "")),
+                device_id=str(step.get("device_id", "")),
+                action=str(step.get("action", "")),
+                execution_status=str(execution.get("status", "not_executed")),
+                result=_bounded_dependency_value(execution.get("raw_result")),
+                verification=_bounded_dependency_value(item.get("verification")),
+                error=(
+                    str(execution["error"])
+                    if execution.get("error") is not None
+                    else None
+                ),
+            ))
+    return DependencyFinding(
+        task_id=task.task_id,
+        agent_id=task.agent_id,
+        objective=task.objective,
+        status=finding.status,
+        finding=finding.finding[:1000],
+        observations=observations,
+        recommended_actions=finding.recommended_actions[:8],
+        unresolved_questions=finding.unresolved_questions[:8],
+    )
+
+
+def _bounded_dependency_value(
+    value: Any,
+    *,
+    depth: int = 0,
+) -> Any:
+    if depth >= 3:
+        return str(value)[:200]
+    if isinstance(value, dict):
+        return {
+            str(key)[:100]: _bounded_dependency_value(item, depth=depth + 1)
+            for key, item in list(value.items())[:16]
+        }
+    if isinstance(value, list | tuple):
+        return [
+            _bounded_dependency_value(item, depth=depth + 1)
+            for item in value[:16]
+        ]
+    if isinstance(value, str):
+        return value[:500]
+    return value
 
 
 def _failure_finding(

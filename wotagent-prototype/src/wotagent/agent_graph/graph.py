@@ -401,6 +401,16 @@ def _agent_loop_context(
     state: AgentState,
     deps: AgentGraphDependencies,
 ) -> dict[str, Any]:
+    upstream_findings = list(
+        state.get("context", {}).get("dependency_findings", [])
+    )
+    upstream_observations = [
+        observation
+        for finding in upstream_findings
+        if isinstance(finding, dict)
+        for observation in finding.get("observations", [])
+        if isinstance(observation, dict)
+    ]
     return {
         "execution_mode": "observe_act_loop",
         "original_objective": (
@@ -411,7 +421,8 @@ def _agent_loop_context(
         "max_iterations": deps.max_agent_iterations,
         "tool_call_count": state.get("tool_call_count", 0),
         "max_tool_calls": deps.max_tool_calls,
-        "observations": [
+        "upstream_findings": upstream_findings,
+        "observations": upstream_observations + [
             observation
             for iteration, trace in enumerate(state.get("execution_history", []), start=1)
             for observation in _trace_observations(trace, iteration)

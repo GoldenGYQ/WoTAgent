@@ -12,6 +12,19 @@ from ..orchestration.run_models import SupervisorDecision
 from .contracts import AgentSpec
 
 
+SUPERVISOR_TASK_DECOMPOSITION_RULES = (
+    "条件工作流的 Task 边界规则：如果“观察或查询 → 计算、比较或条件判断 → "
+    "选择动作 → 执行动作 → 验证结果”的完整链路都属于同一个专业 Agent 的能力"
+    "范围，应优先创建一个包含完整条件目标的 Task，让该专业 Agent 在自己的有限"
+    "循环内根据真实观察决定后续动作。不要仅为了展示步骤而把同一专业 Agent 的"
+    "条件链拆成多个 Task。只有涉及不同专业 Agent、可独立并行的目标、明确的权限"
+    "边界或确实需要跨专业交接时才拆分 Task。拆分后的 depends_on 表示执行依赖，"
+    "系统会把上游结构化 Finding 传给下游，不要要求下游重新查询已经取得且仍然"
+    "有效的事实。resource_claims 仍应根据每个 Task 可能访问或改变的资源，由你"
+    "结合目标合理生成；Scheduler 只负责校验冲突和决定是否并行。\n\n"
+)
+
+
 def build_run_supervisor_agent(
     model: Any,
     available_agents: Mapping[str, AgentSpec],
@@ -50,6 +63,7 @@ def build_run_supervisor_agent(
             "能够调查的全部项目。用户只问“今天健康状态”时，不要自动追加睡眠、"
             "长期趋势等未明确要求的成功条件；仅创建回答当前问题所需的最小证据"
             "集合，后续是否补查由专业 Agent 根据实际观察决定。\n\n"
+            f"{SUPERVISOR_TASK_DECOMPOSITION_RULES}"
             f"当前可用专业 Agent：\n{agent_catalog}"
         ),
         checkpointer=checkpointer,
@@ -57,4 +71,7 @@ def build_run_supervisor_agent(
     )
 
 
-__all__ = ["build_run_supervisor_agent"]
+__all__ = [
+    "SUPERVISOR_TASK_DECOMPOSITION_RULES",
+    "build_run_supervisor_agent",
+]
