@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import asyncio
 
-from wotagent.domains.eldercare import EldercareDeviceCollector, EldercareStore, Resident
+from wotagent.domains.eldercare import (
+    EldercareDeviceCollector,
+    EldercareMonitorService,
+    EldercareStore,
+    Resident,
+)
 
 
 class FakeGateway:
@@ -57,3 +62,29 @@ def test_collector_maps_td_properties_to_standard_sensor_readings(tmp_path) -> N
     }
     assert all(item.source.startswith("wot-mcp:") for item in first)
     assert second == []
+
+
+def test_monitor_pauses_without_polling_when_eldercare_profile_is_inactive(
+    tmp_path,
+) -> None:
+    class RejectUnexpectedPoll:
+        async def query_state(self, _device_id):
+            raise AssertionError("inactive eldercare monitor must not poll")
+
+    async def active_profile() -> str:
+        return "villa"
+
+    store = EldercareStore(tmp_path / "eldercare.db")
+    store.seed_demo()
+    service = EldercareMonitorService(
+        store,
+        RejectUnexpectedPoll(),
+        get_active_profile=active_profile,
+    )
+
+    assert asyncio.run(service.collect_once()) == []
+    status = store.service_status("eldercare-monitor")
+    assert status is not None
+    assert status["status"] == "online"
+    assert status["reported_status"] == "paused"
+    assert status["details"]["active_profile"] == "villa"

@@ -31,7 +31,10 @@ successor to `99afb3d feat: harden agent context and real model health flow`
 - smoke and energy injection update simulator devices and create deterministic
   domain events; villa events are currently process-local and do not yet enter
   the Run pipeline automatically.
-- current regression: backend `201 passed, 3 skipped`, frontend `25 passed`
+- the independent eldercare Monitor probes the simulator Profile before each
+  collection cycle and reports `paused` without polling eldercare devices while
+  the villa Profile is active.
+- current regression: backend `202 passed, 3 skipped`, frontend `25 passed`
   plus production build, simulator `63 passed`.
 
 ## 2026-07-19 P0.5 Update

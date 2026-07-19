@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import signal
 
+import httpx
 from dotenv import load_dotenv
 
 from ..paths import project_root
@@ -81,9 +83,28 @@ def _run_monitor(args: argparse.Namespace) -> None:
     from wotagent.gateway import MCPDeviceGateway
 
     async def run() -> None:
+        async def get_active_profile() -> str | None:
+            simulator_url = os.getenv(
+                "WOT_SIMULATOR_URL",
+                "http://127.0.0.1:18080",
+            ).rstrip("/")
+            try:
+                async with httpx.AsyncClient(timeout=2) as client:
+                    response = await client.get(
+                        f"{simulator_url}/api/scenes/active"
+                    )
+                    response.raise_for_status()
+                return str(response.json()["profile"]["profile_id"])
+            except (httpx.HTTPError, KeyError, TypeError, ValueError):
+                return None
+
         store = EldercareStore()
         store.seed_demo()
-        service = EldercareMonitorService(store, MCPDeviceGateway())
+        service = EldercareMonitorService(
+            store,
+            MCPDeviceGateway(),
+            get_active_profile=get_active_profile,
+        )
         if args.once:
             results = await service.collect_once()
             print(f"Monitor collected {len(results)} changed device batches")

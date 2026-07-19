@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from .collector import EldercareDeviceCollector
@@ -12,10 +13,17 @@ from .store import EldercareStore
 
 
 class EldercareMonitorService:
-    def __init__(self, store: EldercareStore, gateway: Any) -> None:
+    def __init__(
+        self,
+        store: EldercareStore,
+        gateway: Any,
+        *,
+        get_active_profile: Callable[[], Awaitable[str | None]] | None = None,
+    ) -> None:
         self.store = store
         self.collector = EldercareDeviceCollector(store, gateway)
         self.monitor = HealthMonitor(store)
+        self.get_active_profile = get_active_profile
 
     async def ingest(self, reading: SensorReading) -> dict[str, Any]:
         self.store.add_reading(reading)
@@ -31,10 +39,25 @@ class EldercareMonitorService:
         }
 
     async def collect_once(self) -> list[dict[str, Any]]:
+        if self.get_active_profile is not None:
+            active_profile = await self.get_active_profile()
+            if active_profile != "eldercare":
+                self.store.heartbeat(
+                    "eldercare-monitor",
+                    status="paused",
+                    details={
+                        "active_profile": active_profile or "unknown",
+                        "reason": "eldercare deployment is not active",
+                    },
+                )
+                return []
         results = [await self.ingest(reading) for reading in await self.collector.collect_all()]
         self.store.heartbeat(
             "eldercare-monitor",
-            details={"changed_readings": len(results)},
+            details={
+                "active_profile": "eldercare",
+                "changed_readings": len(results),
+            },
         )
         return results
 

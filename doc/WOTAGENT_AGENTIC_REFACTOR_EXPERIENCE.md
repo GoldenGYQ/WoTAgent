@@ -2056,6 +2056,9 @@ Domain scenario
   先导出底层 RBAC 后再加载高层服务，避免运行时导入失败；
 - 单元测试必须采用仓库已有的 `asyncio.run()` 模式，不能假定安装了
   `pytest-asyncio`。
+- 真实切换到别墅后，独立养老 Monitor 仍会轮询手环；Profile 生命周期必须同时
+  约束后台采集服务。当前 Monitor 在非养老 Profile 下保持心跳但进入 `paused`，
+  不再访问场景外设备。
 
 ### 27.5 验证范围
 
@@ -2065,7 +2068,7 @@ Domain scenario
 完整回归结果：
 
 ```text
-Backend: 201 passed, 3 skipped
+Backend: 202 passed, 3 skipped
 Frontend: 25 passed, typecheck/build passed
 Simulator: 63 passed
 ```
