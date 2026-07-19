@@ -25,6 +25,14 @@ interface TraceGroup {
   status: string
   task: AgentTaskRecord | null
   events: TraceEvent[]
+  stages: TraceStage[]
+}
+
+interface TraceStage {
+  id: string
+  key: string
+  label: string
+  events: TraceEvent[]
 }
 
 interface EventDetail {
@@ -59,16 +67,19 @@ const traceGroups = computed<TraceGroup[]>(() => {
       status: props.run.status,
       task: null,
       events: runEvents,
+      stages: buildStages(runEvents),
     })
   }
   for (const task of props.run.tasks) {
+    const taskEvents = orderedEvents.value.filter((event) => event.task_id === task.task_id)
     groups.push({
       id: task.task_id,
       label: task.agent_id,
       summary: task.objective,
       status: task.status,
       task,
-      events: orderedEvents.value.filter((event) => event.task_id === task.task_id),
+      events: taskEvents,
+      stages: buildStages(taskEvents),
     })
   }
   const knownTasks = new Set(props.run.tasks.map((task) => task.task_id))
@@ -84,13 +95,15 @@ const traceGroups = computed<TraceGroup[]>(() => {
     ),
   ]
   for (const taskId of orphanTaskIds) {
+    const taskEvents = orderedEvents.value.filter((event) => event.task_id === taskId)
     groups.push({
       id: taskId,
       label: '专业 Agent',
       summary: taskId,
       status: 'running',
       task: null,
-      events: orderedEvents.value.filter((event) => event.task_id === taskId),
+      events: taskEvents,
+      stages: buildStages(taskEvents),
     })
   }
   return groups
@@ -204,6 +217,69 @@ function eventDetails(event: TraceEvent): EventDetail[] {
   return details
 }
 
+function buildStages(events: TraceEvent[]): TraceStage[] {
+  const stages: TraceStage[] = []
+  for (const event of events) {
+    const descriptor = stageFor(event)
+    const previous = stages.at(-1)
+    if (previous?.key === descriptor.key) {
+      previous.events.push(event)
+      continue
+    }
+    stages.push({
+      id: `${descriptor.key}-${event.sequence}`,
+      key: descriptor.key,
+      label: descriptor.label,
+      events: [event],
+    })
+  }
+  return stages
+}
+
+function stageFor(event: TraceEvent): { key: string; label: string } {
+  if (
+    event.type.startsWith('model.')
+    || event.type === 'supervisor.decision.completed'
+    || event.type === 'model.reasoning.summary'
+  ) {
+    return event.task_id
+      ? { key: 'planning', label: '规划与模型决策' }
+      : { key: 'supervision', label: 'Supervisor 决策' }
+  }
+  if (
+    event.node === 'planner'
+    || event.type === 'agent.goal.created'
+    || event.type === 'agent.goal.evaluated'
+  ) return { key: 'planning', label: '规划与模型决策' }
+  if (event.type.startsWith('policy.')) return { key: 'policy', label: '权限与策略检查' }
+  if (
+    event.type.startsWith('agent.tool')
+    || event.type.startsWith('agent.resource')
+    || event.node === 'executor'
+  ) return { key: 'execution', label: '工具执行' }
+  if (
+    event.type.startsWith('verification.')
+    || event.node === 'verifier'
+  ) return { key: 'execution', label: '工具执行与状态验证' }
+  if (
+    event.type.includes('recovery')
+    || event.type.includes('fallback')
+  ) return { key: 'recovery', label: '恢复与替代方案' }
+  if (
+    event.node === 'responder'
+    || event.type === 'agent.finding.completed'
+    || event.type.endsWith('.completed')
+    || event.type.endsWith('.failed')
+  ) return { key: 'result', label: '结果与收尾' }
+  if (
+    event.type === 'task.created'
+    || event.type.startsWith('scheduler.')
+  ) return { key: 'dispatch', label: 'Task 创建与调度' }
+  return event.task_id
+    ? { key: 'entry', label: 'Task 入口' }
+    : { key: 'lifecycle', label: 'Run 生命周期' }
+}
+
 function hasValue(value: unknown): boolean {
   return value !== undefined && value !== null && value !== ''
 }
@@ -270,58 +346,70 @@ function pretty(value: unknown): string {
 
             <Transition name="trace-expand">
               <div v-if="expandedGroups.has(group.id)" class="trace-group-events">
-                <TransitionGroup name="trace-event" tag="div">
-                  <button
-                    v-for="event in group.events"
-                    :key="event.event_id"
-                    class="inline-trace-event"
-                    :class="{ active: eventIsLive(event, group) }"
-                    :data-tone="eventTone(event)"
-                    type="button"
-                    @click="toggleEvent(event)"
-                  >
-                    <span class="inline-trace-rail">
-                      <span class="inline-trace-icon">
-                        <LoaderCircle
-                          v-if="eventIsLive(event, group)"
-                          :size="13"
-                          class="trace-running-icon"
-                        />
-                        <component :is="iconFor(event)" v-else :size="13" />
-                      </span>
-                    </span>
-                    <span class="inline-trace-copy">
-                      <span class="inline-trace-title">
-                        <strong>{{ eventTitle(event) }}</strong>
-                        <span v-if="event.iteration" class="iteration-label">
-                          第 {{ event.iteration }} 轮
+                <section
+                  v-for="stage in group.stages"
+                  :key="stage.id"
+                  class="trace-stage"
+                  :data-stage="stage.key"
+                >
+                  <header class="trace-stage-header">
+                    <span class="trace-stage-branch" />
+                    <strong>{{ stage.label }}</strong>
+                    <span>{{ stage.events.length }} 项</span>
+                  </header>
+                  <TransitionGroup name="trace-event" tag="div" class="trace-stage-events">
+                    <button
+                      v-for="event in stage.events"
+                      :key="event.event_id"
+                      class="inline-trace-event"
+                      :class="{ active: eventIsLive(event, group) }"
+                      :data-tone="eventTone(event)"
+                      type="button"
+                      @click="toggleEvent(event)"
+                    >
+                      <span class="inline-trace-rail">
+                        <span class="inline-trace-icon">
+                          <LoaderCircle
+                            v-if="eventIsLive(event, group)"
+                            :size="13"
+                            class="trace-running-icon"
+                          />
+                          <component :is="iconFor(event)" v-else :size="13" />
                         </span>
-                        <time>{{ formatTime(event.timestamp) }}</time>
                       </span>
-                      <span v-if="eventSummary(event)" class="inline-trace-summary">
-                        {{ eventSummary(event) }}
-                      </span>
-                      <Transition name="trace-detail">
-                        <span
-                          v-if="expandedEvents.has(event.sequence)"
-                          class="trace-detail-stack"
-                        >
-                          <span
-                            v-for="detail in eventDetails(event)"
-                            :key="detail.label"
-                            class="trace-detail"
-                            :data-tone="detail.tone"
-                          >
-                            <b>{{ detail.label }}</b>
-                            <code>{{ pretty(detail.value) }}</code>
+                      <span class="inline-trace-copy">
+                        <span class="inline-trace-title">
+                          <strong>{{ eventTitle(event) }}</strong>
+                          <span v-if="event.iteration" class="iteration-label">
+                            第 {{ event.iteration }} 轮
                           </span>
+                          <time>{{ formatTime(event.timestamp) }}</time>
                         </span>
-                      </Transition>
-                    </span>
-                    <ChevronDown v-if="expandedEvents.has(event.sequence)" :size="14" />
-                    <ChevronRight v-else :size="14" />
-                  </button>
-                </TransitionGroup>
+                        <span v-if="eventSummary(event)" class="inline-trace-summary">
+                          {{ eventSummary(event) }}
+                        </span>
+                        <Transition name="trace-detail">
+                          <span
+                            v-if="expandedEvents.has(event.sequence)"
+                            class="trace-detail-stack"
+                          >
+                            <span
+                              v-for="detail in eventDetails(event)"
+                              :key="detail.label"
+                              class="trace-detail"
+                              :data-tone="detail.tone"
+                            >
+                              <b>{{ detail.label }}</b>
+                              <code>{{ pretty(detail.value) }}</code>
+                            </span>
+                          </span>
+                        </Transition>
+                      </span>
+                      <ChevronDown v-if="expandedEvents.has(event.sequence)" :size="14" />
+                      <ChevronRight v-else :size="14" />
+                    </button>
+                  </TransitionGroup>
+                </section>
 
                 <div v-if="groupIsLive(group)" class="trace-waiting">
                   <span class="runtime-spinner" />
