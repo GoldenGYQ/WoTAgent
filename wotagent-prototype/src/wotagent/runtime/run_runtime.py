@@ -24,6 +24,7 @@ from ..domains.eldercare.entity_resolution import ResidentEntityResolver
 from ..orchestration import (
     AgentTask,
     PendingConfirmation,
+    ResourceScope,
     RunCoordinator,
     RunStore,
     SupervisorDecision,
@@ -537,6 +538,10 @@ def _task_preparer(runtime: Any) -> Callable[[AgentTask, str, dict[str, Any]], A
     default_capabilities = {
         "health_agent": "health.status.read",
         "care_agent": "care.coordinate",
+        "security_agent": "security.use",
+        "energy_agent": "energy.use",
+        "housekeeping_agent": "housekeeping.use",
+        "device_ops_agent": "device_ops.use",
     }
 
     async def prepare(
@@ -544,12 +549,23 @@ def _task_preparer(runtime: Any) -> Callable[[AgentTask, str, dict[str, Any]], A
         message: str,
         task_context: dict[str, Any],
     ) -> AgentTask:
+        deployment = task_context.get("deployment", {})
         capability = (
-            default_capabilities.get(task.agent_id)
-            or task.requested_capability
+            default_capabilities[task.agent_id]
+            if task.agent_id in {"health_agent", "care_agent"}
+            else task.requested_capability
+            or (
+                "environment.control"
+                if (
+                    task.agent_id == "environment_agent"
+                    and deployment.get("domain_id") == "eldercare"
+                )
+                else "environment.use"
+                if task.agent_id == "environment_agent"
+                else default_capabilities.get(task.agent_id, "")
+            )
         )
         task.requested_capability = capability
-        deployment = task_context.get("deployment", {})
         enabled_agents = set(deployment.get("enabled_agents", []))
         if enabled_agents and task.agent_id not in enabled_agents:
             raise TaskPreparationError(_task_failure(
@@ -563,6 +579,46 @@ def _task_preparer(runtime: Any) -> Callable[[AgentTask, str, dict[str, Any]], A
                 retryable=False,
             ))
         if task.agent_id not in {"health_agent", "care_agent"}:
+            if (
+                task.principal is None
+                or not task.principal.granted_capabilities
+            ):
+                return task
+            if (
+                "*" not in task.principal.granted_capabilities
+                and capability not in task.principal.granted_capabilities
+            ):
+                raise TaskPreparationError(_task_failure(
+                    task,
+                    category="authorization",
+                    code="AGENT_CAPABILITY_NOT_DELEGABLE",
+                    message=(
+                        f"Principal '{task.principal.principal_id}' cannot "
+                        f"delegate capability '{capability}' to "
+                        f"Agent '{task.agent_id}'."
+                    ),
+                    retryable=False,
+                ))
+            scoped_devices = _principal_device_scope(
+                runtime,
+                task.principal,
+                deployment,
+            )
+            if not scoped_devices:
+                raise TaskPreparationError(_task_failure(
+                    task,
+                    category="resource_scope",
+                    code="PRINCIPAL_DEVICE_SCOPE_EMPTY",
+                    message="Principal 在当前场景没有可委派的设备资源。",
+                    retryable=False,
+                ))
+            task.effective_scope = ResourceScope(
+                resource_ids=[
+                    f"device:{device_id}"
+                    for device_id in scoped_devices
+                ],
+                capabilities=[capability],
+            )
             return task
         target_type = "resident"
         task.target_type = target_type
@@ -617,6 +673,39 @@ def _task_preparer(runtime: Any) -> Callable[[AgentTask, str, dict[str, Any]], A
         return task
 
     return prepare
+
+
+def _principal_device_scope(
+    runtime: Any,
+    principal: Any,
+    deployment: dict[str, Any],
+) -> list[str]:
+    profile_devices = set(deployment.get("device_ids", []))
+    if "*" in principal.resource_ids:
+        return sorted(profile_devices)
+    site_resource = f"site:{deployment.get('site_id', '')}"
+    if site_resource in principal.resource_ids:
+        return sorted(profile_devices)
+    device_ids = {
+        item.removeprefix("device:")
+        for item in principal.resource_ids
+        if item.startswith("device:")
+    }
+    for resource_id in principal.resource_ids:
+        if not resource_id.startswith("resident:"):
+            continue
+        resident = runtime.eldercare_store.get_resident(
+            resource_id.removeprefix("resident:")
+        )
+        if resident is None:
+            continue
+        device_ids.update(filter(None, (
+            resident.environment_device_id,
+            resident.wristband_device_id,
+            resident.mattress_device_id,
+            resident.environment_sensor_device_id,
+        )))
+    return sorted(device_ids.intersection(profile_devices))
 
 
 def _task_failure(
@@ -688,9 +777,10 @@ def _device_executor(
             task,
         )
         deployment = context.get("deployment", {})
+        device_ids = _execution_device_scope(task, deployment)
         try:
             with deployment_device_scope(
-                deployment.get("device_ids")
+                device_ids
             ):
                 result = await asyncio.wait_for(
                     graph.ainvoke(
@@ -744,7 +834,8 @@ def _device_resumer(
     context: dict[str, Any] | None = None,
 ) -> Callable[[AgentTask, bool], Any]:
     async def resume(task: AgentTask, approved: bool) -> AgentFinding:
-        device_ids = (context or {}).get("deployment", {}).get("device_ids")
+        deployment = (context or {}).get("deployment", {})
+        device_ids = _execution_device_scope(task, deployment)
         with deployment_device_scope(device_ids):
             result = await asyncio.wait_for(
                 graph.ainvoke(
@@ -760,6 +851,21 @@ def _device_resumer(
         return _result_finding(task, result)
 
     return resume
+
+
+def _execution_device_scope(
+    task: AgentTask,
+    deployment: dict[str, Any],
+) -> list[str] | None:
+    if task.effective_scope is not None:
+        scoped = [
+            item.removeprefix("device:")
+            for item in task.effective_scope.resource_ids
+            if item.startswith("device:")
+        ]
+        if scoped:
+            return scoped
+    return deployment.get("device_ids")
 
 
 def _subscribe_trace_projection(

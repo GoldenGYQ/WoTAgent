@@ -5,7 +5,6 @@ from typing import Any
 
 import pytest
 
-from wotagent.auth import DomainAssignmentService, VILLA_ASSIGNMENTS
 from wotagent.domain import DeploymentProfile, DomainAccessDenied
 from wotagent.domains.smart_home import SmartHomeOperations
 
@@ -104,7 +103,6 @@ def make_operations() -> tuple[SmartHomeOperations, FakeGateway]:
         SmartHomeOperations(
             get_gateway=lambda: gateway,
             get_profile=lambda: profile,
-            authorization=DomainAssignmentService(VILLA_ASSIGNMENTS),
         ),
         gateway,
     )
@@ -119,7 +117,7 @@ def test_manifest_exposes_butler_security_and_monitor_subjects() -> None:
     }
 
     assert actors["butler_run_supervisor"].llm_driven is True
-    assert actors["security_agent"].label == "安防保安"
+    assert actors["security_agent"].label == "安防处置 Agent"
     assert actors["villa-rule-monitor"].llm_driven is False
     assert "security_agent" in actors["butler_run_supervisor"].delegates_to
 

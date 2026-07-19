@@ -8,6 +8,8 @@ import pytest
 from wotagent.domains.eldercare.entity_resolution import ResidentEntityResolver
 from wotagent.domains.eldercare.health_gateway import ScopedHealthMCPClient
 from wotagent.domains.eldercare.store import EldercareStore
+from wotagent.domain import DeploymentProfileRegistry
+from wotagent.identity import DEFAULT_PRINCIPAL_DIRECTORY
 from wotagent.orchestration import (
     AgentTask,
     ResourceScope,
@@ -157,3 +159,43 @@ def test_health_gateway_rejects_resident_outside_effective_scope(
     assert result.success is False
     assert result.error_code == "RESOURCE_SCOPE_DENIED"
     assert result.retryable is False
+
+
+def test_security_staff_can_delegate_observation_but_not_environment_control(
+    tmp_path,
+) -> None:
+    profile = DeploymentProfileRegistry.load().require("villa")
+    principal = DEFAULT_PRINCIPAL_DIRECTORY.resolve("JH-2", "smart_home")
+    runtime = SimpleNamespace(eldercare_store=_store(tmp_path))
+    prepare = _task_preparer(runtime)
+
+    def task(agent_id: str, capability: str) -> AgentTask:
+        return AgentTask(
+            task_id=f"task-{agent_id}",
+            run_id="run-villa",
+            local_id=agent_id,
+            agent_id=agent_id,
+            objective="检查状态",
+            reason="用户请求",
+            success_criteria=["获得设备状态"],
+            principal=principal,
+            requested_capability=capability,
+        )
+
+    security = asyncio.run(prepare(
+        task("security_agent", "security.observe"),
+        "检查入口安防状态",
+        {"deployment": profile.model_dump(mode="json")},
+    ))
+
+    assert security.effective_scope is not None
+    assert security.effective_scope.capabilities == ["security.observe"]
+    assert security.effective_scope.resource_ids
+
+    with pytest.raises(TaskPreparationError) as captured:
+        asyncio.run(prepare(
+            task("environment_agent", "environment.use"),
+            "打开客厅灯",
+            {"deployment": profile.model_dump(mode="json")},
+        ))
+    assert captured.value.failure.code == "AGENT_CAPABILITY_NOT_DELEGABLE"

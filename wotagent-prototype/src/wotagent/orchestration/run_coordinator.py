@@ -178,13 +178,19 @@ class RunCoordinator:
                 )
 
             plan = decision.task_plan()
+            principal_payload = context.get("principal")
+            principal = (
+                TaskPrincipal.model_validate(principal_payload)
+                if isinstance(principal_payload, dict)
+                else TaskPrincipal(
+                    principal_id=run.user_id,
+                    roles=[run.role],
+                )
+            )
             tasks = self.scheduler.materialize(
                 run.run_id,
                 plan,
-                principal=TaskPrincipal(
-                    principal_id=run.user_id,
-                    roles=[run.role],
-                ),
+                principal=principal,
             )
             tasks = await self._prepare_tasks(
                 tasks,

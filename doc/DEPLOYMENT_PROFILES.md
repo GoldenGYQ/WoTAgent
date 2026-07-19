@@ -54,6 +54,18 @@ Software actors are not login users. `JH-1` and `JH-2` are authorization
 Principals; Butler and specialist Agents are delegated software Principals with
 their own AgentSpec/MCP capability boundaries.
 
+The backend identity directory resolves the same human Principal differently
+for each domain:
+
+| Principal | Eldercare binding | Smart-home binding |
+|---|---|---|
+| `JH-1` | caregiver, `caregiver_of elderly-001` | villa owner, `owner_of site:villa-demo` |
+| `JH-2` | family observer, `family_of elderly-002` | security staff, assigned to `site:villa-demo` |
+
+These human roles must not be used as specialist Agent identities. Specialist
+names describe capability categories such as health analysis, care
+coordination, security response and environment control.
+
 ## Runtime Flow
 
 ```text
@@ -77,6 +89,8 @@ tries to reuse a Conversation after switching worlds.
 ```text
 GET /api/v2/deployment/profiles
 PUT /api/v2/deployment/active
+GET /api/v2/principals?domain_id=<domain_id>&login_only=true
+GET /api/v2/principals/{principal_id}/context?domain_id=<domain_id>
 
 GET /api/scenes
 GET /api/scenes/active
@@ -124,3 +138,15 @@ JH-2 -> site:villa-demo
 This is intentionally smaller than a final room/post/shift relationship model.
 It proves that the same Domain Operations API can enforce different Principal
 capabilities without asking the LLM to grant access.
+
+The execution boundary is computed as:
+
+```text
+Principal capability and relationship scope
+INTERSECT Profile devices
+INTERSECT AgentSpec and MCP scope
+INTERSECT TD and Policy constraints
+```
+
+The resulting `effective_scope` is issued by the backend. A Supervisor may
+request a capability, but it cannot issue or widen that scope.

@@ -2072,3 +2072,90 @@ Backend: 202 passed, 3 skipped
 Frontend: 25 passed, typecheck/build passed
 Simulator: 63 passed
 ```
+
+## 28. P1 第三阶段：人类 Principal 与软件 Agent 分离
+
+### 28.1 为什么必须分离
+
+此前界面和领域清单里同时出现“护理员”“保安”“健康监测专员”等名称，容易把登录用户、
+岗位角色和软件 Agent 混成同一种主体。修复后的四层模型是：
+
+```text
+Principal
+  -> 谁发起请求，例如护理员、居民、别墅业主、安保人员
+
+Software Agent
+  -> 哪一类软件能力执行任务，例如健康信息分析、安防处置、环境调节
+
+Resource / Subject
+  -> 操作或读取的对象，例如 resident:elderly-001、site:villa-demo、device:light-001
+
+Policy / Relationship
+  -> Principal 是否可以把某项能力委派给 Agent，并作用于该资源
+```
+
+因此，护士或保安不是 Agent；老人既可以是受保护的数据主体，也可以作为登录 Principal
+查询自己的数据。软件 Agent 按抽象能力分类，不模拟一个具体人的职业身份。
+
+### 28.2 当前可信身份链
+
+新增 `PrincipalDirectory` 作为实验阶段的后端可信身份目录。前端登录卡片不再硬编码角色和
+居民关系，而是读取：
+
+```text
+GET /api/v2/principals?domain_id=<domain_id>&login_only=true
+GET /api/v2/principals/{principal_id}/context?domain_id=<domain_id>
+```
+
+同一个 Principal 在不同领域可以有不同绑定：
+
+```text
+JH-1 + eldercare  -> 护理员，caregiver_of elderly-001
+JH-1 + smart_home -> 别墅业主，owner_of site:villa-demo
+JH-2 + eldercare  -> 家属观察者，family_of elderly-002
+JH-2 + smart_home -> 安保人员，assigned_to site:villa-demo
+```
+
+创建 Run 时，后端根据 `user_id + domain_id` 解析可信 `TaskPrincipal`，覆盖客户端自报的
+粗粒度角色，并将 Principal 快照持久化到 Run。Supervisor 仍可提出目标、Agent 和业务
+capability，但不能生成 `effective_scope`。
+
+### 28.3 实际授权公式
+
+设备任务的最终能力边界是：
+
+```text
+Principal capability and relationship scope
+INTERSECT Deployment Profile device set
+INTERSECT AgentSpec and MCP scope
+INTERSECT TD capability and parameter constraints
+INTERSECT Policy/RBAC decision
+```
+
+任务准备阶段会把交集签发为 `effective_scope`；设备 Graph 和恢复路径都使用该范围，而不是
+直接使用整个 Profile。Health/Care 的可信 capability 由运行时固定注入，模型不能通过自报
+更高权限扩大范围。
+
+### 28.4 本轮踩坑
+
+- 兼容主体 `local-user` 一度被目录绑定为 `admin`，导致客户端传入的 `operator` 被意外提权；
+  修复为只保留 operator，并由回归测试锁定。
+- Health Task 一度仍优先采用模型生成的 `requested_capability`；修复为健康和照护能力由
+  后端规范化，模型只负责业务目标。
+- 别墅领域曾维护独立的 `DomainAssignmentService`，与养老居民绑定形成两套身份真相；
+  现已删除，统一使用 `PrincipalDirectory`。
+- 前端切换 Profile 后不能沿用旧领域角色文本；现在会重新读取同一 Principal 在新领域的
+  binding，并展示领域角色、平台角色和资源关系。
+
+### 28.5 当前边界
+
+这仍是实验级身份目录，不是真实登录鉴权。已知 Principal 的角色和关系由后端授信，但
+`user_id` 仍由客户端提交。生产化仍需要认证网关、服务端会话、岗位/班次上下文和更细的
+资源关系策略。
+
+验证结果：
+
+```text
+Backend: 207 passed, 3 skipped
+Frontend: 26 passed, typecheck/build passed
+```

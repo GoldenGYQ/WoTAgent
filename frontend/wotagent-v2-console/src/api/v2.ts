@@ -17,6 +17,7 @@ import type {
   DeploymentProfile,
   HealthSummary,
   MonitorStatus,
+  PrincipalContext,
   Resident,
   RiskEvent,
   RunRecord,
@@ -54,6 +55,12 @@ export const agentV2Api = {
   health: (): Promise<{ status: string; pipeline: string }> => request('/api/health'),
   capabilities: (): Promise<ApiCapabilities> => request('/api/v2/capabilities'),
   listDeploymentProfiles: (): Promise<{ default_profile_id: string; profiles: DeploymentProfile[] }> => request('/api/v2/deployment/profiles'),
+  listPrincipals(domainId: string): Promise<{ domain_id: string; principals: PrincipalContext[] }> {
+    return request(`/api/v2/principals?domain_id=${encodeURIComponent(domainId)}&login_only=true`)
+  },
+  getPrincipalContext(principalId: string, domainId: string): Promise<PrincipalContext> {
+    return request(`/api/v2/principals/${encodeURIComponent(principalId)}/context?domain_id=${encodeURIComponent(domainId)}`)
+  },
   activateDeploymentProfile(profileId: string): Promise<{ profile: DeploymentProfile }> {
     return request('/api/v2/deployment/active', {
       method: 'PUT',

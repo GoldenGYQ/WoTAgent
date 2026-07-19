@@ -1,11 +1,35 @@
 export type AgentRole = 'viewer' | 'operator' | 'admin'
 
 export interface LoginAccount {
-  accountId: 'JH-1' | 'JH-2'
+  accountId: string
   displayName: string
   role: AgentRole
-  subjectId: string
-  subjectName: string
+  domainRoles: string[]
+  roleLabels: string[]
+  capabilities: string[]
+  relationships: PrincipalRelationship[]
+  subjectId?: string
+  subjectName?: string
+}
+
+export interface PrincipalRelationship {
+  relation: string
+  target_type: string
+  target_id: string
+  target_label: string | null
+}
+
+export interface PrincipalContext {
+  principal_id: string
+  principal_type: 'human' | 'service'
+  display_name: string
+  domain_id: string
+  roles: AgentRole[]
+  domain_roles: string[]
+  role_labels: string[]
+  granted_capabilities: string[]
+  resource_ids: string[]
+  relationships: PrincipalRelationship[]
 }
 
 export interface UsageSummary {
@@ -48,6 +72,7 @@ export interface RunRecord {
   root_goal: string
   role: string
   user_id: string
+  principal?: PrincipalContext | null
   thinking: boolean
   source: 'user' | 'monitor' | 'system'
   domain_id: string | null
@@ -211,10 +236,7 @@ export interface AgentTaskRecord {
   depends_on: string[]
   parallel_candidate: boolean
   priority: number
-  principal: {
-    principal_id: string
-    roles: string[]
-  } | null
+  principal: PrincipalContext | null
   target_type: string | null
   target_mention: string | null
   target: {

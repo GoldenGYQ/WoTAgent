@@ -14,6 +14,7 @@ from ..application import DomainEventConsumer, RunService
 from ..domain import DeploymentProfileRegistry, DomainOperationsRegistry
 from ..domains.eldercare import EldercareOperations
 from ..domains.smart_home import SmartHomeOperations
+from ..identity import DEFAULT_PRINCIPAL_DIRECTORY
 from ..orchestration import SQLiteRunStore
 from ..paths import data_path, project_root
 from ..runtime import (
@@ -26,6 +27,7 @@ from .routers.conversations import create_conversation_router
 from .routers.domains import create_domain_router
 from .routers.deployment import create_deployment_router
 from .routers.eldercare import create_eldercare_router
+from .routers.principals import create_principal_router
 from .routers.runs import create_run_router, create_run_websocket_handler
 from .routers.speech import create_speech_router
 from .routers.system import create_system_router
@@ -61,6 +63,7 @@ _run_service = RunService(
     ),
     thinking_supported=lambda: _runtime.pipeline.thinking_planner is not None,
     deployment_profiles=_deployment_profiles,
+    principal_directory=DEFAULT_PRINCIPAL_DIRECTORY,
 )
 _domain_event_consumer = DomainEventConsumer(
     _runtime.eldercare_store,
@@ -138,6 +141,9 @@ app.include_router(create_domain_router(
 ))
 app.include_router(create_deployment_router(
     lambda: _deployment_profiles
+))
+app.include_router(create_principal_router(
+    lambda: DEFAULT_PRINCIPAL_DIRECTORY
 ))
 app.include_router(create_conversation_router(
     lambda: _runtime.conversation_store

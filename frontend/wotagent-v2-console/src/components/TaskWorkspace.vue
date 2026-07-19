@@ -34,6 +34,7 @@ const props = defineProps<{
   currentAccountId: string | null
   currentAccountName: string | null
   currentAccountRole: AgentRole
+  currentAccountRoleLabel?: string
   currentSubjectName: string
   currentDomainId?: string | null
   sidebarCollapsed: boolean
@@ -290,7 +291,7 @@ const guidance = computed(() => {
           </div>
           <span class="guide-principal">
             <strong>{{ currentAccountId ?? 'JH-1' }}</strong>
-            <code>{{ currentAccountRole }}</code>
+            <code>{{ currentAccountRoleLabel || currentAccountRole }}</code>
             <span>关联 {{ currentSubjectName }}</span>
           </span>
         </header>
@@ -298,10 +299,10 @@ const guidance = computed(() => {
         <div class="role-scope-note">
           <ShieldCheck :size="16" />
           <span v-if="currentAccountRole === 'viewer'">
-            当前是只读观察角色：可以查询健康、环境和设备状态，控制请求会由后端策略拒绝。
+            当前人类主体是 {{ currentAccountRoleLabel || '只读角色' }}：可以查询授权范围内的数据，控制请求会由后端策略拒绝。
           </span>
           <span v-else>
-            当前是操作角色：可以查询数据、控制授权设备并创建照护协同任务，高风险动作仍需确认。
+            当前人类主体是 {{ currentAccountRoleLabel || '操作角色' }}：可以委派授权能力，高风险动作仍需确认。
           </span>
         </div>
 

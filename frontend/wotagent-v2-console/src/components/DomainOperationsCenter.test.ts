@@ -83,7 +83,7 @@ describe('DomainOperationsCenter', () => {
         actors: [
           {
             actor_id: 'butler_run_supervisor',
-            label: '智能管家 / 秘书',
+            label: '目标编排 Supervisor',
             actor_type: 'supervisor',
             responsibility: '协调专业主体',
             capabilities: ['task.delegate'],
@@ -93,7 +93,7 @@ describe('DomainOperationsCenter', () => {
           },
           {
             actor_id: 'security_agent',
-            label: '安防保安',
+            label: '安防处置 Agent',
             actor_type: 'specialist_agent',
             responsibility: '核查安防风险',
             capabilities: ['wot.security'],
@@ -146,8 +146,8 @@ describe('DomainOperationsCenter', () => {
     await wrapper.get('[data-section="actors"]').trigger('click')
 
     expect(listSubjects).toHaveBeenCalledWith('smart_home', 'JH-1')
-    expect(wrapper.text()).toContain('智能管家 / 秘书')
-    expect(wrapper.text()).toContain('安防保安')
+    expect(wrapper.text()).toContain('目标编排 Supervisor')
+    expect(wrapper.text()).toContain('安防处置 Agent')
     expect(wrapper.text()).toContain('LLM 驱动')
     expect(wrapper.text()).not.toContain('养老照护')
     wrapper.unmount()

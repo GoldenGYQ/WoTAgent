@@ -2,7 +2,7 @@
 import { Eye, HeartHandshake, LogIn, ShieldCheck } from 'lucide-vue-next'
 import type { LoginAccount } from '../types/agent'
 
-defineProps<{ accounts: LoginAccount[] }>()
+defineProps<{ accounts: LoginAccount[]; sceneTitle?: string }>()
 const emit = defineEmits<{ login: [account: LoginAccount] }>()
 </script>
 
@@ -11,16 +11,20 @@ const emit = defineEmits<{ login: [account: LoginAccount] }>()
     <section class="login-panel">
       <header>
         <span class="login-mark"><HeartHandshake :size="25" /></span>
-        <div><h1>WoTAgent 养老协作平台</h1><p>选择实验账号进入工作台</p></div>
+        <div><h1>WoTAgent 多主体协作平台</h1><p>{{ sceneTitle ?? '当前场景' }} · 选择人类用户主体</p></div>
       </header>
       <div class="login-account-list">
         <button v-for="account in accounts" :key="account.accountId" type="button" @click="emit('login', account)">
           <span class="account-icon"><ShieldCheck v-if="account.role === 'operator'" :size="21" /><Eye v-else :size="21" /></span>
-          <span class="account-copy"><strong>{{ account.accountId }}</strong><small>{{ account.displayName }}</small><em>{{ account.subjectName }} · {{ account.role }}</em></span>
+          <span class="account-copy">
+            <strong>{{ account.accountId }}</strong>
+            <small>{{ account.displayName }}</small>
+            <em>{{ account.roleLabels.join(' / ') }} · {{ account.role }}</em>
+          </span>
           <LogIn :size="17" />
         </button>
       </div>
-      <footer>本地实验账号 · 无密码 · 操作受角色权限约束</footer>
+      <footer>人类 Principal · 无密码实验账号 · 权限由角色、关系与资源范围共同约束</footer>
     </section>
   </main>
 </template>

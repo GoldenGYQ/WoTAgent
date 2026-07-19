@@ -6,7 +6,6 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from ...auth import DEMO_RESIDENT_ASSIGNMENTS
 from ...domain.operations import (
     DomainAccessDenied,
     DomainActorDefinition,
@@ -15,6 +14,7 @@ from ...domain.operations import (
     MonitorRuleDefinition,
     TelemetrySignal,
 )
+from ...identity import DEFAULT_PRINCIPAL_DIRECTORY, PrincipalDirectory
 from .models import SensorReading
 
 
@@ -25,10 +25,12 @@ class EldercareOperations:
         get_store: Callable[[], Any],
         get_runtime: Callable[[], Any],
         get_gateway: Callable[[], Any],
+        principals: PrincipalDirectory | None = None,
     ) -> None:
         self.get_store = get_store
         self.get_runtime = get_runtime
         self.get_gateway = get_gateway
+        self.principals = principals or DEFAULT_PRINCIPAL_DIRECTORY
 
     def manifest(self) -> DomainManifest:
         return DomainManifest(
@@ -124,7 +126,7 @@ class EldercareOperations:
             actors=[
                 DomainActorDefinition(
                     actor_id="butler_run_supervisor",
-                    label="照护管家",
+                    label="目标编排 Supervisor",
                     actor_type="supervisor",
                     responsibility="理解请求、创建专业 Task 并评估照护目标",
                     capabilities=["task.delegate", "finding.aggregate"],
@@ -138,7 +140,7 @@ class EldercareOperations:
                 ),
                 DomainActorDefinition(
                     actor_id="health_agent",
-                    label="健康监测专员",
+                    label="健康信息分析 Agent",
                     actor_type="specialist_agent",
                     responsibility="调查生命体征、趋势和数据质量",
                     capabilities=["health.status.read"],
@@ -147,7 +149,7 @@ class EldercareOperations:
                 ),
                 DomainActorDefinition(
                     actor_id="care_agent",
-                    label="护理协调专员",
+                    label="照护协同 Agent",
                     actor_type="specialist_agent",
                     responsibility="通知护理员并创建照护任务",
                     capabilities=["care.coordinate"],
@@ -375,9 +377,24 @@ class EldercareOperations:
             },
         }
 
-    @staticmethod
-    def _allowed_subjects(principal_id: str) -> set[str]:
-        return set(DEMO_RESIDENT_ASSIGNMENTS.get(principal_id, set()))
+    def _allowed_subjects(self, principal_id: str) -> set[str]:
+        try:
+            principal = self.principals.resolve(
+                principal_id,
+                "eldercare",
+            )
+        except LookupError:
+            return set()
+        if "*" in principal.resource_ids:
+            return {
+                item.resident_id
+                for item in self.get_store().list_residents()
+            }
+        return {
+            resource_id.removeprefix("resident:")
+            for resource_id in principal.resource_ids
+            if resource_id.startswith("resident:")
+        }
 
     def _require_access(
         self,

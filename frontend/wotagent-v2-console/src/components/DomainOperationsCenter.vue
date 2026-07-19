@@ -66,7 +66,7 @@ const subjectAccessLabel = computed(() => {
 const signal = computed(() => manifest.value?.telemetry_signals.find((item) => item.key === signalKey.value) ?? null)
 const sections = [
   { value: 'overview', label: '运行概览', icon: Gauge },
-  { value: 'actors', label: '领域主体', icon: Users },
+  { value: 'actors', label: '软件主体', icon: Users },
   { value: 'resources', label: '资源管理', icon: Settings2 },
   { value: 'telemetry', label: '数据观测', icon: Database },
   { value: 'monitoring', label: '规则监测', icon: RadioTower },
@@ -348,8 +348,8 @@ onBeforeUnmount(() => {
     <section v-else-if="activeSection === 'actors'" class="section-body">
       <div class="section-heading">
         <div>
-          <h2>领域主体与能力边界</h2>
-          <p>Supervisor、专业 Agent 与确定性服务通过结构化 Task、Finding 和事件协作</p>
+          <h2>软件能力主体</h2>
+          <p>这里展示 Agent 与确定性服务；护理员、居民、业主和安保人员属于人类 Principal</p>
         </div>
         <span>{{ manifest?.actors?.length ?? 0 }} 个主体</span>
       </div>

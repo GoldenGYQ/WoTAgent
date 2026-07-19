@@ -106,4 +106,18 @@ describe('agentV2Api', () => {
 
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v2/conversations?user_id=JH-2')
   })
+
+  it('loads domain-specific human principal contexts', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ domain_id: 'smart_home', principals: [] }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await agentV2Api.listPrincipals('smart_home')
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/api/v2/principals?domain_id=smart_home&login_only=true',
+    )
+  })
 })

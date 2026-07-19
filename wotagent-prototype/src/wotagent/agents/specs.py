@@ -8,6 +8,8 @@ from .contracts import AgentSpec
 AGENT_SPECS: dict[str, AgentSpec] = {
     "health_agent": AgentSpec(
         agent_id="health_agent",
+        display_name="健康信息分析 Agent",
+        capability_category="health_analysis",
         domain="health",
         responsibility="调查生命体征、睡眠、趋势和健康数据质量",
         system_prompt=(
@@ -31,6 +33,8 @@ AGENT_SPECS: dict[str, AgentSpec] = {
     ),
     "care_agent": AgentSpec(
         agent_id="care_agent",
+        display_name="照护协同 Agent",
+        capability_category="care_coordination",
         domain="care",
         responsibility="通知护理员并创建照护任务",
         system_prompt=(
@@ -47,6 +51,8 @@ AGENT_SPECS: dict[str, AgentSpec] = {
     ),
     "environment_agent": AgentSpec(
         agent_id="environment_agent",
+        display_name="环境调节 Agent",
+        capability_category="environment_control",
         domain="environment",
         responsibility="调查并控制灯光、空调、空气、窗帘等环境设备",
         system_prompt=(
@@ -58,6 +64,8 @@ AGENT_SPECS: dict[str, AgentSpec] = {
     ),
     "security_agent": AgentSpec(
         agent_id="security_agent",
+        display_name="安防处置 Agent",
+        capability_category="security_response",
         domain="security",
         responsibility="处理门禁、燃气、烟雾、摄像头和应急联动",
         system_prompt=(
@@ -69,6 +77,8 @@ AGENT_SPECS: dict[str, AgentSpec] = {
     ),
     "energy_agent": AgentSpec(
         agent_id="energy_agent",
+        display_name="能耗管理 Agent",
+        capability_category="energy_management",
         domain="energy",
         responsibility="读取能耗并执行受限负载调度",
         system_prompt="你是 Energy Agent。根据可验证能耗数据执行授权范围内的调度。",
@@ -77,6 +87,8 @@ AGENT_SPECS: dict[str, AgentSpec] = {
     ),
     "housekeeping_agent": AgentSpec(
         agent_id="housekeeping_agent",
+        display_name="家务执行 Agent",
+        capability_category="housekeeping",
         domain="housekeeping",
         responsibility="控制清洁和家务设备",
         system_prompt="你是 Housekeeping Agent。使用授权设备能力完成清洁目标。",
@@ -85,6 +97,8 @@ AGENT_SPECS: dict[str, AgentSpec] = {
     ),
     "device_ops_agent": AgentSpec(
         agent_id="device_ops_agent",
+        display_name="设备运维 Agent",
+        capability_category="device_operations",
         domain="device_ops",
         responsibility="发现 TD、查询设备状态并诊断接入异常",
         system_prompt=(

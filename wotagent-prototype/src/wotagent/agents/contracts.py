@@ -17,6 +17,8 @@ AgentStatus = Literal[
 
 class AgentSpec(BaseModel):
     agent_id: str = Field(min_length=1)
+    display_name: str = ""
+    capability_category: str = ""
     domain: str = Field(min_length=1)
     responsibility: str = Field(min_length=1)
     system_prompt: str = Field(min_length=1)

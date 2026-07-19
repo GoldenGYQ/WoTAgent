@@ -41,6 +41,21 @@ class RelationshipAuthorizationService:
     ) -> AuthorizationDecision:
         if "admin" in principal.roles:
             return self._allow(capability, target, "admin role")
+        resource_id = f"{target.type}:{target.id}"
+        if principal.granted_capabilities:
+            if principal.allows(capability, resource_id):
+                return self._allow(
+                    capability,
+                    target,
+                    "principal capability and relationship scope",
+                )
+            return AuthorizationDecision(
+                effect="deny",
+                reason=(
+                    f"principal '{principal.principal_id}' lacks capability "
+                    f"'{capability}' or resource '{resource_id}'"
+                ),
+            )
         assigned = self.resident_assignments.get(principal.principal_id, set())
         if target.id not in assigned:
             return AuthorizationDecision(

@@ -8,6 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from ..agents.contracts import AgentFinding
+from ..identity import TaskPrincipal
 from ..telemetry import UsageSummary
 
 
@@ -61,11 +62,6 @@ def utc_now() -> datetime:
 class ResourceClaim(BaseModel):
     key: str = Field(min_length=1)
     mode: ResourceMode
-
-
-class TaskPrincipal(BaseModel):
-    principal_id: str = Field(min_length=1)
-    roles: list[str] = Field(default_factory=list, min_length=1)
 
 
 class TaskTarget(BaseModel):
@@ -251,6 +247,7 @@ class RunRecord(BaseModel):
     root_goal: str
     role: str = "operator"
     user_id: str = "local-user"
+    principal: TaskPrincipal | None = None
     thinking: bool = False
     source: RunSource = "user"
     domain_id: str | None = None

@@ -21,20 +21,13 @@ import TaskSidebar from './components/TaskSidebar.vue'
 import DomainOperationsCenter from './components/DomainOperationsCenter.vue'
 import LoginScreen from './components/LoginScreen.vue'
 import TaskWorkspace from './components/TaskWorkspace.vue'
+import { agentV2Api } from './api/v2'
 import { useAgentRuntime } from './composables/useAgentRuntime'
 import { useVoiceInput } from './composables/useVoiceInput'
-import type { LoginAccount } from './types/agent'
+import type { LoginAccount, PrincipalContext } from './types/agent'
 
 const LOGIN_KEY = 'wotagent-v2-console.account'
-const accounts: LoginAccount[] = [
-  { accountId: 'JH-1', displayName: '王护理员', role: 'operator', subjectId: 'elderly-001', subjectName: '张爷爷' },
-  { accountId: 'JH-2', displayName: '赵观察员', role: 'viewer', subjectId: 'elderly-002', subjectName: '李奶奶' },
-]
-
-function savedAccount(): LoginAccount | null {
-  const accountId = localStorage.getItem(LOGIN_KEY)
-  return accounts.find((item) => item.accountId === accountId) ?? null
-}
+const savedAccountId = localStorage.getItem(LOGIN_KEY)
 
 const {
   runs,
@@ -64,10 +57,31 @@ const {
 const activeDeployment = computed(() => deploymentProfiles.value.find(
   (item) => item.profile_id === activeProfileId.value,
 ) ?? null)
+const principalContexts = ref<PrincipalContext[]>([])
+const accounts = computed<LoginAccount[]>(() => principalContexts.value.map((principal) => {
+  const subject = principal.relationships.find((item) => item.target_type === 'resident')
+  return {
+    accountId: principal.principal_id,
+    displayName: principal.display_name,
+    role: principal.roles[0] ?? 'viewer',
+    domainRoles: principal.domain_roles,
+    roleLabels: principal.role_labels,
+    capabilities: principal.granted_capabilities,
+    relationships: principal.relationships,
+    subjectId: subject?.target_id,
+    subjectName: subject?.target_label ?? undefined,
+  }
+}))
+const currentAccount = ref<LoginAccount | null>(null)
 const principalResourceLabel = computed(() => (
-  activeDeployment.value?.domain_id === 'eldercare'
-    ? currentAccount.value?.subjectName ?? ''
-    : activeDeployment.value?.title ?? ''
+  currentAccount.value?.relationships[0]?.target_label
+  ?? activeDeployment.value?.title
+  ?? ''
+))
+const currentDomainRoleLabel = computed(() => (
+  currentAccount.value?.roleLabels.join(' / ')
+  || currentAccount.value?.role
+  || ''
 ))
 
 const draft = ref('')
@@ -76,7 +90,6 @@ const submitError = ref('')
 const drawerOpen = ref(false)
 const sidebarCollapsed = ref(false)
 const appView = ref<'agent' | 'domains'>('agent')
-const currentAccount = ref<LoginAccount | null>(savedAccount())
 const composer = ref<HTMLTextAreaElement | null>(null)
 const inputMode = ref<'text' | 'voice'>('text')
 const voiceGestureActive = ref(false)
@@ -214,6 +227,17 @@ async function removeConversation(conversationId: string): Promise<void> {
   await deleteConversation(conversationId)
 }
 
+async function loadPrincipalContexts(): Promise<void> {
+  const domainId = activeDeployment.value?.domain_id
+  if (!domainId || backendState.value !== 'online') {
+    principalContexts.value = []
+    return
+  }
+  principalContexts.value = (
+    await agentV2Api.listPrincipals(domainId)
+  ).principals
+}
+
 async function inspectDomainRun(runId: string): Promise<void> {
   await inspectRun(runId)
   appView.value = 'agent'
@@ -221,9 +245,22 @@ async function inspectDomainRun(runId: string): Promise<void> {
 
 async function changeDeployment(event: Event): Promise<void> {
   const profileId = (event.target as HTMLSelectElement).value
+  const accountId = currentAccount.value?.accountId
   submitError.value = ''
   try {
     await switchDeploymentProfile(profileId)
+    await loadPrincipalContexts()
+    if (accountId) {
+      const nextAccount = accounts.value.find(
+        (item) => item.accountId === accountId,
+      )
+      if (nextAccount) {
+        currentAccount.value = nextAccount
+        await switchIdentity(nextAccount.accountId, nextAccount.role)
+      } else {
+        logout()
+      }
+    }
     appView.value = 'agent'
   } catch (error) {
     submitError.value = error instanceof Error ? error.message : String(error)
@@ -232,14 +269,24 @@ async function changeDeployment(event: Event): Promise<void> {
 
 onMounted(async () => {
   await checkBackend()
-  if (currentAccount.value) {
-    await switchIdentity(currentAccount.value.accountId, currentAccount.value.role)
+  await loadPrincipalContexts()
+  const saved = accounts.value.find(
+    (item) => item.accountId === savedAccountId,
+  )
+  if (saved) {
+    currentAccount.value = saved
+    await switchIdentity(saved.accountId, saved.role)
   }
 })
 </script>
 
 <template>
-  <LoginScreen v-if="!currentAccount" :accounts="accounts" @login="login" />
+  <LoginScreen
+    v-if="!currentAccount"
+    :accounts="accounts"
+    :scene-title="activeDeployment?.title"
+    @login="login"
+  />
   <div v-else class="app-shell">
     <header class="app-header">
       <div class="brand-block">
@@ -269,7 +316,10 @@ onMounted(async () => {
         <button v-if="backendState === 'offline'" class="icon-button" type="button" title="重新检测" @click="checkBackend">
           <RefreshCw :size="16" />
         </button>
-        <span class="account-badge"><strong>{{ currentAccount.accountId }}</strong>{{ currentAccount.displayName }}</span>
+        <span class="account-badge">
+          <strong>{{ currentAccount.accountId }}</strong>
+          {{ currentAccount.displayName }} · {{ currentDomainRoleLabel }}
+        </span>
         <button class="icon-button" type="button" title="退出登录" @click="logout"><LogOut :size="15" /></button>
       </div>
     </header>
@@ -296,6 +346,7 @@ onMounted(async () => {
           :current-account-id="currentAccount.accountId"
           :current-account-name="currentAccount.displayName"
           :current-account-role="currentAccount.role"
+          :current-account-role-label="currentDomainRoleLabel"
           :current-subject-name="principalResourceLabel"
           :current-domain-id="activeDeployment?.domain_id ?? null"
           :sidebar-collapsed="sidebarCollapsed"
@@ -370,11 +421,11 @@ onMounted(async () => {
             <div class="composer-controls">
               <span
                 class="principal-context"
-                :title="`权限主体 ${currentAccount.accountId}；角色 ${currentAccount.role}；当前范围 ${principalResourceLabel}`"
+                :title="`人类主体 ${currentAccount.accountId}；领域角色 ${currentDomainRoleLabel}；平台角色 ${currentAccount.role}；资源关系 ${principalResourceLabel}`"
               >
                 <ShieldCheck :size="14" />
                 <strong>{{ currentAccount.accountId }}</strong>
-                <code>{{ currentAccount.role }}</code>
+                <code>{{ currentDomainRoleLabel }}</code>
                 <span>{{ principalResourceLabel }}</span>
               </span>
               <div class="composer-actions">

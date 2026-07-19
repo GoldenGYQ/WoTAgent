@@ -67,6 +67,7 @@ describe('TaskWorkspace', () => {
         currentAccountId: 'JH-2',
         currentAccountName: '赵观察员',
         currentAccountRole: 'viewer',
+        currentAccountRoleLabel: '家属观察者',
         currentSubjectName: '李奶奶',
         sidebarCollapsed: false,
       },
@@ -74,7 +75,7 @@ describe('TaskWorkspace', () => {
 
     expect(wrapper.text()).toContain('JH-2')
     expect(wrapper.text()).toContain('新会话')
-    expect(wrapper.text()).toContain('只读观察角色')
+    expect(wrapper.text()).toContain('家属观察者')
     expect(wrapper.text()).toContain('查看李奶奶今天的健康状态')
     expect(wrapper.text()).not.toContain('把李奶奶房间温度调到 24 度')
   })

@@ -10,6 +10,12 @@ from fastapi import BackgroundTasks, HTTPException
 
 from ..conversation import ConversationStore
 from ..domain import DeploymentProfile, DeploymentProfileRegistry
+from ..identity import (
+    DEFAULT_PRINCIPAL_DIRECTORY,
+    PrincipalDirectory,
+    PrincipalNotAssigned,
+    TaskPrincipal,
+)
 from ..orchestration import RunCoordinator, RunRecord, RunStore
 
 
@@ -21,6 +27,7 @@ class RunService:
         coordinator_factory: Callable[[dict[str, Any]], RunCoordinator],
         thinking_supported: Callable[[], bool] | None = None,
         deployment_profiles: DeploymentProfileRegistry | None = None,
+        principal_directory: PrincipalDirectory | None = None,
     ) -> None:
         self.conversation_store = conversation_store
         self.run_store = run_store
@@ -28,6 +35,9 @@ class RunService:
         self.thinking_supported = thinking_supported or (lambda: True)
         self.deployment_profiles = (
             deployment_profiles or DeploymentProfileRegistry.load()
+        )
+        self.principal_directory = (
+            principal_directory or DEFAULT_PRINCIPAL_DIRECTORY
         )
 
     async def create(
@@ -47,6 +57,12 @@ class RunService:
                 detail="thinking mode is not available on this server",
             )
         profile = self._require_profile(profile_id)
+        principal = self._resolve_principal(
+            user_id,
+            profile.domain_id,
+            fallback_role=role,
+        )
+        role = principal.roles[0]
         conversation_id = self._resolve_conversation(
             conversation_id,
             user_id=user_id,
@@ -70,6 +86,7 @@ class RunService:
             root_goal=message,
             role=role,
             user_id=user_id,
+            principal=principal,
             thinking=thinking,
             domain_id=profile.domain_id,
             profile_id=profile.profile_id,
@@ -105,6 +122,12 @@ class RunService:
             role=role,
         )
         profile = self._profile_for_domain(domain_id)
+        principal = self._resolve_principal(
+            user_id,
+            profile.domain_id,
+            fallback_role=role,
+        )
+        role = principal.roles[0]
         run_id = f"run_{uuid4().hex[:12]}"
         turn = self.conversation_store.start_turn(
             conversation_id=conversation_id,
@@ -119,6 +142,7 @@ class RunService:
             root_goal=message,
             role=role,
             user_id=user_id,
+            principal=principal,
             thinking=False,
             source="monitor",
             domain_id=domain_id,
@@ -199,6 +223,11 @@ class RunService:
         return {
             "role": run.role,
             "user_id": run.user_id,
+            "principal": (
+                run.principal.model_dump(mode="json")
+                if run.principal
+                else None
+            ),
             "thinking": run.thinking,
             "history": self.conversation_store.context(
                 run.conversation_id,
@@ -217,6 +246,22 @@ class RunService:
             },
             "deployment": profile.model_dump(mode="json"),
         }
+
+    def _resolve_principal(
+        self,
+        principal_id: str,
+        domain_id: str,
+        *,
+        fallback_role: str,
+    ) -> TaskPrincipal:
+        try:
+            return self.principal_directory.resolve(
+                principal_id,
+                domain_id,
+                fallback_role=fallback_role,
+            )
+        except PrincipalNotAssigned as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     async def confirm(
         self,

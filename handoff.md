@@ -7,6 +7,15 @@ Current implementation target: `v3.0.0` scene-scoped P1
 Current implementation baseline: Domain Operations and Monitor Run refactor,
 successor to `99afb3d feat: harden agent context and real model health flow`
 
+> 2026-07-19 identity update: P1 now separates human Principals from
+> capability-based software Agents. `PrincipalDirectory` resolves domain
+> roles, relationships, capabilities and resources; Run creation persists the
+> trusted Principal context; Task preparation computes device
+> `effective_scope` from Principal, Profile and Agent capability boundaries.
+> Frontend login identities now come from the backend instead of hard-coded
+> cards. Latest regression result: backend `207 passed, 3 skipped`; frontend
+> `26 passed`, typecheck/build passed.
+
 ## 2026-07-19 Scene-Scoped P1 Update
 
 - `v2.8.0` preserves the stable pre-scene baseline.
@@ -193,6 +202,15 @@ The intended responsibility boundary is:
 | Verification | Confirm post-action state instead of trusting HTTP/tool success alone |
 | Monitor | Continuously consume device data and produce deterministic risk events |
 | Audit/Trace | Record structured decisions and execution facts without exposing private chain-of-thought |
+
+Identity terminology:
+
+| Concept | Meaning |
+|---|---|
+| Human Principal | The requester, such as caregiver, resident, villa owner or security staff |
+| Software Agent | A delegated capability executor, such as health analysis or environment control |
+| Resource/Subject | The resident, site or device affected by the request |
+| Relationship/Policy | The backend rule deciding whether that Principal may delegate that capability over that resource |
 
 ## 3. Current Repository Layout
 

@@ -8,7 +8,6 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from ...auth import DomainAssignmentService, VILLA_ASSIGNMENTS
 from ...domain import DeploymentProfile
 from ...domain.operations import (
     DomainAccessDenied,
@@ -18,6 +17,7 @@ from ...domain.operations import (
     MonitorRuleDefinition,
     TelemetrySignal,
 )
+from ...identity import DEFAULT_PRINCIPAL_DIRECTORY, PrincipalDirectory
 
 
 SITE_RESOURCE_ID = "site:villa-demo"
@@ -29,13 +29,11 @@ class SmartHomeOperations:
         *,
         get_gateway: Callable[[], Any],
         get_profile: Callable[[], DeploymentProfile],
-        authorization: DomainAssignmentService | None = None,
+        principals: PrincipalDirectory | None = None,
     ) -> None:
         self.get_gateway = get_gateway
         self.get_profile = get_profile
-        self.authorization = authorization or DomainAssignmentService(
-            VILLA_ASSIGNMENTS
-        )
+        self.principals = principals or DEFAULT_PRINCIPAL_DIRECTORY
         self._events: list[dict[str, Any]] = []
         self._actions: list[dict[str, Any]] = []
 
@@ -110,7 +108,7 @@ class SmartHomeOperations:
             actors=[
                 DomainActorDefinition(
                     actor_id="butler_run_supervisor",
-                    label="智能管家 / 秘书",
+                    label="目标编排 Supervisor",
                     actor_type="supervisor",
                     responsibility="理解住户目标、拆分任务并协调专业主体",
                     capabilities=["task.delegate", "finding.aggregate"],
@@ -126,7 +124,7 @@ class SmartHomeOperations:
                 ),
                 DomainActorDefinition(
                     actor_id="security_agent",
-                    label="安防保安",
+                    label="安防处置 Agent",
                     actor_type="specialist_agent",
                     responsibility="核查门锁、摄像头、燃气和烟雾风险",
                     capabilities=["wot.security"],
@@ -139,7 +137,7 @@ class SmartHomeOperations:
                 ),
                 DomainActorDefinition(
                     actor_id="environment_agent",
-                    label="环境管控专员",
+                    label="环境调节 Agent",
                     actor_type="specialist_agent",
                     responsibility="管理灯光、空调、空气和湿度设备",
                     capabilities=["wot.environment"],
@@ -148,7 +146,7 @@ class SmartHomeOperations:
                 ),
                 DomainActorDefinition(
                     actor_id="energy_agent",
-                    label="能耗管理员",
+                    label="能耗管理 Agent",
                     actor_type="specialist_agent",
                     responsibility="读取能耗并执行受限负载调度",
                     capabilities=["wot.energy"],
@@ -157,7 +155,7 @@ class SmartHomeOperations:
                 ),
                 DomainActorDefinition(
                     actor_id="housekeeping_agent",
-                    label="家务服务专员",
+                    label="家务执行 Agent",
                     actor_type="specialist_agent",
                     responsibility="协调清洁和家务设备",
                     capabilities=["wot.housekeeping"],
@@ -166,7 +164,7 @@ class SmartHomeOperations:
                 ),
                 DomainActorDefinition(
                     actor_id="device_ops_agent",
-                    label="设备运维专员",
+                    label="设备运维 Agent",
                     actor_type="specialist_agent",
                     responsibility="检查 TD、MCP 接入和设备在线状态",
                     capabilities=["wot.device_ops"],
@@ -197,10 +195,7 @@ class SmartHomeOperations:
     ) -> dict[str, Any]:
         self._require(subject_id, principal_id, "domain.read")
         profile = self.get_profile()
-        capabilities = self.authorization.capabilities_for(
-            principal_id,
-            SITE_RESOURCE_ID,
-        )
+        capabilities = self._principal(principal_id).granted_capabilities
         return {
             "subject": self._subject(principal_id),
             "metrics": [
@@ -213,7 +208,7 @@ class SmartHomeOperations:
                 ),
                 self._metric(
                     "actors",
-                    "领域主体",
+                    "软件主体",
                     len(self.manifest().actors),
                     "个",
                 ),
@@ -511,10 +506,8 @@ class SmartHomeOperations:
 
     def _subject(self, principal_id: str) -> dict[str, Any]:
         profile = self.get_profile()
-        capabilities = self.authorization.capabilities_for(
-            principal_id,
-            SITE_RESOURCE_ID,
-        )
+        principal = self._principal(principal_id)
+        capabilities = principal.granted_capabilities
         return {
             "subject_id": "villa-demo",
             "label": "云栖别墅",
@@ -525,6 +518,8 @@ class SmartHomeOperations:
             "metadata": {
                 "principal_id": principal_id,
                 "capabilities": capabilities,
+                "domain_roles": principal.domain_roles,
+                "role_labels": principal.role_labels,
                 "access": (
                     "operator"
                     if "device.control" in capabilities or "*" in capabilities
@@ -550,11 +545,16 @@ class SmartHomeOperations:
         }
 
     def _allows(self, principal_id: str, capability: str) -> bool:
-        return self.authorization.allows(
-            principal_id,
-            capability,
-            SITE_RESOURCE_ID,
-        )
+        try:
+            return self._principal(principal_id).allows(
+                capability,
+                SITE_RESOURCE_ID,
+            )
+        except LookupError:
+            return False
+
+    def _principal(self, principal_id: str):
+        return self.principals.resolve(principal_id, "smart_home")
 
     def _require(
         self,
