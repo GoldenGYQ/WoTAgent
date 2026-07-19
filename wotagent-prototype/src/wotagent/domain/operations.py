@@ -33,6 +33,17 @@ class MonitorRuleDefinition(BaseModel):
     default_response: str
 
 
+class DomainActorDefinition(BaseModel):
+    actor_id: str
+    label: str
+    actor_type: str
+    responsibility: str
+    capabilities: list[str] = Field(default_factory=list)
+    resource_scope: list[str] = Field(default_factory=list)
+    delegates_to: list[str] = Field(default_factory=list)
+    llm_driven: bool = False
+
+
 class DomainManifest(BaseModel):
     domain_id: str
     title: str
@@ -42,6 +53,7 @@ class DomainManifest(BaseModel):
     telemetry_signals: list[TelemetrySignal] = Field(default_factory=list)
     scenarios: list[DomainScenario] = Field(default_factory=list)
     monitor_rules: list[MonitorRuleDefinition] = Field(default_factory=list)
+    actors: list[DomainActorDefinition] = Field(default_factory=list)
 
 
 class DomainAccessDenied(PermissionError):
@@ -128,6 +140,7 @@ class DomainOperationsRegistry:
 
 __all__ = [
     "DomainAccessDenied",
+    "DomainActorDefinition",
     "DomainManifest",
     "DomainNotFound",
     "DomainOperations",

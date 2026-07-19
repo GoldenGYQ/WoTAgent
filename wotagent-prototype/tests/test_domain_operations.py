@@ -27,6 +27,41 @@ class FakeGateway:
         }
 
 
+class FakeVillaGateway:
+    def __init__(self) -> None:
+        self.state = {
+            "smokeLevel": 0,
+            "alarm": False,
+            "observedAt": "2026-07-19T08:00:00+00:00",
+        }
+
+    async def list_devices(self):
+        return [{
+            "id": "smoke-sensor-001",
+            "title": "Hall Smoke Sensor",
+            "location": "hall",
+            "actions": [{"name": "updateSmokeState"}],
+        }]
+
+    async def query_state(self, device_id):
+        assert device_id == "smoke-sensor-001"
+        return dict(self.state)
+
+    async def control_device(
+        self,
+        device_id,
+        action,
+        parameters,
+        *,
+        idempotency_key,
+    ):
+        assert device_id == "smoke-sensor-001"
+        assert action == "updateSmokeState"
+        assert idempotency_key.startswith("domain-")
+        self.state.update(parameters)
+        return {"success": True}
+
+
 def test_domain_api_projects_eldercare_and_filters_demo_subject_scope(
     monkeypatch,
     tmp_path,
@@ -73,10 +108,65 @@ def test_domain_api_projects_eldercare_and_filters_demo_subject_scope(
         )
 
     assert domains.status_code == 200
-    assert domains.json()["domains"][0]["domain_id"] == "eldercare"
+    assert {
+        item["domain_id"]
+        for item in domains.json()["domains"]
+    } == {"eldercare", "smart_home"}
     assert [item["subject_id"] for item in subjects.json()["subjects"]] == [
         "elderly-001"
     ]
     assert resources.json()["resources"][0]["resource_id"] == "wristband-001"
     assert denied.status_code == 403
     assert monitor.json()["status"] == "offline"
+
+
+def test_smart_home_domain_api_enforces_site_relationship_scope(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        app_module._runtime,
+        "gateway",
+        FakeVillaGateway(),
+    )
+    monkeypatch.setenv("ELDERCARE_EVENT_CONSUMER_ENABLED", "false")
+
+    with TestClient(app_module.app) as client:
+        subjects = client.get(
+            "/api/v2/domains/smart_home/subjects",
+            params={"principal_id": "JH-1"},
+        )
+        resources = client.get(
+            "/api/v2/domains/smart_home/subjects/villa-demo/resources",
+            params={"principal_id": "JH-2"},
+        )
+        allowed = client.post(
+            "/api/v2/domains/smart_home/scenarios",
+            json={
+                "subject_id": "villa-demo",
+                "scenario": "smoke_alarm",
+                "principal_id": "JH-1",
+            },
+        )
+        denied = client.post(
+            "/api/v2/domains/smart_home/scenarios",
+            json={
+                "subject_id": "villa-demo",
+                "scenario": "smoke_alarm",
+                "principal_id": "JH-2",
+            },
+        )
+        events = client.get(
+            "/api/v2/domains/smart_home/subjects/villa-demo/events",
+            params={"principal_id": "JH-1"},
+        )
+
+    assert subjects.status_code == 200
+    assert subjects.json()["subjects"][0]["subject_id"] == "villa-demo"
+    assert resources.status_code == 200
+    assert resources.json()["resources"][0]["resource_id"] == (
+        "smoke-sensor-001"
+    )
+    assert allowed.status_code == 202
+    assert allowed.json()["verified"] is True
+    assert denied.status_code == 403
+    assert events.json()["events"][0]["event_type"] == "smoke_alarm"

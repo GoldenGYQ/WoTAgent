@@ -252,7 +252,7 @@ onMounted(async () => {
       </div>
       <nav class="app-view-switch" aria-label="工作视图">
         <button type="button" :class="{ active: appView === 'agent' }" @click="appView = 'agent'"><MessageSquare :size="14" />Agent 会话</button>
-        <button v-if="activeDeployment?.domain_id === 'eldercare'" type="button" :class="{ active: appView === 'domains' }" @click="appView = 'domains'"><Boxes :size="14" />领域运行</button>
+        <button type="button" :class="{ active: appView === 'domains' }" @click="appView = 'domains'"><Boxes :size="14" />领域运行</button>
       </nav>
       <div class="header-status">
         <label class="deployment-selector" title="当前设备与空间场景">
@@ -424,9 +424,10 @@ onMounted(async () => {
     </div>
 
     <DomainOperationsCenter
-      v-else-if="activeDeployment?.domain_id === 'eldercare'"
-      :initial-domain-id="activeDeployment.domain_id"
-      :initial-subject-id="currentAccount.subjectId"
+      v-else
+      :key="activeDeployment?.domain_id ?? 'domain'"
+      :initial-domain-id="activeDeployment?.domain_id"
+      :initial-subject-id="activeDeployment?.domain_id === 'eldercare' ? currentAccount.subjectId : undefined"
       :principal-id="currentAccount.accountId"
       @inspect-run="inspectDomainRun"
     />

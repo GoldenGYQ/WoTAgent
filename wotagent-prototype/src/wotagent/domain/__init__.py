@@ -20,6 +20,7 @@ from .deployment import (
 )
 from .operations import (
     DomainAccessDenied,
+    DomainActorDefinition,
     DomainManifest,
     DomainNotFound,
     DomainOperationsRegistry,
@@ -31,6 +32,7 @@ __all__ = [
     "DeploymentProfileCatalog",
     "DeploymentProfileRegistry",
     "DomainAccessDenied",
+    "DomainActorDefinition",
     "DomainManifest",
     "DomainNotFound",
     "DomainOperationsRegistry",

@@ -23,7 +23,15 @@ successor to `99afb3d feat: harden agent context and real model health flow`
   Conversation after switching.
 - broad room/catalog questions no longer inherit a previous health-device
   scope from conversation history.
-- current regression: backend `194 passed, 3 skipped`, frontend `24 passed`
+- every selectable Profile now has a matching Domain Operations adapter;
+- the villa center exposes Butler/secretary, Security/guard, Environment,
+  Energy, Housekeeping, DeviceOps and a deterministic villa rule Monitor;
+- villa Domain Operations use TD/MCP-backed devices and enforce a first
+  site-level JH-1 operator/JH-2 viewer relationship scope;
+- smoke and energy injection update simulator devices and create deterministic
+  domain events; villa events are currently process-local and do not yet enter
+  the Run pipeline automatically.
+- current regression: backend `201 passed, 3 skipped`, frontend `25 passed`
   plus production build, simulator `63 passed`.
 
 ## 2026-07-19 P0.5 Update
@@ -91,6 +99,10 @@ Conversation → Turn → Run → 多个 Task → AgentRun → Loop → ToolCall
     ToolMessage 确定性封装 Finding，不再依赖 Repair LLM 才能完成；
 17. Domain Event 已实施一事件一 Run，outbox 重试不再重复创建 Run；
 18. Supervisor 直接回答的零 Task `finish` 已修复为 `run.completed`。
+19. Deployment Profile 已成为运行时场景边界，养老与别墅的空间、设备、提示词和
+    MCP 设备范围彼此隔离。
+20. `smart_home` 已注册通用领域运行适配器；前端在别墅 Profile 下展示管家、
+    安防、环境、能耗、家务、运维和规则 Monitor，而不是隐藏领域中心入口。
 
 但真实模型测试暴露了尚未解决的问题：
 

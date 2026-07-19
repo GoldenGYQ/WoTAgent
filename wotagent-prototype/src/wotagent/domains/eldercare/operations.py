@@ -9,6 +9,7 @@ from typing import Any
 from ...auth import DEMO_RESIDENT_ASSIGNMENTS
 from ...domain.operations import (
     DomainAccessDenied,
+    DomainActorDefinition,
     DomainManifest,
     DomainScenario,
     MonitorRuleDefinition,
@@ -118,6 +119,49 @@ class EldercareOperations:
                     condition="室温 > 28 C",
                     freshness="10 分钟",
                     default_response="委派环境与照护 Agent",
+                ),
+            ],
+            actors=[
+                DomainActorDefinition(
+                    actor_id="butler_run_supervisor",
+                    label="照护管家",
+                    actor_type="supervisor",
+                    responsibility="理解请求、创建专业 Task 并评估照护目标",
+                    capabilities=["task.delegate", "finding.aggregate"],
+                    resource_scope=["resident:assigned"],
+                    delegates_to=[
+                        "health_agent",
+                        "care_agent",
+                        "environment_agent",
+                    ],
+                    llm_driven=True,
+                ),
+                DomainActorDefinition(
+                    actor_id="health_agent",
+                    label="健康监测专员",
+                    actor_type="specialist_agent",
+                    responsibility="调查生命体征、趋势和数据质量",
+                    capabilities=["health.status.read"],
+                    resource_scope=["resident:assigned"],
+                    llm_driven=True,
+                ),
+                DomainActorDefinition(
+                    actor_id="care_agent",
+                    label="护理协调专员",
+                    actor_type="specialist_agent",
+                    responsibility="通知护理员并创建照护任务",
+                    capabilities=["care.coordinate"],
+                    resource_scope=["resident:assigned"],
+                    llm_driven=True,
+                ),
+                DomainActorDefinition(
+                    actor_id="eldercare-monitor",
+                    label="健康规则监视器",
+                    actor_type="deterministic_service",
+                    responsibility="持续采集数据并按硬规则生成风险事件",
+                    capabilities=["telemetry.observe", "risk.emit"],
+                    resource_scope=["resident:assigned"],
+                    llm_driven=False,
                 ),
             ],
         )

@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Send,
   Settings2,
+  Users,
 } from 'lucide-vue-next'
 import { agentV2Api } from '../api/v2'
 import type {
@@ -32,7 +33,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ inspectRun: [runId: string] }>()
 
-type Section = 'overview' | 'resources' | 'telemetry' | 'monitoring' | 'events'
+type Section = 'overview' | 'actors' | 'resources' | 'telemetry' | 'monitoring' | 'events'
 
 const manifests = ref<DomainManifest[]>([])
 const domainId = ref(props.initialDomainId ?? '')
@@ -54,9 +55,18 @@ let refreshInFlight = false
 
 const manifest = computed(() => manifests.value.find((item) => item.domain_id === domainId.value) ?? null)
 const selectedSubject = computed(() => subjects.value.find((item) => item.subject_id === subjectId.value) ?? null)
+const subjectAccessLabel = computed(() => {
+  const metadata = overview.value?.subject.metadata
+  if (!metadata) return ''
+  if (metadata.caregiver) return String(metadata.caregiver)
+  if (metadata.access === 'operator') return '可控制'
+  if (metadata.access === 'viewer') return '只读'
+  return ''
+})
 const signal = computed(() => manifest.value?.telemetry_signals.find((item) => item.key === signalKey.value) ?? null)
 const sections = [
   { value: 'overview', label: '运行概览', icon: Gauge },
+  { value: 'actors', label: '领域主体', icon: Users },
   { value: 'resources', label: '资源管理', icon: Settings2 },
   { value: 'telemetry', label: '数据观测', icon: Database },
   { value: 'monitoring', label: '规则监测', icon: RadioTower },
@@ -103,7 +113,10 @@ async function loadDomains(): Promise<void> {
   loading.value = true
   error.value = ''
   try {
-    manifests.value = (await agentV2Api.listDomains()).domains
+    const available = (await agentV2Api.listDomains()).domains
+    manifests.value = props.initialDomainId
+      ? available.filter((item) => item.domain_id === props.initialDomainId)
+      : available
     domainId.value = manifests.value.some((item) => item.domain_id === domainId.value)
       ? domainId.value
       : manifests.value[0]?.domain_id ?? ''
@@ -304,6 +317,7 @@ onBeforeUnmount(() => {
         v-for="section in sections"
         :key="section.value"
         type="button"
+        :data-section="section.value"
         :class="{ active: activeSection === section.value }"
         @click="activeSection = section.value"
       >
@@ -316,7 +330,10 @@ onBeforeUnmount(() => {
         <Activity :size="20" />
         <div>
           <strong>{{ overview?.subject.label ?? '--' }}</strong>
-          <span>{{ overview?.subject.subtitle }} · {{ overview?.subject.metadata.caregiver ?? '' }}</span>
+          <span>
+            {{ overview?.subject.subtitle }}
+            <template v-if="subjectAccessLabel"> · {{ subjectAccessLabel }}</template>
+          </span>
         </div>
       </div>
       <div class="metric-grid">
@@ -324,6 +341,44 @@ onBeforeUnmount(() => {
           <span>{{ item.label }}</span>
           <strong>{{ metricValue(item.value, item.unit) }}</strong>
           <small>{{ item.observed_at ? formatTime(item.observed_at) : '暂无数据' }} · {{ item.source ?? '--' }}</small>
+        </article>
+      </div>
+    </section>
+
+    <section v-else-if="activeSection === 'actors'" class="section-body">
+      <div class="section-heading">
+        <div>
+          <h2>领域主体与能力边界</h2>
+          <p>Supervisor、专业 Agent 与确定性服务通过结构化 Task、Finding 和事件协作</p>
+        </div>
+        <span>{{ manifest?.actors?.length ?? 0 }} 个主体</span>
+      </div>
+      <div class="actor-grid">
+        <article v-for="actor in manifest?.actors ?? []" :key="actor.actor_id">
+          <header>
+            <div>
+              <strong>{{ actor.label }}</strong>
+              <code>{{ actor.actor_id }}</code>
+            </div>
+            <span :data-llm="actor.llm_driven">
+              {{ actor.llm_driven ? 'LLM 驱动' : '确定性服务' }}
+            </span>
+          </header>
+          <p>{{ actor.responsibility }}</p>
+          <dl>
+            <div>
+              <dt>能力</dt>
+              <dd>{{ actor.capabilities.join(' · ') || '--' }}</dd>
+            </div>
+            <div>
+              <dt>资源范围</dt>
+              <dd>{{ actor.resource_scope.join(' · ') || '--' }}</dd>
+            </div>
+            <div v-if="actor.delegates_to.length">
+              <dt>可委派</dt>
+              <dd>{{ actor.delegates_to.join(' · ') }}</dd>
+            </div>
+          </dl>
         </article>
       </div>
     </section>
@@ -479,6 +534,18 @@ select, input { height: 34px; border: 1px solid var(--line-strong); border-radiu
 .metric-grid span, .metric-grid small { color: var(--text-muted); font-size: 9px; }
 .metric-grid strong { font-size: 18px; }
 .metric-grid small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.actor-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.actor-grid article { min-width: 0; padding: 13px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+.actor-grid header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.actor-grid header div { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.actor-grid code { overflow: hidden; color: var(--text-faint); font-size: 9px; text-overflow: ellipsis; }
+.actor-grid header > span { flex: none; padding: 2px 5px; border-radius: 3px; color: var(--text-muted); background: var(--surface-muted); font-size: 9px; }
+.actor-grid header > span[data-llm="true"] { color: var(--teal); background: var(--teal-soft); }
+.actor-grid p { min-height: 34px; margin: 10px 0; color: var(--text-muted); font-size: 10px; line-height: 1.6; }
+.actor-grid dl { display: grid; gap: 7px; margin: 0; }
+.actor-grid dl div { display: grid; grid-template-columns: 48px 1fr; gap: 6px; }
+.actor-grid dt { color: var(--text-faint); font-size: 9px; }
+.actor-grid dd { min-width: 0; margin: 0; overflow-wrap: anywhere; font-size: 9px; line-height: 1.5; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .section-heading h2 { margin: 0; font-size: 14px; }
 .section-heading > span { color: var(--text-muted); font-size: 10px; }
@@ -511,6 +578,7 @@ td small { margin-top: 3px; color: var(--text-faint); font-size: 9px; }
   .service-strip { grid-template-columns: repeat(3, 1fr); }
   .metric-grid { grid-template-columns: repeat(2, 1fr); }
   .telemetry-layout, .event-layout { grid-template-columns: 1fr; }
+  .actor-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 620px) {
   .domain-center { height: calc(100dvh - 50px); padding: 12px; }
@@ -518,6 +586,7 @@ td small { margin-top: 3px; color: var(--text-faint); font-size: 9px; }
   .domain-heading p, .platform-label { display: none; }
   .domain-toolbar { flex-wrap: wrap; justify-content: flex-end; }
   .domain-toolbar select { max-width: 125px; }
+  .actor-grid { grid-template-columns: 1fr; }
   .service-strip { grid-template-columns: repeat(2, 1fr); }
   .domain-tabs { overflow-x: auto; }
   .domain-tabs button { flex: 0 0 auto; padding: 0 9px; }

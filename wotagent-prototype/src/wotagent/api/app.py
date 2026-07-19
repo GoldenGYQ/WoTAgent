@@ -13,6 +13,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from ..application import DomainEventConsumer, RunService
 from ..domain import DeploymentProfileRegistry, DomainOperationsRegistry
 from ..domains.eldercare import EldercareOperations
+from ..domains.smart_home import SmartHomeOperations
 from ..orchestration import SQLiteRunStore
 from ..paths import data_path, project_root
 from ..runtime import (
@@ -71,7 +72,11 @@ _domain_registry = DomainOperationsRegistry([
         get_store=lambda: _runtime.eldercare_store,
         get_runtime=lambda: _runtime.eldercare_runtime,
         get_gateway=lambda: _runtime.gateway,
-    )
+    ),
+    SmartHomeOperations(
+        get_gateway=lambda: _runtime.gateway,
+        get_profile=lambda: _deployment_profiles.require("villa"),
+    ),
 ])
 
 

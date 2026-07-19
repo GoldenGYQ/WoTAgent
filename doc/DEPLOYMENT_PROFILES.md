@@ -13,6 +13,10 @@ AgentSpec and MCP Scope
 
 RBAC and Relationship Policy
   -> what the current Principal may do to a target resource
+
+Domain Operations
+  -> how that world projects subjects, actors, resources, observations,
+     deterministic rules, events and actions to the operations console
 ```
 
 A Profile is not a role. Switching from `eldercare` to `villa` changes the
@@ -37,6 +41,18 @@ profiles are:
 
 Device membership is exclusive. The catalog validator rejects a device
 assigned to multiple profiles.
+
+Every selectable Profile must register one `DomainOperations` adapter with the
+same `domain_id`. The current projections are:
+
+| Profile | Operations center | Primary software actors |
+|---|---|---|
+| `eldercare` | 养老照护管控 | Butler, Health, Care, eldercare Monitor |
+| `villa` | 别墅智能管控 | Butler/秘书, Security/保安, Environment, Energy, Housekeeping, DeviceOps, villa rule Monitor |
+
+Software actors are not login users. `JH-1` and `JH-2` are authorization
+Principals; Butler and specialist Agents are delegated software Principals with
+their own AgentSpec/MCP capability boundaries.
 
 ## Runtime Flow
 
@@ -75,8 +91,8 @@ The first pair belongs to WoTAgent. The second group belongs to the simulator.
 2. Assign only existing TD device IDs.
 3. Keep device membership disjoint.
 4. Define spaces, enabled Agents and the domain-specific prompt.
-5. Add domain operations only when the scene needs a dedicated operations
-   adapter; ordinary Agent use does not require one.
+5. Register a matching `DomainOperations` adapter. A Profile exposed to the
+   frontend without one is an incomplete scene implementation.
 6. Run backend, frontend and simulator regression tests.
 
 ## Current P1 Boundary
@@ -93,3 +109,18 @@ AND Health MCP scope validation
 `JH-1` is assigned to `elderly-001`; `JH-2` is assigned to `elderly-002`.
 These are still demo identities supplied by the client, so this is an
 experiment-grade authorization model rather than production authentication.
+
+For the villa Profile, the first relationship scope is site-level:
+
+```text
+JH-1 -> site:villa-demo
+  -> domain.read, device.read, device.control,
+     scenario.execute, event.acknowledge
+
+JH-2 -> site:villa-demo
+  -> domain.read, device.read
+```
+
+This is intentionally smaller than a final room/post/shift relationship model.
+It proves that the same Domain Operations API can enforce different Principal
+capabilities without asking the LLM to grant access.

@@ -1998,3 +1998,74 @@ MCP 接口都会拒绝当前 Profile 外的设备，不依赖模型自觉遵守�
 - 同一 Conversation 跨 Profile 被后端拒绝；
 - Gateway 在 MCP 调用前拒绝场景外设备；
 - 广义房间/空间查询不继承上一轮设备领域词。
+
+## 27. P1 第二阶段：每个场景都必须有领域运行投影
+
+### 27.1 暴露出的建模缺口
+
+引入 Deployment Profile 后，前端只在养老场景展示“领域运行中心”，切换到别墅
+则隐藏入口。平台虽然已经具备通用 `DomainOperationsRegistry`，但注册表中实际
+只有 `EldercareOperations`。因此问题不是平台概念不允许别墅领域，而是实现只完成
+了一个领域适配器，前端又用隐藏按钮掩盖了缺口。
+
+修复后的约束是：
+
+```text
+每个可选择 Deployment Profile
+-> 必须有同 domain_id 的 DomainOperations
+-> 必须声明领域主体、资源、观测、规则、场景、事件与执行记录
+```
+
+### 27.2 别墅领域主体
+
+别墅不照搬“老人”作为 Subject，而以 `site:villa-demo` 作为当前管理范围，并声明：
+
+- 智能管家/秘书：LLM Supervisor，建立任务和协调专业主体；
+- 安防保安：LLM 专业 Agent，负责门锁、摄像头、燃气和烟雾；
+- 环境、能耗、家务、设备运维 Agent：各自在 AgentSpec/MCP Scope 内运行；
+- 住宅规则监视器：非 LLM 确定性服务，对注入数据执行阈值规则。
+
+登录用户与上述软件主体属于不同维度。当前 JH-1 对别墅站点具备读取、控制、场景
+执行和事件确认能力；JH-2 只有读取能力。访问决定由后端关系授权生成，不由模型
+输出。
+
+### 27.3 真实设备链与边界
+
+领域中心的场景动作不直接修改前端状态，而是调用 Gateway：
+
+```text
+Domain scenario
+-> TD 声明的动作和参数
+-> MCP/Gateway
+-> simulator 设备
+-> 查询动作后状态
+-> 写入 verified 执行记录
+```
+
+烟雾与能耗注入会先更新对应仿真设备，再由确定性规则生成领域事件。当前别墅事件
+保存在进程内，尚未像养老 Monitor outbox 一样自动创建 Run；界面明确显示“等待
+处置”，不能声称已经完成事件驱动 Agent 闭环。
+
+### 27.4 本轮踩坑
+
+- PowerShell 默认编码会把 UTF-8 中文显示成乱码，必须以 `-Encoding UTF8`
+  复查后再判断文件是否损坏；
+- 摄像头 TD 要求 `durationSeconds`，场景动作传空对象会在真实 Gateway 被拒绝；
+- 通用领域执行记录不能只保留 `resident_id`，新增 `subject_id` 并暂时兼容旧字段；
+- `auth/__init__.py` 先加载高层授权服务会经编排层回到 Policy，形成循环导入；
+  先导出底层 RBAC 后再加载高层服务，避免运行时导入失败；
+- 单元测试必须采用仓库已有的 `asyncio.run()` 模式，不能假定安装了
+  `pytest-asyncio`。
+
+### 27.5 验证范围
+
+测试覆盖领域主体声明、Profile 设备过滤、JH-1 执行、JH-2 只读、烟雾事件、
+事件确认、摄像头 TD 必填参数、通用 HTTP API 和前端按 Profile 过滤领域。
+
+完整回归结果：
+
+```text
+Backend: 201 passed, 3 skipped
+Frontend: 25 passed, typecheck/build passed
+Simulator: 63 passed
+```

@@ -103,6 +103,17 @@ export interface DomainMonitorRule {
   default_response: string
 }
 
+export interface DomainActor {
+  actor_id: string
+  label: string
+  actor_type: string
+  responsibility: string
+  capabilities: string[]
+  resource_scope: string[]
+  delegates_to: string[]
+  llm_driven: boolean
+}
+
 export interface DomainManifest {
   domain_id: string
   title: string
@@ -112,6 +123,7 @@ export interface DomainManifest {
   telemetry_signals: DomainTelemetrySignal[]
   scenarios: DomainScenario[]
   monitor_rules: DomainMonitorRule[]
+  actors?: DomainActor[]
 }
 
 export interface DomainSubject {
@@ -164,7 +176,8 @@ export interface DomainEvent {
 
 export interface DomainAction {
   action_id: string
-  resident_id: string
+  subject_id?: string
+  resident_id?: string
   agent_id: string
   action: string
   arguments: Record<string, unknown>
