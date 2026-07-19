@@ -217,6 +217,7 @@ class AgentTask(BaseModel):
     target_type: str | None = None
     target_mention: str | None = None
     target: TaskTarget | None = None
+    model_requested_capability: str = ""
     requested_capability: str = ""
     effective_scope: ResourceScope | None = None
     dependency_findings: list[DependencyFinding] = Field(default_factory=list)

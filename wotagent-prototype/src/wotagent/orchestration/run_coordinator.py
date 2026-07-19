@@ -226,6 +226,9 @@ class RunCoordinator:
                             if task.target else None
                         ),
                         "requested_capability": task.requested_capability,
+                        "model_requested_capability": (
+                            task.model_requested_capability
+                        ),
                         "effective_scope": (
                             task.effective_scope.model_dump(mode="json")
                             if task.effective_scope else None

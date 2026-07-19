@@ -19,6 +19,8 @@ class AgentSpec(BaseModel):
     agent_id: str = Field(min_length=1)
     display_name: str = ""
     capability_category: str = ""
+    delegation_capabilities: frozenset[str] = Field(default_factory=frozenset)
+    default_capability: str = ""
     domain: str = Field(min_length=1)
     responsibility: str = Field(min_length=1)
     system_prompt: str = Field(min_length=1)

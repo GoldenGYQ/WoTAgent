@@ -13,8 +13,19 @@ successor to `99afb3d feat: harden agent context and real model health flow`
 > trusted Principal context; Task preparation computes device
 > `effective_scope` from Principal, Profile and Agent capability boundaries.
 > Frontend login identities now come from the backend instead of hard-coded
-> cards. Latest regression result: backend `207 passed, 3 skipped`; frontend
+> cards. Latest regression result: backend `210 passed, 3 skipped`; frontend
 > `26 passed`, typecheck/build passed.
+
+> 2026-07-19 production hotfix: real DeepSeek runs exposed that Supervisor
+> natural-language `requested_capability` values were being compared directly
+> with canonical authorization IDs, and that Supervisor
+> `ModelCallLimitMiddleware(run_limit=1)` leaked its count across reused Agent
+> invocations. Task preparation now preserves the model proposal separately,
+> canonicalizes authorization capabilities from AgentSpec/deployment/read-write
+> claims, and relies on RunCoordinator for Supervisor iteration limits. Real
+> runs `run_26882ea68f92` and `run_c39a0fcf6a75` completed successfully; the
+> first verified `light-001` as on at 45%, and the second confirmed no
+> cross-Run model-call-limit failure.
 
 ## 2026-07-19 Scene-Scoped P1 Update
 

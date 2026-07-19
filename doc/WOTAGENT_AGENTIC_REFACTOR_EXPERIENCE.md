@@ -2159,3 +2159,37 @@ INTERSECT Policy/RBAC decision
 Backend: 207 passed, 3 skipped
 Frontend: 26 passed, typecheck/build passed
 ```
+
+### 28.6 真实模型回归：自由文本 capability 与跨 Run 调用计数
+
+真实别墅请求“打开客厅灯并调到 45%，然后确认是否生效”暴露了两个 Fake LLM
+测试未发现的问题。
+
+第一，Supervisor 把 `requested_capability` 生成为“控制客厅灯光并查询状态”这类自然语言。
+运行时直接把它与 `environment.use` 做字符串比较，导致合法的别墅业主被错误拒绝。正确
+边界是：
+
+```text
+LLM capability proposal
+-> AgentSpec + deployment + read/write claims 规范化
+-> canonical capability
+-> Principal 授权检查
+-> effective_scope
+```
+
+Task 现在同时保留 `model_requested_capability` 供审计，并将
+`requested_capability` 改写为后端可信的规范值。模型仍决定业务意图，但不再负责生成权限
+系统的主键。
+
+第二，Run Supervisor 使用了 `ModelCallLimitMiddleware(run_limit=1)`。Supervisor Agent
+实例被多个 Run 复用时，该中间件的计数状态会污染后续调用，出现新 Run 第一次模型请求就
+报告 `run limit (1/1)`。Supervisor 本身没有工具循环，因此删除该中间件；全局边界继续由
+`RunCoordinator.max_supervisor_iterations`、LLM 超时和 Task/Tool 上限控制。
+
+新增回归测试覆盖：
+
+- 同一个 Supervisor Agent 连续服务两个独立 Run；
+- 别墅业主的中文 capability 提议规范化为 `environment.use`；
+- 设备运维中文提议规范化为 `device_ops.use`；
+- 原始模型提议进入 Task 审计字段；
+- 安保读任务和写任务按资源声明选择 `security.observe` 或 `security.use`。

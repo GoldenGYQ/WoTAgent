@@ -535,14 +535,6 @@ def _task_preparer(runtime: Any) -> Callable[[AgentTask, str, dict[str, Any]], A
     authorization = RelationshipAuthorizationService(
         DEMO_RESIDENT_ASSIGNMENTS
     )
-    default_capabilities = {
-        "health_agent": "health.status.read",
-        "care_agent": "care.coordinate",
-        "security_agent": "security.use",
-        "energy_agent": "energy.use",
-        "housekeeping_agent": "housekeeping.use",
-        "device_ops_agent": "device_ops.use",
-    }
 
     async def prepare(
         task: AgentTask,
@@ -550,20 +542,10 @@ def _task_preparer(runtime: Any) -> Callable[[AgentTask, str, dict[str, Any]], A
         task_context: dict[str, Any],
     ) -> AgentTask:
         deployment = task_context.get("deployment", {})
-        capability = (
-            default_capabilities[task.agent_id]
-            if task.agent_id in {"health_agent", "care_agent"}
-            else task.requested_capability
-            or (
-                "environment.control"
-                if (
-                    task.agent_id == "environment_agent"
-                    and deployment.get("domain_id") == "eldercare"
-                )
-                else "environment.use"
-                if task.agent_id == "environment_agent"
-                else default_capabilities.get(task.agent_id, "")
-            )
+        task.model_requested_capability = task.requested_capability
+        capability = _canonical_task_capability(
+            task,
+            deployment,
         )
         task.requested_capability = capability
         enabled_agents = set(deployment.get("enabled_agents", []))
@@ -673,6 +655,40 @@ def _task_preparer(runtime: Any) -> Callable[[AgentTask, str, dict[str, Any]], A
         return task
 
     return prepare
+
+
+def _canonical_task_capability(
+    task: AgentTask,
+    deployment: dict[str, Any],
+) -> str:
+    spec = AGENT_SPECS[task.agent_id]
+    proposed = task.requested_capability.strip()
+    if proposed in spec.delegation_capabilities:
+        return proposed
+    if task.agent_id == "environment_agent":
+        return (
+            "environment.control"
+            if deployment.get("domain_id") == "eldercare"
+            else "environment.use"
+        )
+    if task.agent_id == "security_agent":
+        has_write_claim = any(
+            claim.mode == "write"
+            for claim in task.resource_claims
+        )
+        return "security.use" if has_write_claim else "security.observe"
+    if spec.default_capability:
+        return spec.default_capability
+    raise TaskPreparationError(_task_failure(
+        task,
+        category="contract",
+        code="AGENT_CAPABILITY_CONTRACT_MISSING",
+        message=(
+            f"Agent '{task.agent_id}' does not declare a canonical "
+            "delegation capability."
+        ),
+        retryable=False,
+    ))
 
 
 def _principal_device_scope(

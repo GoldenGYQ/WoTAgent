@@ -91,6 +91,7 @@ def test_task_preparer_normalizes_model_proposed_health_capability(
 
     task = asyncio.run(scenario())
 
+    assert task.model_requested_capability == "health.read.generated.by.model"
     assert task.requested_capability == "health.status.read"
     assert task.effective_scope is not None
     assert task.effective_scope.capabilities == ["health.status.read"]
@@ -199,3 +200,58 @@ def test_security_staff_can_delegate_observation_but_not_environment_control(
             {"deployment": profile.model_dump(mode="json")},
         ))
     assert captured.value.failure.code == "AGENT_CAPABILITY_NOT_DELEGABLE"
+
+
+@pytest.mark.parametrize(
+    ("agent_id", "model_proposal", "canonical"),
+    [
+        (
+            "environment_agent",
+            "控制客厅灯光并查询状态",
+            "environment.use",
+        ),
+        (
+            "device_ops_agent",
+            "查询客厅灯光设备状态和TD",
+            "device_ops.use",
+        ),
+    ],
+)
+def test_villa_owner_model_capability_proposal_is_canonicalized(
+    tmp_path,
+    agent_id: str,
+    model_proposal: str,
+    canonical: str,
+) -> None:
+    profile = DeploymentProfileRegistry.load().require("villa")
+    principal = DEFAULT_PRINCIPAL_DIRECTORY.resolve("JH-1", "smart_home")
+    prepare = _task_preparer(SimpleNamespace(
+        eldercare_store=_store(tmp_path),
+    ))
+    task = AgentTask(
+        task_id=f"task-{agent_id}",
+        run_id="run-villa-owner",
+        local_id=agent_id,
+        agent_id=agent_id,
+        objective="打开客厅灯并验证",
+        reason="用户请求",
+        success_criteria=["灯光状态已验证"],
+        principal=principal,
+        requested_capability=model_proposal,
+        resource_claims=[{
+            "key": "device:light-001",
+            "mode": "write",
+        }],
+    )
+
+    prepared = asyncio.run(prepare(
+        task,
+        "打开客厅灯并调到45%，然后验证",
+        {"deployment": profile.model_dump(mode="json")},
+    ))
+
+    assert prepared.model_requested_capability == model_proposal
+    assert prepared.requested_capability == canonical
+    assert prepared.failure is None
+    assert prepared.effective_scope is not None
+    assert prepared.effective_scope.capabilities == [canonical]

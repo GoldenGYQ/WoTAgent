@@ -452,3 +452,41 @@ def test_run_supervisor_creates_structured_parallel_task_dag() -> None:
     assert "最小必要证据原则" in get_agent_spec(
         "health_agent"
     ).system_prompt
+
+
+def test_run_supervisor_can_be_reused_across_independent_runs() -> None:
+    def response(goal: str) -> AIMessage:
+        return AIMessage(
+            content="",
+            tool_calls=[{
+                "name": "SupervisorDecision",
+                "args": {
+                    "action": "finish",
+                    "goal": goal,
+                    "final_response": f"{goal}已处理",
+                    "reason": "无需创建专业任务",
+                },
+                "id": f"decision-{goal}",
+                "type": "tool_call",
+            }],
+        )
+
+    model = ScriptedChatModel(responses=[
+        response("第一轮"),
+        response("第二轮"),
+    ])
+    supervisor = build_run_supervisor_agent(
+        model,
+        {"environment_agent": get_agent_spec("environment_agent")},
+    )
+
+    first = supervisor.invoke({
+        "messages": [{"role": "user", "content": "第一轮"}],
+    })
+    second = supervisor.invoke({
+        "messages": [{"role": "user", "content": "第二轮"}],
+    })
+
+    assert first["structured_response"].goal == "第一轮"
+    assert second["structured_response"].goal == "第二轮"
+    assert model.index == 2

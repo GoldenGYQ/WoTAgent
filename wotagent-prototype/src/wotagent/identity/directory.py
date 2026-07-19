@@ -129,6 +129,7 @@ DEMO_PRINCIPALS = [
                     "device.control",
                     "environment.use",
                     "security.use",
+                    "security.observe",
                     "energy.use",
                     "housekeeping.use",
                     "device_ops.use",
