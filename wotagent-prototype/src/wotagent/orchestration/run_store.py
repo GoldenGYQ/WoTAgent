@@ -171,6 +171,7 @@ class InMemoryRunStore:
                 data=data or {},
             )
             events.append(event)
+            _apply_event_metrics(run, event)
             run.updated_at = event.timestamp
             condition = self._conditions[run_id]
         async with condition:
@@ -479,6 +480,7 @@ class SQLiteRunStore:
                    VALUES (?, ?, ?, ?)""",
                 (run_id, sequence, task_id, event.model_dump_json()),
             )
+            _apply_event_metrics(run, event)
             run.updated_at = event.timestamp
             self._save_run(connection, run)
             condition = self._conditions.setdefault(
@@ -567,6 +569,65 @@ class SQLiteRunStore:
 
 
 RunStore = InMemoryRunStore | SQLiteRunStore
+
+
+def _apply_event_metrics(run: RunRecord, event: RunEvent) -> None:
+    """Project durable RunEvents into the persisted Run summary."""
+    data = event.data
+    if event.type == "model.request.completed":
+        run.usage.model_calls += 1
+        for key in (
+            "input_tokens",
+            "output_tokens",
+            "reasoning_tokens",
+            "total_tokens",
+            "cache_hit_tokens",
+            "cache_miss_tokens",
+        ):
+            current = getattr(run.usage, key)
+            setattr(run.usage, key, current + int(data.get(key, 0) or 0))
+        run.usage.estimated_cost += float(
+            data.get("estimated_cost", 0) or 0
+        )
+        run.usage.currency = str(
+            data.get("currency", run.usage.currency)
+        )
+        run.usage.pricing_available = (
+            run.usage.pricing_available
+            or bool(data.get("pricing_available", False))
+        )
+        run.usage.model_latency_ms += float(
+            data.get("duration_ms", 0) or 0
+        )
+        if data.get("ttft_ms") is not None:
+            run.usage.ttft_ms_total += float(data["ttft_ms"])
+            run.usage.ttft_measurements += 1
+    elif event.type in {
+        "agent.tool.completed",
+        "agent.resource.completed",
+    }:
+        run.usage.tool_calls += 1
+    elif event.type == "supervisor.decision.completed":
+        run.supervisor_iterations = max(
+            run.supervisor_iterations,
+            event.iteration or run.supervisor_iterations + 1,
+        )
+    elif event.type == "agent.loop.completed":
+        run.agent_loops += 1
+    elif event.type == "agent.recovery.completed":
+        run.recoveries += 1
+
+    if event.type.startswith("run.") and event.type in {
+        "run.completed",
+        "run.partial_success",
+        "run.failed",
+        "run.cancelled",
+    }:
+        run.finished_at = event.timestamp
+        run.duration_ms = max(
+            0,
+            (event.timestamp - run.created_at).total_seconds() * 1000,
+        )
 
 
 __all__ = ["InMemoryRunStore", "RunStore", "SQLiteRunStore"]

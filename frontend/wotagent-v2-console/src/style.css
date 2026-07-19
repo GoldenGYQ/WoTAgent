@@ -185,6 +185,7 @@ button:focus-visible, textarea:focus-visible {
 .message-avatar { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 6px; background: #e9edf1; color: #4d5c6a; font-size: 11px; font-weight: 700; }
 .assistant-message .message-avatar { background: var(--teal-soft); color: var(--teal); }
 .message-role { display: flex; align-items: center; gap: 8px; margin: 0 0 5px; font-size: 10px; font-weight: 700; color: var(--text-faint); text-transform: uppercase; }
+.response-duration { padding: 2px 5px; border: 1px solid #c8d8d5; border-radius: 3px; color: #41736d; background: #f1f7f6; font-family: "Cascadia Code", Consolas, monospace; font-size: 8px; font-weight: 600; text-transform: none; }
 .turn-task-link { max-width: 150px; overflow: hidden; text-overflow: ellipsis; padding: 0; border: 0; color: #648092; background: transparent; font-family: "Cascadia Code", Consolas, monospace; font-size: 9px; text-transform: none; white-space: nowrap; }
 .turn-task-link:hover { color: var(--teal); text-decoration: underline; }
 .message-block p { margin: 0; font-size: 14px; line-height: 1.7; color: var(--text); white-space: pre-wrap; }

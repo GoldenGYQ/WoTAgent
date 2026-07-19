@@ -34,6 +34,7 @@ where = ["src"]
 pythonpath = ["src"]
 markers = [
   "real_model: opt-in tests that call the configured external LLM",
+  "simulator: opt-in tests that require the local device simulator",
 ]
 
 [project.scripts]

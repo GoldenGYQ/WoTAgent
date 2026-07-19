@@ -1865,3 +1865,92 @@ completed / partial_success / failed / blocked / cancelled
 
 `selected` 只继续用于标记当前 Run 和内部 Task 展示，不再控制外层时间线。终态自动
 折叠后，用户仍可点击时间线标题重新展开完整 Trace。
+
+## 25. P0.5：持久化运行指标与仿真多 Agent 冒烟
+
+### 25.1 为什么刷新后指标一直是零
+
+旧前端创建 `RuntimeRun` 时直接填入空的 `UsageSummary`，随后只重放事件，
+并没有从后端 Run 记录恢复统计值。更重要的是，后端虽然已经产生
+`model.request.completed`、`agent.tool.completed` 等 RunEvent，却没有把它们
+投影到持久化的 Run 摘要中。因此这不是简单的前端渲染错误，而是缺少可持久化
+的指标读模型。
+
+本轮在 `InMemoryRunStore` 和 `SQLiteRunStore` 的事件写入事务内完成指标投影，
+RunRecord 新增：
+
+```text
+usage
+supervisor_iterations
+agent_loops
+recoveries
+duration_ms
+finished_at
+```
+
+统计事实来自已经持久化的 RunEvent：
+
+- `model.request.completed` 聚合模型调用、Token、价格和模型耗时；
+- `agent.tool.completed`、`agent.resource.completed` 聚合工具调用；
+- `supervisor.decision.completed` 记录 Supervisor 决策轮次；
+- `agent.loop.completed` 和 `agent.recovery.completed` 分别记录专业 Agent 循环和恢复；
+- 终态 `run.*` 计算从 Run 创建到最终完成的端到端耗时。
+
+### 25.2 TTFT 不可用时不能显示 0
+
+当前主要模型路径使用 `ainvoke`，没有稳定采集首个流式 Token 的时间。
+`0 ms` 会被误解为性能极好，实际含义却是“没有测量”。因此 P0.5 不伪造 TTFT：
+只有事件明确携带 `ttft_ms` 时才增加测量次数。前端顶栏将该位置改成真实的
+Run 端到端总耗时，并在每条最终回复旁显示同一指标。
+
+同时明确区分：
+
+```text
+Supervisor 决策轮次 != 专业 Agent 内部 Loop 次数
+```
+
+前端顶栏展示 Supervisor 决策轮次；`agent_loops` 仍保留在 API 中，供后续
+专业 Agent 细粒度面板使用。
+
+### 25.3 仿真多 Agent 冒烟测试的边界
+
+新增 opt-in 测试：
+
+```powershell
+$env:RUN_SIMULATOR_AGENT_TESTS='1'
+.\.venv\Scripts\python.exe -m pytest `
+  tests/e2e/test_run_multi_agent_simulator.py -q -s
+```
+
+该测试创建同一 Run 下的两个独立 Task：
+
+1. `health_agent` 通过带 `resident:elderly-001` Scope 的 MCP Resource
+   读取健康摘要；
+2. `environment_agent` 通过真实 `wot-device-simulator` 发布的 TD 派生
+   MCP 工具读取 `environment-sensor-001` 状态。
+
+测试验证两个 Task 被调度为同一个并行批次、两个 Finding 都包含工具证据，
+Environment 结果携带真实 `__read_state` 工具名，并由 Supervisor 第二次决策
+完成 Run。
+
+该测试使用脚本化 Supervisor 和确定性 specialist adapter，不调用外部 LLM。
+它证明 RunCoordinator、TaskScheduler、Health Resource、TD/MCP 和仿真端的组合
+链路可运行，但不证明真实模型的中文理解或结构化输出稳定性。真实模型 Health/
+Scope 冒烟仍是另一组独立测试，二者不能互相替代。
+
+### 25.4 本轮踩坑与结论
+
+- 前端类型夹具仍使用旧 `loopCount`，说明数据契约变更必须同步测试夹具；
+- 单测只构造事件不等于验证刷新恢复，必须同时覆盖 SQLite RunRecord 再读取；
+- 工具调用次数只能统计完成事件，避免 started/completed 各算一次；
+- 仿真测试必须显式 opt-in，默认测试不应因本地服务未启动而失败；
+- 仿真测试通过不能标注成真实模型测试通过。
+
+验证结果：
+
+```text
+Backend: 190 passed, 3 skipped
+Simulator multi-Agent smoke: 1 passed
+Frontend: 24 passed
+Frontend typecheck/build: passed
+```

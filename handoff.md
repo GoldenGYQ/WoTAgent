@@ -1,9 +1,31 @@
 # WoTAgent 2.0 Project Handoff
 
-Last updated: 2026-07-18
+Last updated: 2026-07-19
 Current branch: `codex/run-task-dag`
 Current implementation baseline: Domain Operations and Monitor Run refactor,
 successor to `99afb3d feat: harden agent context and real model health flow`
+
+## 2026-07-19 P0.5 Update
+
+P0.5 is complete:
+
+- Run usage, Supervisor rounds, specialist loops, recoveries, finish time and
+  end-to-end duration are projected from durable RunEvents into RunRecord;
+- SQLite-backed metrics survive refresh and service restart;
+- the frontend displays real Token/tool/cost values, end-to-end Run duration
+  and Supervisor decision rounds instead of presenting unavailable TTFT as zero;
+- assistant responses show their Run's total duration;
+- an opt-in simulator-backed multi-Agent smoke test runs Health and Environment
+  Tasks in parallel, reads a scoped eldercare MCP Resource and a TD-derived
+  simulator MCP tool, then returns to the Supervisor for completion;
+- current regression result: backend `190 passed, 3 skipped`, frontend
+  `24 passed`, frontend typecheck and production build passed;
+- simulator smoke result: `1 passed`.
+
+Important qualification: the simulator smoke uses a scripted Supervisor and
+deterministic specialist adapters. It validates orchestration plus MCP/simulator
+integration without external Token cost; it does not replace the separate real
+model Health/Scope smoke suite.
 
 ## 中文快速交接摘要
 

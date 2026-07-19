@@ -25,6 +25,7 @@ import InlineTraceTimeline from './InlineTraceTimeline.vue'
 import MarkdownContent from './MarkdownContent.vue'
 import MetricStrip from './MetricStrip.vue'
 import StatusBadge from './StatusBadge.vue'
+import { duration } from '../utils/trace'
 
 const props = defineProps<{
   conversation: RuntimeConversation | null
@@ -45,6 +46,11 @@ const emit = defineEmits<{
 
 function runForTurn(turn: ConversationTurn): RuntimeRun | undefined {
   return props.runs.find((run) => run.id === turn.run_id)
+}
+
+function responseDuration(turn: ConversationTurn): string | null {
+  const value = runForTurn(turn)?.durationMs
+  return value == null ? null : duration(value)
 }
 
 const guidance = computed(() => {
@@ -200,7 +206,12 @@ const guidance = computed(() => {
           <section v-if="turn.assistant_message" class="message-block assistant-message">
             <div class="message-avatar"><Bot :size="17" /></div>
             <div class="message-content">
-              <span class="message-role">WoTAgent</span>
+              <span class="message-role">
+                WoTAgent
+                <span v-if="responseDuration(turn)" class="response-duration">
+                  总耗时 {{ responseDuration(turn) }}
+                </span>
+              </span>
               <MarkdownContent :content="turn.assistant_message" />
             </div>
           </section>

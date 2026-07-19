@@ -8,6 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from ..agents.contracts import AgentFinding
+from ..telemetry import UsageSummary
 
 
 RunStatus = Literal[
@@ -260,6 +261,12 @@ class RunRecord(BaseModel):
     success_criteria: list[str] = Field(default_factory=list)
     task_ids: list[str] = Field(default_factory=list)
     final_response: str = ""
+    usage: UsageSummary = Field(default_factory=UsageSummary)
+    supervisor_iterations: int = Field(default=0, ge=0)
+    agent_loops: int = Field(default=0, ge=0)
+    recoveries: int = Field(default=0, ge=0)
+    duration_ms: float | None = Field(default=None, ge=0)
+    finished_at: datetime | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { agentV2Api } from './v2'
+import { EMPTY_USAGE } from '../types/agent'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -33,6 +34,12 @@ describe('agentV2Api', () => {
         success_criteria: [],
         task_ids: [],
         final_response: '',
+        usage: { ...EMPTY_USAGE },
+        supervisor_iterations: 0,
+        agent_loops: 0,
+        recoveries: 0,
+        duration_ms: null,
+        finished_at: null,
         created_at: '',
         updated_at: '',
       }),

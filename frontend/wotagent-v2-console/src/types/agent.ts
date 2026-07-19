@@ -58,6 +58,12 @@ export interface RunRecord {
   success_criteria: string[]
   task_ids: string[]
   final_response: string
+  usage: UsageSummary
+  supervisor_iterations: number
+  agent_loops: number
+  recoveries: number
+  duration_ms: number | null
+  finished_at: string | null
   created_at: string
   updated_at: string
 }
@@ -357,8 +363,10 @@ export interface RuntimeRun {
   confirmation: RunConfirmation | null
   events: TraceEvent[]
   usage: UsageSummary
-  loopCount: number
+  supervisorIterations: number
+  agentLoops: number
   recoveryCount: number
+  durationMs: number | null
   createdAt: string
   updatedAt: string
   error: string

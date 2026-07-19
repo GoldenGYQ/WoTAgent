@@ -2,7 +2,7 @@ import { defineComponent, nextTick } from 'vue'
 import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { agentV2Api } from '../api/v2'
-import type { RunRecord, TraceEvent } from '../types/agent'
+import { EMPTY_USAGE, type RunRecord, type TraceEvent } from '../types/agent'
 import { useAgentRuntime } from './useAgentRuntime'
 
 const run: RunRecord = {
@@ -20,6 +20,18 @@ const run: RunRecord = {
   execution_strategy: 'sequential',
   success_criteria: [],
   task_ids: [],
+  usage: {
+    ...EMPTY_USAGE,
+    model_calls: 2,
+    total_tokens: 1200,
+    pricing_available: true,
+    estimated_cost: 0.0012,
+  },
+  supervisor_iterations: 2,
+  agent_loops: 3,
+  recoveries: 1,
+  duration_ms: 3000,
+  finished_at: '2026-07-18T10:00:03Z',
   final_response: '已完成',
   thinking: false,
   created_at: '2026-07-18T10:00:00Z',
@@ -137,6 +149,10 @@ describe('useAgentRuntime refresh recovery', () => {
     expect(runtime.runs).toHaveLength(1)
     expect(runtime.runs[0].events.map((event) => event.sequence)).toEqual([1, 2])
     expect(runtime.runs[0].streamState).toBe('closed')
+    expect(runtime.runs[0].usage.total_tokens).toBe(1200)
+    expect(runtime.runs[0].supervisorIterations).toBe(2)
+    expect(runtime.runs[0].agentLoops).toBe(3)
+    expect(runtime.runs[0].durationMs).toBe(3000)
     expect(agentV2Api.getEvents).toHaveBeenCalledWith(run.run_id, 0)
     expect(runtime.activeConversationId.value).toBeNull()
     expect(runtime.activeRunId.value).toBeNull()
