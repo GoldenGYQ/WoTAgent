@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
@@ -65,7 +68,29 @@ class InMemoryTraceStore:
         self._records: dict[str, TraceRecord] = {}
         self._events: dict[str, list[TraceEvent]] = {}
         self._conditions: dict[str, asyncio.Condition] = {}
+        self._listeners: dict[
+            str,
+            dict[str, Callable[[TraceEvent], Awaitable[None] | None]],
+        ] = {}
         self._lock = asyncio.Lock()
+
+    def subscribe(
+        self,
+        task_id: str,
+        listener: Callable[[TraceEvent], Awaitable[None] | None],
+    ) -> Callable[[], None]:
+        token = uuid4().hex
+        self._listeners.setdefault(task_id, {})[token] = listener
+
+        def unsubscribe() -> None:
+            listeners = self._listeners.get(task_id)
+            if listeners is None:
+                return
+            listeners.pop(token, None)
+            if not listeners:
+                self._listeners.pop(task_id, None)
+
+        return unsubscribe
 
     async def create(
         self,
@@ -140,9 +165,19 @@ class InMemoryTraceStore:
             elif type == "agent.recovery.completed":
                 record.recovery_count += 1
             condition = self._conditions[task_id]
+            listeners = list(self._listeners.get(task_id, {}).values())
         async with condition:
             condition.notify_all()
-        return event.model_copy(deep=True)
+        projected = event.model_copy(deep=True)
+        for listener in listeners:
+            try:
+                result = listener(projected.model_copy(deep=True))
+                if inspect.isawaitable(result):
+                    await result
+            except Exception:
+                # Observability projection must not break device execution.
+                continue
+        return projected
 
     async def finish(self, task_id: str, *, status: str, result: dict[str, Any]) -> None:
         async with self._lock:

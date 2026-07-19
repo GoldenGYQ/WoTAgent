@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import time
 from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
@@ -33,6 +34,7 @@ from ..orchestration import (
 )
 from ..domain.entity_resolution import EntityResolutionError
 from ..prompting import compact_history
+from ..telemetry import TraceEvent, extract_usage_with_cost
 
 
 SUPERVISOR_HISTORY_MESSAGES = 6
@@ -59,8 +61,13 @@ def build_run_coordinator(
             max_tasks_per_run=16,
             max_parallel_tasks=4,
         ),
-        supervisor=_supervisor_decider(runtime, context),
-        executors=_specialist_executors(runtime, context, domain_graphs),
+        supervisor=_supervisor_decider(runtime, context, store),
+        executors=_specialist_executors(
+            runtime,
+            context,
+            domain_graphs,
+            store,
+        ),
         resumers={
             agent_id: _device_resumer(runtime, graph)
             for agent_id, graph in domain_graphs.items()
@@ -73,26 +80,76 @@ def build_run_coordinator(
 def _supervisor_decider(
     runtime: Any,
     base_context: dict[str, Any],
+    store: RunStore,
 ) -> Callable[[dict[str, Any]], Any]:
     async def decide(state: dict[str, Any]) -> SupervisorDecision:
+        run_id = str(state["run"]["run_id"])
+        iteration = int(state["supervisor_iteration"])
         payload = {
             "user_request": state["message"],
             "conversation_context": _compact_supervisor_context(base_context),
             "completed_findings": _compact_findings(state["findings"]),
             "decision_iteration": state["supervisor_iteration"],
         }
-        result = await asyncio.wait_for(
-            runtime.run_supervisor_agent.ainvoke({
-                "messages": [{
-                    "role": "user",
-                    "content": json.dumps(
-                        payload,
-                        ensure_ascii=False,
-                        default=str,
-                    ),
-                }],
-            }),
-            timeout=runtime.settings.llm_timeout_seconds,
+        await store.record_event(
+            run_id,
+            "model.request.started",
+            node="butler_run_supervisor",
+            iteration=iteration,
+            data={
+                "purpose": "supervisor_decision",
+                "input": payload,
+            },
+        )
+        started = time.perf_counter()
+        try:
+            result = await asyncio.wait_for(
+                runtime.run_supervisor_agent.ainvoke({
+                    "messages": [{
+                        "role": "user",
+                        "content": json.dumps(
+                            payload,
+                            ensure_ascii=False,
+                            default=str,
+                        ),
+                    }],
+                }),
+                timeout=runtime.settings.llm_timeout_seconds,
+            )
+        except Exception as exc:
+            await store.record_event(
+                run_id,
+                "model.request.failed",
+                node="butler_run_supervisor",
+                iteration=iteration,
+                data={
+                    "purpose": "supervisor_decision",
+                    "error": str(exc),
+                    "duration_ms": (
+                        time.perf_counter() - started
+                    ) * 1000,
+                },
+            )
+            raise
+        messages = result.get("messages", [])
+        usage = (
+            extract_usage_with_cost(messages[-1])
+            if messages
+            else {}
+        )
+        await store.record_event(
+            run_id,
+            "model.request.completed",
+            node="butler_run_supervisor",
+            iteration=iteration,
+            data={
+                "purpose": "supervisor_decision",
+                "duration_ms": (time.perf_counter() - started) * 1000,
+                "output": _bounded_value(
+                    result.get("structured_response")
+                ),
+                **usage,
+            },
         )
         return SupervisorDecision.model_validate(
             result.get("structured_response")
@@ -212,19 +269,46 @@ def _specialist_executors(
     runtime: Any,
     context: dict[str, Any],
     domain_graphs: dict[str, Any],
+    store: RunStore,
 ) -> dict[str, Callable[[AgentTask], Any]]:
     executors: dict[str, Callable[[AgentTask], Any]] = {
-        "health_agent": _health_executor(runtime),
-        "care_agent": _care_executor(runtime, context),
+        "health_agent": _health_executor(runtime, store),
+        "care_agent": _care_executor(runtime, context, store),
     }
     for agent_id, graph in domain_graphs.items():
-        executors[agent_id] = _device_executor(runtime, graph, context)
+        executors[agent_id] = _device_executor(
+            runtime,
+            graph,
+            context,
+            store,
+        )
     return executors
 
 
-def _health_executor(runtime: Any) -> Callable[[AgentTask], Any]:
+def _health_executor(
+    runtime: Any,
+    store: RunStore | None = None,
+) -> Callable[[AgentTask], Any]:
     async def execute(task: AgentTask) -> AgentFindingPayload:
         dependency_context = _dependency_context(task)
+        if store is not None:
+            await store.record_event(
+                task.run_id,
+                "model.request.started",
+                task_id=task.task_id,
+                node=task.agent_id,
+                data={
+                    "purpose": "health_specialist",
+                    "input": {
+                        "objective": task.objective,
+                        "target": (
+                            task.target.model_dump(mode="json")
+                            if task.target else None
+                        ),
+                    },
+                },
+            )
+        started = time.perf_counter()
         with runtime.health_gateway.authorized_scope(task.effective_scope):
             result = await asyncio.wait_for(
                 runtime.health_react_agent.ainvoke({
@@ -245,6 +329,13 @@ def _health_executor(runtime: Any) -> Callable[[AgentTask], Any]:
                     }],
                 }),
                 timeout=runtime.settings.total_timeout_seconds,
+            )
+        if store is not None:
+            await _project_health_messages(
+                store,
+                task,
+                result.get("messages", []),
+                duration_ms=(time.perf_counter() - started) * 1000,
             )
         structured = result.get("structured_response")
         if structured is not None:
@@ -519,21 +610,30 @@ def _task_failure(
 def _care_executor(
     runtime: Any,
     context: dict[str, Any],
+    store: RunStore | None = None,
 ) -> Callable[[AgentTask], Any]:
     async def execute(task: AgentTask) -> AgentFinding:
         await _ensure_legacy_trace(runtime, task)
-        result = await asyncio.wait_for(
-            runtime.eldercare_chat_agent.run(
-                task_id=task.task_id,
-                message=f"{task.objective}{_dependency_context(task)}",
-                history=context.get("history", []),
-                role=context.get("role", "operator"),
-                thinking=context.get("thinking", False),
-                routed_agent="care_agent",
-                resident_id=task.target.id if task.target else None,
-            ),
-            timeout=runtime.settings.total_timeout_seconds,
+        unsubscribe = _subscribe_trace_projection(
+            runtime,
+            store,
+            task,
         )
+        try:
+            result = await asyncio.wait_for(
+                runtime.eldercare_chat_agent.run(
+                    task_id=task.task_id,
+                    message=f"{task.objective}{_dependency_context(task)}",
+                    history=context.get("history", []),
+                    role=context.get("role", "operator"),
+                    thinking=context.get("thinking", False),
+                    routed_agent="care_agent",
+                    resident_id=task.target.id if task.target else None,
+                ),
+                timeout=runtime.settings.total_timeout_seconds,
+            )
+        finally:
+            unsubscribe()
         return _result_finding(task, result)
 
     return execute
@@ -543,12 +643,19 @@ def _device_executor(
     runtime: Any,
     graph: Any,
     context: dict[str, Any],
+    store: RunStore | None = None,
 ) -> Callable[[AgentTask], Any]:
     async def execute(task: AgentTask) -> AgentFinding:
         await _ensure_legacy_trace(runtime, task)
-        result = await asyncio.wait_for(
-            graph.ainvoke(
-                {
+        unsubscribe = _subscribe_trace_projection(
+            runtime,
+            store,
+            task,
+        )
+        try:
+            result = await asyncio.wait_for(
+                graph.ainvoke(
+                    {
                     "request_id": f"req_{uuid4().hex[:12]}",
                     "task_id": task.task_id,
                     "session_id": task.run_id,
@@ -569,11 +676,13 @@ def _device_executor(
                             for item in task.dependency_findings
                         ],
                     },
-                },
-                config={"configurable": {"thread_id": task.task_id}},
-            ),
-            timeout=runtime.settings.total_timeout_seconds,
-        )
+                    },
+                    config={"configurable": {"thread_id": task.task_id}},
+                ),
+                timeout=runtime.settings.total_timeout_seconds,
+            )
+        finally:
+            unsubscribe()
         interrupts = result.get("__interrupt__", [])
         if interrupts:
             payload = interrupts[0].value
@@ -603,6 +712,115 @@ def _device_resumer(runtime: Any, graph: Any) -> Callable[[AgentTask, bool], Any
         return _result_finding(task, result)
 
     return resume
+
+
+def _subscribe_trace_projection(
+    runtime: Any,
+    store: RunStore | None,
+    task: AgentTask,
+) -> Callable[[], None]:
+    subscribe = getattr(runtime.trace_store, "subscribe", None)
+    if store is None or not callable(subscribe):
+        return lambda: None
+
+    async def project(event: TraceEvent) -> None:
+        data = dict(event.data)
+        if event.duration_ms is not None:
+            data.setdefault("duration_ms", event.duration_ms)
+        step_id = data.get("step_id")
+        await store.record_event(
+            task.run_id,
+            event.type,
+            task_id=task.task_id,
+            parent_task_id=task.parent_task_id,
+            iteration=event.iteration,
+            tool_call_id=(
+                str(step_id)
+                if step_id is not None
+                and event.type.startswith(("agent.tool", "verification."))
+                else None
+            ),
+            node=event.node,
+            data=data,
+        )
+
+    return subscribe(task.task_id, project)
+
+
+async def _project_health_messages(
+    store: RunStore,
+    task: AgentTask,
+    messages: list[Any],
+    *,
+    duration_ms: float,
+) -> None:
+    for message in messages:
+        message_type = str(
+            getattr(message, "type", None)
+            or (
+                message.get("role", "")
+                if isinstance(message, dict)
+                else ""
+            )
+        )
+        if message_type in {"ai", "assistant", "AIMessage"}:
+            tool_calls = (
+                message.get("tool_calls", [])
+                if isinstance(message, dict)
+                else getattr(message, "tool_calls", [])
+            )
+            for call in tool_calls or []:
+                call_data = call if isinstance(call, dict) else {}
+                await store.record_event(
+                    task.run_id,
+                    "agent.tool.started",
+                    task_id=task.task_id,
+                    tool_call_id=str(call_data.get("id") or ""),
+                    node=task.agent_id,
+                    data={
+                        "tool": call_data.get("name"),
+                        "input": _bounded_value(call_data.get("args")),
+                    },
+                )
+        if message_type not in {"tool", "ToolMessage"}:
+            continue
+        content = (
+            message.get("content")
+            if isinstance(message, dict)
+            else getattr(message, "content", None)
+        )
+        payload = _strict_json_object(content) or {
+            "result": _bounded_text(content, 1200),
+        }
+        tool_call_id = (
+            message.get("tool_call_id")
+            if isinstance(message, dict)
+            else getattr(message, "tool_call_id", None)
+        )
+        await store.record_event(
+            task.run_id,
+            "agent.tool.completed",
+            task_id=task.task_id,
+            tool_call_id=str(tool_call_id or ""),
+            node=task.agent_id,
+            data={
+                "tool": payload.get("tool_name"),
+                "input": _bounded_value(payload.get("arguments")),
+                "output": _bounded_value(payload),
+            },
+        )
+    usage = extract_usage_with_cost(messages[-1]) if messages else {}
+    await store.record_event(
+        task.run_id,
+        "model.request.completed",
+        task_id=task.task_id,
+        node=task.agent_id,
+        data={
+            "purpose": "health_specialist",
+            "duration_ms": duration_ms,
+            **usage,
+        },
+    )
 
 
 def _dependency_context(task: AgentTask) -> str:

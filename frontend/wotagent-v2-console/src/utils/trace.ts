@@ -29,9 +29,11 @@ export function eventTitle(event: TraceEvent): string {
     'agent.node.failed': `${nodeLabel(event.node)}失败`,
     'model.request.started': '模型请求',
     'model.request.completed': '模型响应',
+    'model.request.failed': '模型调用失败',
     'model.reasoning.summary': '推理摘要',
     'policy.evaluated': '策略判定',
     'agent.tool.completed': '工具执行',
+    'agent.tool.started': '调用工具',
     'verification.completed': '状态验证',
     'agent.loop.completed': '循环完成',
     'agent.recovery.completed': '恢复规划',
@@ -77,6 +79,7 @@ export function eventSummary(event: TraceEvent): string {
     return `${number(data.history_messages)} 条历史 · ${number(data.history_characters)} 字符`
   }
   if (event.type === 'model.request.started') return String(data.purpose ?? '调用模型')
+  if (event.type === 'model.request.failed') return String(data.error ?? '模型调用失败')
   if (event.type === 'model.request.completed') {
     return `${number(data.total_tokens)} tokens · ${duration(Number(data.duration_ms ?? 0))}`
   }
@@ -88,6 +91,9 @@ export function eventSummary(event: TraceEvent): string {
   }
   if (event.type === 'agent.tool.completed') {
     return `${String(data.tool ?? 'tool')} · ${String(data.step_id ?? '')}`
+  }
+  if (event.type === 'agent.tool.started') {
+    return `${String(data.tool ?? 'tool')} · 正在调用`
   }
   if (event.type === 'agent.resource.completed') {
     return `${String(data.tool ?? data.uri ?? 'resource')} · ${outputState(data.output)}`

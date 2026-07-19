@@ -13,8 +13,10 @@ from wotagent.agents import (
 )
 from wotagent.orchestration import (
     AgentTask,
+    InMemoryRunStore,
     PendingConfirmation,
     ResourceScope,
+    RunRecord,
     TaskTarget,
 )
 from wotagent.runtime.run_runtime import (
@@ -22,6 +24,7 @@ from wotagent.runtime.run_runtime import (
     _device_resumer,
     _health_executor,
 )
+from wotagent.telemetry import InMemoryTraceStore
 
 
 def test_device_executor_surfaces_and_resumes_native_langgraph_interrupt() -> None:
@@ -91,6 +94,80 @@ def test_device_executor_surfaces_and_resumes_native_langgraph_interrupt() -> No
     assert isinstance(calls[1][0], Command)
     assert calls[0][1]["configurable"]["thread_id"] == "task-confirm"
     assert calls[1][1]["configurable"]["thread_id"] == "task-confirm"
+
+
+def test_device_trace_events_are_projected_into_run_event_stream() -> None:
+    async def scenario():
+        trace_store = InMemoryTraceStore()
+        run_store = InMemoryRunStore()
+        await run_store.create_run(RunRecord(
+            run_id="run-trace",
+            conversation_id="conv-1",
+            turn_id="turn-1",
+            root_goal="读取客厅灯",
+        ))
+
+        class Graph:
+            async def ainvoke(self, _value, config=None):
+                await trace_store.record(
+                    task_id="task-trace",
+                    type="agent.tool.completed",
+                    node="executor",
+                    data={
+                        "step_id": "step-1",
+                        "tool": "light_001__read_state",
+                        "input": {
+                            "device_id": "light-001",
+                            "action": "read_state",
+                        },
+                        "output": {
+                            "success": True,
+                            "raw_result": {"on": False},
+                        },
+                    },
+                )
+                return {
+                    "status": "succeeded",
+                    "response": "客厅灯当前关闭。",
+                }
+
+        runtime = SimpleNamespace(
+            settings=SimpleNamespace(total_timeout_seconds=2),
+            trace_store=trace_store,
+        )
+        task = AgentTask(
+            task_id="task-trace",
+            run_id="run-trace",
+            local_id="inspect",
+            agent_id="environment_agent",
+            objective="读取客厅灯",
+            reason="用户请求",
+            success_criteria=["获得客厅灯状态"],
+        )
+        await _device_executor(
+            runtime,
+            Graph(),
+            {
+                "user_id": "local-user",
+                "role": "operator",
+                "thinking": False,
+                "history": [],
+                "runtime": {},
+            },
+            run_store,
+        )(task)
+        return await run_store.events("run-trace")
+
+    events = asyncio.run(scenario())
+
+    assert [event.type for event in events] == ["agent.tool.completed"]
+    assert events[0].task_id == "task-trace"
+    assert events[0].tool_call_id == "step-1"
+    assert events[0].data["input"] == {
+        "device_id": "light-001",
+        "action": "read_state",
+    }
+    assert events[0].data["output"]["raw_result"] == {"on": False}
 
 
 def test_health_executor_repairs_missing_structured_response_once() -> None:

@@ -86,4 +86,36 @@ describe('InlineTraceTimeline', () => {
     await wrapper.find('.inline-trace-header').trigger('click')
     expect(wrapper.find('.inline-trace-body').exists()).toBe(true)
   })
+
+  it('nests tool input and output under an active Task event', async () => {
+    const toolEvent = {
+      ...event(3, 'agent.tool.completed'),
+      data: {
+        tool: 'light_001__read_state',
+        step_id: 'step-1',
+        input: { device_id: 'light-001' },
+        output: { success: true, raw_result: { on: false } },
+      },
+    }
+    const activeRun: RuntimeRun = {
+      ...run,
+      tasks: [{ ...run.tasks[0], status: 'running' }],
+      events: [event(1, 'run.started'), event(2, 'task.started'), toolEvent],
+    }
+    const wrapper = mount(InlineTraceTimeline, {
+      props: { run: activeRun, selected: true },
+    })
+
+    const toolRow = wrapper.findAll('.inline-trace-event').find(
+      (item) => item.text().includes('light_001__read_state'),
+    )
+    expect(toolRow).toBeDefined()
+    await toolRow!.trigger('click')
+
+    expect(wrapper.text()).toContain('输入')
+    expect(wrapper.text()).toContain('输出')
+    expect(wrapper.text()).toContain('"device_id": "light-001"')
+    expect(wrapper.text()).toContain('"on": false')
+    expect(wrapper.find('.trace-waiting .runtime-spinner').exists()).toBe(true)
+  })
 })

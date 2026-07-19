@@ -1618,3 +1618,94 @@ Full backend tests: 186 passed, 2 skipped
 本轮没有调用真实模型，避免在结构契约尚未完成回归前消耗 Token。下一次真实链路
 复验应重点观察 Supervisor 是否生成单个条件 Task，以及 Planner 是否直接基于
 上游观察生成空调或加湿器动作。
+
+## 20. RunEvent 细粒度 Trace 与三级时间线
+
+### 20.1 数据为什么曾经不完整
+
+设备 LangGraph 原本已经向旧 `InMemoryTraceStore` 写入以下事件：
+
+```text
+agent.node.started / completed / failed
+model.request.started / completed
+policy.evaluated
+agent.tool.completed
+verification.completed
+agent.loop.completed
+```
+
+但前端 WebSocket 和历史回放读取的是持久化 `RunStore`。两套 Store 之间没有事件
+桥，因此前端只能看到 RunCoordinator 写入的 Run、Task 和调度里程碑。前端无法
+凭空展示工具输入输出，问题首先属于后端可观测性投影，而不是 CSS。
+
+### 20.2 后端修复
+
+`InMemoryTraceStore` 增加按 `task_id` 订阅的 listener。设备和 Care 专业 Agent
+运行时临时订阅自己的 Trace，并把每个事件实时投影为持久化 RunEvent：
+
+```text
+LangGraph TraceEvent
+→ task_id listener
+→ RunStore.record_event()
+→ SQLite RunEvent
+→ WebSocket / 历史回放
+```
+
+投影保留：
+
+- Task、Node、Iteration；
+- Tool Call ID；
+- 工具名称和 Step ID；
+- 工具输入；
+- 工具输出；
+- Verification；
+- duration 和结构化错误。
+
+listener 的异常不会中断设备执行，Task 结束后立即注销，避免跨 Run 泄漏。
+
+Supervisor 现在也会记录模型请求开始、结构化输入、模型响应、结构化输出、耗时和
+Token 使用。Health `create_agent` 的消息转录会投影工具调用输入和
+`ToolExecutionResult` 输出；由于当前没有使用流式 Agent callback，这部分工具
+事件在 Health Agent 返回后按转录顺序补写，不是调用瞬间实时写入。
+
+### 20.3 前端三级结构
+
+时间线从平铺事件列表调整为：
+
+```text
+第一级：Run 调度 / 专业 Task
+  第二级：模型、Planner、Policy、Tool、Verification、Loop 事件
+    第三级：输入、输出、验证、错误、计划和执行元数据
+```
+
+Task 执行中显示稳定的 spinner、状态标签和“等待下一项执行事件”提示。新增事件、
+分组展开和详情展开使用短时透明度与位移动画；`prefers-reduced-motion` 仍会关闭
+动画。输入输出使用不同的左侧状态色，但保持控制台式紧凑布局，没有增加嵌套装饰
+卡片。
+
+### 20.4 测试与踩坑
+
+新增后端测试实际执行：
+
+```text
+TraceStore agent.tool.completed
+→ RunStore RunEvent
+→ input/output/tool_call_id 保持一致
+```
+
+新增前端测试验证：
+
+- Tool 事件位于对应 Task 下；
+- 点击二级事件后显示输入和输出；
+- 运行中 Task 显示 spinner；
+- 历史 Run 仍可折叠并回放。
+
+```text
+Backend: 187 passed, 2 skipped
+Frontend: 19 passed
+Frontend typecheck/build: passed
+```
+
+本轮内置浏览器连接因本机 browser runtime 的 kernel asset 路径错误而失败，因此
+没有声称完成截图视觉验收。已完成组件 DOM 测试、类型检查、生产构建和本地 HTTP
+健康检查；后续浏览器运行环境恢复后仍应补一次 390px 手机宽度和桌面宽度截图检查。
