@@ -19,6 +19,7 @@ DEVICE_FIELDS = (
 
 PROPERTY_BINDINGS: dict[str, tuple[str, str]] = {
     "heartRate": ("heart_rate", "bpm"),
+    "bloodPressure": ("blood_pressure", "mmHg"),
     "spo2": ("spo2", "%"),
     "fallDetected": ("fall_detected", ""),
     "bedOccupancy": ("bed_occupancy", ""),

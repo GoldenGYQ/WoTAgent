@@ -22,6 +22,7 @@ def utc_now() -> datetime:
 
 SensorType = Literal[
     "heart_rate",
+    "blood_pressure",
     "spo2",
     "fall_detected",
     "bed_occupancy",
@@ -52,6 +53,23 @@ class SensorReading(BaseModel):
     source: str = "simulator"
     observed_at: datetime = Field(default_factory=utc_now)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_value(self) -> "SensorReading":
+        if self.sensor_type == "blood_pressure":
+            value = str(self.value).strip()
+            parts = value.split("/")
+            if (
+                len(parts) != 2
+                or any(not item.strip().isdigit() for item in parts)
+            ):
+                raise ValueError(
+                    "blood_pressure 必须使用 '收缩压/舒张压' 格式，例如 128/82"
+                )
+            self.value = value
+            if not self.unit:
+                self.unit = "mmHg"
+        return self
 
 
 class RiskEvent(BaseModel):

@@ -85,6 +85,8 @@ def _default_property_value(prop_name: str, prop_type: str) -> Any:
         if "bright" in name_lower or "level" in name_lower:
             return 0
         return 0
+    if name_lower == "bloodpressure":
+        return "122/78"
     if name_lower == "sleepquality":
         return "unknown"
     return ""

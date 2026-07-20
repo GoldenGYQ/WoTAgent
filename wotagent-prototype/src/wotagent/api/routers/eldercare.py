@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -36,6 +36,19 @@ def create_eldercare_router(
     async def get_summary(resident_id: str) -> dict[str, Any]:
         try:
             return get_store().summary(resident_id).model_dump(mode="json")
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @router.get("/residents/{resident_id}/trend")
+    async def get_trend(
+        resident_id: str,
+        minutes: int = 180,
+    ) -> dict[str, Any]:
+        try:
+            since = datetime.now(UTC) - timedelta(
+                minutes=min(max(minutes, 10), 24 * 60)
+            )
+            return get_store().trend(resident_id, since=since)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 

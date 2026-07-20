@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 
 from wotagent.domains.eldercare import EldercareRuntime, EldercareStore, Resident
 from wotagent.telemetry import InMemoryTraceStore
@@ -59,3 +60,21 @@ def test_normal_scenario_does_not_create_agent_task(tmp_path) -> None:
 
     assert result["events"] == []
     assert result["tasks"] == []
+    latest = runtime.store.latest("elderly-001")
+    assert latest["blood_pressure"]["value"] == "122/78"
+    assert latest["room_humidity"]["value"] == 52
+
+
+def test_high_blood_pressure_scenario_records_trendable_readings(tmp_path) -> None:
+    runtime = make_runtime(tmp_path)
+
+    result = asyncio.run(runtime.simulate("high_blood_pressure", "elderly-001"))
+
+    assert result["events"] == []
+    assert result["tasks"] == []
+    trend = runtime.store.trend(
+        "elderly-001",
+        since=datetime.now(UTC) - timedelta(hours=1),
+    )
+    blood_pressure = next(item for item in trend["series"] if item["sensor_type"] == "blood_pressure")
+    assert blood_pressure["points"][-1]["display_value"] == "160/99"

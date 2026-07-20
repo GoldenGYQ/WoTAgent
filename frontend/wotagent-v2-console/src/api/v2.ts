@@ -14,6 +14,7 @@ import type {
   DomainOverview,
   DomainResource,
   DomainSubject,
+  EldercareTrendResponse,
   DeploymentProfile,
   HealthSummary,
   ManagedUserCreatePayload,
@@ -229,6 +230,7 @@ export const agentV2Api = {
 
   listResidents: (): Promise<{ residents: Resident[] }> => request('/api/v2/eldercare/residents'),
   getHealthSummary: (residentId: string): Promise<HealthSummary> => request(`/api/v2/eldercare/residents/${encodeURIComponent(residentId)}/summary`),
+  getEldercareTrend: (residentId: string, minutes = 180): Promise<EldercareTrendResponse> => request(`/api/v2/eldercare/residents/${encodeURIComponent(residentId)}/trend?minutes=${minutes}`),
   ingestReading(payload: { resident_id: string; sensor_type: SensorType; value: number | boolean | string; unit?: string; source?: string }): Promise<{ events: RiskEvent[]; tasks: Array<{ task_id: string; status: string }> }> {
     return request('/api/v2/eldercare/readings', { method: 'POST', body: JSON.stringify(payload) })
   },

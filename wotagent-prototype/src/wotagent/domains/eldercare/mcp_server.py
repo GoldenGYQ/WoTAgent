@@ -24,7 +24,7 @@ def build_eldercare_mcp(store: EldercareStore | None = None) -> FastMCP:
         latest = eldercare_store.latest(resident_id)
         vitals = {
             key: value for key, value in latest.items()
-            if key in {"heart_rate", "spo2", "fall_detected"}
+            if key in {"heart_rate", "blood_pressure", "spo2", "fall_detected"}
         }
         return json.dumps(vitals, ensure_ascii=False)
 
@@ -47,7 +47,7 @@ def build_eldercare_mcp(store: EldercareStore | None = None) -> FastMCP:
                 item.model_dump(mode="json")
                 for item in eldercare_store.readings_since(resident_id, sensor_type, since)
             ]
-            for sensor_type in ("heart_rate", "spo2")
+            for sensor_type in ("heart_rate", "blood_pressure", "spo2")
         }, ensure_ascii=False, default=str)
 
     @mcp.resource("elderly://{resident_id}/data-quality", mime_type="application/json")

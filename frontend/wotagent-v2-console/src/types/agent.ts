@@ -238,6 +238,29 @@ export interface DomainOverview {
   generated_at: string
 }
 
+export interface EldercareTrendPoint {
+  observed_at: string
+  value: number | boolean | string | null
+  display_value: string
+  numeric_value: number | null
+  secondary_numeric_value: number | null
+  source: string | null
+}
+
+export interface EldercareTrendSeries {
+  sensor_type: string
+  label: string
+  unit: string
+  points: EldercareTrendPoint[]
+}
+
+export interface EldercareTrendResponse {
+  resident: Resident
+  since: string
+  generated_at: string
+  series: EldercareTrendSeries[]
+}
+
 export interface DomainResource {
   resource_id: string
   label: string
@@ -371,7 +394,7 @@ export interface SpeechTranscription {
   model: string
 }
 
-export type SensorType = 'heart_rate' | 'spo2' | 'fall_detected' | 'bed_occupancy' | 'sleep_quality' | 'room_temperature' | 'room_humidity'
+export type SensorType = 'heart_rate' | 'blood_pressure' | 'spo2' | 'fall_detected' | 'bed_occupancy' | 'sleep_quality' | 'room_temperature' | 'room_humidity'
 
 export interface Resident {
   resident_id: string

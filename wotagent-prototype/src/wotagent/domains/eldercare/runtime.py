@@ -305,6 +305,11 @@ class EldercareRuntime:
 
         bindings = {
             "heart_rate": (resident.wristband_device_id, "updateVitals", "heartRate"),
+            "blood_pressure": (
+                resident.wristband_device_id,
+                "updateVitals",
+                "bloodPressure",
+            ),
             "spo2": (resident.wristband_device_id, "updateVitals", "spo2"),
             "fall_detected": (resident.wristband_device_id, "updateVitals", "fallDetected"),
             "bed_occupancy": (resident.mattress_device_id, "updateSleepState", "bedOccupancy"),
@@ -372,6 +377,23 @@ class EldercareRuntime:
                 )
                 for minutes, value in ((5, 103), (3, 105), (1, 108), (0, 106))
             ]
+        elif scenario == "high_blood_pressure":
+            readings = [
+                SensorReading(
+                    resident_id=resident_id,
+                    sensor_type="blood_pressure",
+                    value=value,
+                    unit="mmHg",
+                    source="scenario-simulator",
+                    observed_at=now - timedelta(minutes=minutes),
+                )
+                for minutes, value in (
+                    (8, "154/96"),
+                    (5, "158/98"),
+                    (2, "162/101"),
+                    (0, "160/99"),
+                )
+            ]
         elif scenario == "fall":
             readings = [SensorReading(
                 resident_id=resident_id,
@@ -381,14 +403,24 @@ class EldercareRuntime:
                 observed_at=now,
             )]
         elif scenario == "hot_room":
-            readings = [SensorReading(
-                resident_id=resident_id,
-                sensor_type="room_temperature",
-                value=30.5,
-                unit="C",
-                source="scenario-simulator",
-                observed_at=now,
-            )]
+            readings = [
+                SensorReading(
+                    resident_id=resident_id,
+                    sensor_type="room_temperature",
+                    value=30.5,
+                    unit="C",
+                    source="scenario-simulator",
+                    observed_at=now,
+                ),
+                SensorReading(
+                    resident_id=resident_id,
+                    sensor_type="room_humidity",
+                    value=68,
+                    unit="%",
+                    source="scenario-simulator",
+                    observed_at=now,
+                ),
+            ]
         elif scenario == "low_spo2":
             readings = [SensorReading(
                 resident_id=resident_id,
@@ -401,9 +433,11 @@ class EldercareRuntime:
         elif scenario == "normal":
             readings = [
                 SensorReading(resident_id=resident_id, sensor_type="heart_rate", value=78, unit="bpm", observed_at=now),
+                SensorReading(resident_id=resident_id, sensor_type="blood_pressure", value="122/78", unit="mmHg", observed_at=now),
                 SensorReading(resident_id=resident_id, sensor_type="spo2", value=97, unit="%", observed_at=now),
                 SensorReading(resident_id=resident_id, sensor_type="fall_detected", value=False, observed_at=now),
                 SensorReading(resident_id=resident_id, sensor_type="room_temperature", value=24, unit="C", observed_at=now),
+                SensorReading(resident_id=resident_id, sensor_type="room_humidity", value=52, unit="%", observed_at=now),
             ]
         else:
             raise ValueError(f"unknown eldercare scenario: {scenario}")

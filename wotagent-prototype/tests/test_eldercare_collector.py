@@ -15,6 +15,7 @@ class FakeGateway:
         self.states = {
             "wristband-001": {
                 "heartRate": 108,
+                "bloodPressure": "138/88",
                 "spo2": 96,
                 "fallDetected": False,
                 "observedAt": "2026-07-16T10:00:00+00:00",
@@ -53,6 +54,7 @@ def test_collector_maps_td_properties_to_standard_sensor_readings(tmp_path) -> N
 
     assert {item.sensor_type for item in first} == {
         "heart_rate",
+        "blood_pressure",
         "spo2",
         "fall_detected",
         "bed_occupancy",

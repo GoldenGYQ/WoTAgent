@@ -47,6 +47,13 @@ class EldercareOperations:
                     default_value="82",
                 ),
                 TelemetrySignal(
+                    key="blood_pressure",
+                    label="血压",
+                    unit="mmHg",
+                    value_type="string",
+                    default_value="122/78",
+                ),
+                TelemetrySignal(
                     key="spo2",
                     label="血氧",
                     unit="%",
@@ -88,6 +95,10 @@ class EldercareOperations:
                 DomainScenario(
                     key="high_heart_rate",
                     label="持续高心率",
+                ),
+                DomainScenario(
+                    key="high_blood_pressure",
+                    label="血压偏高",
                 ),
                 DomainScenario(key="low_spo2", label="低血氧"),
                 DomainScenario(key="fall", label="模拟跌倒"),
@@ -185,9 +196,11 @@ class EldercareOperations:
         summary = self.get_store().summary(subject_id)
         metric_definitions = (
             ("heart_rate", "当前心率"),
+            ("blood_pressure", "当前血压"),
             ("spo2", "血氧"),
             ("sleep_quality", "睡眠"),
             ("room_temperature", "室温"),
+            ("room_humidity", "湿度"),
         )
         metrics = []
         for key, label in metric_definitions:

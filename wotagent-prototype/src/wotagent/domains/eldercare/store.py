@@ -514,6 +514,61 @@ class EldercareStore:
             open_risks=[item for item in self.list_risks(resident_id) if item.status == "open"],
         )
 
+    def trend(
+        self,
+        resident_id: str,
+        *,
+        since: datetime,
+        sensor_types: list[str] | None = None,
+    ) -> dict[str, Any]:
+        resident = self.get_resident(resident_id)
+        if resident is None:
+            raise KeyError(f"resident '{resident_id}' not found")
+        selected_types = sensor_types or [
+            "heart_rate",
+            "blood_pressure",
+            "spo2",
+            "room_temperature",
+            "room_humidity",
+        ]
+        labels = {
+            "heart_rate": ("心率", "bpm"),
+            "blood_pressure": ("血压", "mmHg"),
+            "spo2": ("血氧", "%"),
+            "room_temperature": ("室温", "C"),
+            "room_humidity": ("湿度", "%"),
+        }
+        series = []
+        for sensor_type in selected_types:
+            points = []
+            for item in self.readings_since(resident_id, sensor_type, since):
+                systolic, diastolic = _blood_pressure_parts(item.value)
+                points.append({
+                    "observed_at": item.observed_at.astimezone(UTC).isoformat(),
+                    "value": item.value,
+                    "display_value": _display_reading_value(item.value),
+                    "numeric_value": (
+                        float(item.value)
+                        if isinstance(item.value, (int, float))
+                        else systolic
+                    ),
+                    "secondary_numeric_value": diastolic,
+                    "source": item.source,
+                })
+            label, default_unit = labels.get(sensor_type, (sensor_type, ""))
+            series.append({
+                "sensor_type": sensor_type,
+                "label": label,
+                "unit": default_unit,
+                "points": points,
+            })
+        return {
+            "resident": resident.model_dump(mode="json"),
+            "since": since.astimezone(UTC).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
+            "series": series,
+        }
+
     def record_action(
         self,
         *,
@@ -610,3 +665,18 @@ class EldercareStore:
             **dict(row),
             "payload": json.loads(row["payload_json"]),
         }
+
+
+def _blood_pressure_parts(value: Any) -> tuple[float | None, float | None]:
+    if not isinstance(value, str):
+        return None, None
+    parts = [item.strip() for item in value.split("/", 1)]
+    if len(parts) != 2 or not all(item.isdigit() for item in parts):
+        return None, None
+    return float(parts[0]), float(parts[1])
+
+
+def _display_reading_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return "是" if value else "否"
+    return str(value)

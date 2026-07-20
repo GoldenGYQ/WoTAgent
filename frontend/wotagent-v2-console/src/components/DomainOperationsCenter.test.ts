@@ -24,9 +24,26 @@ describe('DomainOperationsCenter', () => {
     })
     vi.spyOn(agentV2Api, 'getDomainOverview').mockResolvedValue({
       subject: { subject_id: 'elderly-001', label: '张爷爷', subtitle: 'A-101', metadata: { caregiver: '王护理员' } },
-      metrics: [{ key: 'heart_rate', label: '当前心率', value: 82, unit: 'bpm', observed_at: '2026-07-18T08:00:00Z', source: 'test' }],
+      metrics: [
+        { key: 'heart_rate', label: '当前心率', value: 82, unit: 'bpm', observed_at: '2026-07-18T08:00:00Z', source: 'test' },
+        { key: 'blood_pressure', label: '当前血压', value: '122/78', unit: 'mmHg', observed_at: '2026-07-18T08:00:00Z', source: 'test' },
+      ],
       open_event_count: 0,
       generated_at: '2026-07-18T08:00:00Z',
+    })
+    vi.spyOn(agentV2Api, 'getEldercareTrend').mockResolvedValue({
+      resident: { resident_id: 'elderly-001', name: '张爷爷', room: 'A-101', caregiver: '王护理员', active: true },
+      since: '2026-07-18T05:00:00Z',
+      generated_at: '2026-07-18T08:00:00Z',
+      series: [{
+        sensor_type: 'blood_pressure',
+        label: '血压',
+        unit: 'mmHg',
+        points: [
+          { observed_at: '2026-07-18T07:30:00Z', value: '126/80', display_value: '126/80', numeric_value: 126, secondary_numeric_value: 80, source: 'test' },
+          { observed_at: '2026-07-18T08:00:00Z', value: '122/78', display_value: '122/78', numeric_value: 122, secondary_numeric_value: 78, source: 'test' },
+        ],
+      }],
     })
     vi.spyOn(agentV2Api, 'listDomainResources').mockResolvedValue({ resources: [] })
     vi.spyOn(agentV2Api, 'listDomainEvents').mockResolvedValue({ events: [] })
@@ -53,8 +70,12 @@ describe('DomainOperationsCenter', () => {
     expect(wrapper.text()).toContain('养老照护')
     expect(wrapper.text()).toContain('张爷爷')
     expect(wrapper.text()).toContain('82 bpm')
+    expect(wrapper.text()).toContain('122/78 mmHg')
     expect(wrapper.text()).toContain('离线')
     expect(listSubjects).toHaveBeenCalledWith('eldercare', 'JH-1')
+    await wrapper.get('[data-section="history"]').trigger('click')
+    expect(wrapper.text()).toContain('健康历史记录与趋势')
+    expect(wrapper.text()).toContain('血压')
     wrapper.unmount()
   })
 

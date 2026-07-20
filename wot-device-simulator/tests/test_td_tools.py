@@ -75,12 +75,14 @@ async def test_health_sensor_td_is_exposed_and_updates_readable_state() -> None:
     assert tools[tool_name].meta["wot"]["capabilities"] == [
         "health",
         "heart_rate",
+        "blood_pressure",
         "spo2",
         "fall_detection",
     ]
 
     result = await mcp.call_tool(tool_name, {
         "heartRate": 108,
+        "bloodPressure": "138/88",
         "spo2": 96,
         "fallDetected": False,
         "observedAt": "2026-07-16T10:00:00+00:00",
@@ -88,6 +90,7 @@ async def test_health_sensor_td_is_exposed_and_updates_readable_state() -> None:
 
     assert result.structured_content["success"] is True
     assert result.structured_content["new_state"]["heartRate"] == 108
+    assert result.structured_content["new_state"]["bloodPressure"] == "138/88"
     assert result.structured_content["new_state"]["observedAt"] == "2026-07-16T10:00:00+00:00"
 
 

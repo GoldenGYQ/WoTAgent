@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
 
@@ -10,6 +11,7 @@ from wotagent.conversation import ConversationStore
 from wotagent.domains.eldercare import (
     EldercareMonitorService,
     EldercareRuntime,
+    SensorReading,
     EldercareStore,
     Resident,
     RiskEvent,
@@ -115,6 +117,41 @@ def test_eldercare_manual_reading_and_summary(monkeypatch, tmp_path) -> None:
     assert ingested.json()["delivery"] == "monitor_pending"
     assert summary.json()["latest"]["sleep_quality"]["value"] == "poor"
     assert summary.json()["latest"]["sleep_quality"]["source"] == "wot-mcp:mattress-001"
+
+
+def test_eldercare_trend_api_returns_blood_pressure_and_environment_history(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    store = EldercareStore(tmp_path / "eldercare.db")
+    store.seed_demo()
+    now = datetime.now(UTC)
+    for minutes, sensor_type, value, unit in (
+        (45, "blood_pressure", "134/84", "mmHg"),
+        (15, "blood_pressure", "128/80", "mmHg"),
+        (10, "room_temperature", 25.5, "C"),
+        (5, "room_humidity", 54, "%"),
+    ):
+        store.add_reading(SensorReading(
+            resident_id="elderly-001",
+            sensor_type=sensor_type,
+            value=value,
+            unit=unit,
+            observed_at=now - timedelta(minutes=minutes),
+        ))
+    monkeypatch.setattr(app_module._runtime, "eldercare_store", store)
+
+    client = TestClient(app_module.app)
+    response = client.get(
+        "/api/v2/eldercare/residents/elderly-001/trend",
+        params={"minutes": 120},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    series = {item["sensor_type"]: item for item in payload["series"]}
+    assert series["blood_pressure"]["points"][-1]["display_value"] == "128/80"
+    assert series["room_humidity"]["points"][-1]["numeric_value"] == 54
 
 
 def test_main_chat_task_routes_eldercare_request_and_persists_response(

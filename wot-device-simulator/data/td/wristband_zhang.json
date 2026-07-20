@@ -7,6 +7,7 @@
   "capabilities": [
     "health",
     "heart_rate",
+    "blood_pressure",
     "spo2",
     "fall_detection"
   ],
@@ -17,6 +18,7 @@
         "type": "object",
         "properties": {
           "heartRate": { "type": "number", "minimum": 30, "maximum": 220 },
+          "bloodPressure": { "type": "string" },
           "spo2": { "type": "number", "minimum": 50, "maximum": 100 },
           "fallDetected": { "type": "boolean" },
           "observedAt": { "type": "string" }
@@ -27,6 +29,7 @@
   },
   "properties": {
     "heartRate": { "type": "number" },
+    "bloodPressure": { "type": "string" },
     "spo2": { "type": "number" },
     "fallDetected": { "type": "boolean" },
     "observedAt": { "type": "string" }

@@ -23,6 +23,8 @@ import type {
   DomainResource,
   DomainSubject,
   DomainTelemetrySignal,
+  EldercareTrendResponse,
+  EldercareTrendSeries,
   MonitorStatus,
 } from '../types/agent'
 
@@ -33,13 +35,14 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ inspectRun: [runId: string] }>()
 
-type Section = 'overview' | 'actors' | 'resources' | 'telemetry' | 'monitoring' | 'events'
+type Section = 'overview' | 'history' | 'actors' | 'resources' | 'telemetry' | 'monitoring' | 'events'
 
 const manifests = ref<DomainManifest[]>([])
 const domainId = ref(props.initialDomainId ?? '')
 const subjects = ref<DomainSubject[]>([])
 const subjectId = ref('')
 const overview = ref<DomainOverview | null>(null)
+const trend = ref<EldercareTrendResponse | null>(null)
 const resources = ref<DomainResource[]>([])
 const events = ref<DomainEvent[]>([])
 const actions = ref<DomainAction[]>([])
@@ -50,6 +53,7 @@ const error = ref('')
 const signalKey = ref('')
 const signalValue = ref('')
 const signalUnit = ref('')
+const trendLookbackMinutes = ref(180)
 let refreshTimer: ReturnType<typeof setInterval> | undefined
 let refreshInFlight = false
 
@@ -66,6 +70,7 @@ const subjectAccessLabel = computed(() => {
 const signal = computed(() => manifest.value?.telemetry_signals.find((item) => item.key === signalKey.value) ?? null)
 const sections = [
   { value: 'overview', label: '运行概览', icon: Gauge },
+  { value: 'history', label: '历史趋势', icon: Activity },
   { value: 'actors', label: '软件主体', icon: Users },
   { value: 'resources', label: '资源管理', icon: Settings2 },
   { value: 'telemetry', label: '数据观测', icon: Database },
@@ -109,6 +114,45 @@ function executionLabel(action: DomainAction): string {
   return labels[action.execution_mode] ?? action.execution_mode
 }
 
+function numericSeriesValues(series: EldercareTrendSeries, secondary = false): number[] {
+  return series.points
+    .map((point) => (
+      secondary
+        ? point.secondary_numeric_value
+        : point.numeric_value
+    ))
+    .filter((value): value is number => typeof value === 'number')
+}
+
+function trendLatest(series: EldercareTrendSeries): string {
+  return series.points.at(-1)?.display_value ?? '--'
+}
+
+function trendRange(series: EldercareTrendSeries, secondary = false): string {
+  const values = numericSeriesValues(series, secondary)
+  if (!values.length) return '--'
+  return `${Math.min(...values)} - ${Math.max(...values)}${series.unit ? ` ${series.unit}` : ''}`
+}
+
+function sparklinePath(series: EldercareTrendSeries, secondary = false): string {
+  const values = series.points
+    .map((point) => ({
+      value: secondary ? point.secondary_numeric_value : point.numeric_value,
+    }))
+    .filter((point): point is { value: number } => typeof point.value === 'number')
+  if (values.length < 2) return ''
+  const width = 220
+  const height = 64
+  const min = Math.min(...values.map((item) => item.value))
+  const max = Math.max(...values.map((item) => item.value))
+  const range = max - min || 1
+  return values.map((item, index) => {
+    const x = (index / (values.length - 1)) * width
+    const y = height - ((item.value - min) / range) * height
+    return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`
+  }).join(' ')
+}
+
 async function loadDomains(): Promise<void> {
   loading.value = true
   error.value = ''
@@ -145,14 +189,19 @@ async function refresh(): Promise<void> {
   refreshInFlight = true
   error.value = ''
   try {
-    const [nextOverview, resourceData, eventData, actionData, monitorData] = await Promise.all([
+    const trendRequest = domainId.value === 'eldercare'
+      ? agentV2Api.getEldercareTrend(subjectId.value, trendLookbackMinutes.value)
+      : Promise.resolve(null)
+    const [nextOverview, nextTrend, resourceData, eventData, actionData, monitorData] = await Promise.all([
       agentV2Api.getDomainOverview(domainId.value, subjectId.value, props.principalId),
+      trendRequest,
       agentV2Api.listDomainResources(domainId.value, subjectId.value, props.principalId),
       agentV2Api.listDomainEvents(domainId.value, subjectId.value, props.principalId),
       agentV2Api.listDomainActions(domainId.value, subjectId.value, props.principalId),
       agentV2Api.getDomainMonitorStatus(domainId.value),
     ])
     overview.value = nextOverview
+    trend.value = nextTrend
     resources.value = resourceData.resources
     events.value = eventData.events
     actions.value = actionData.actions
@@ -252,6 +301,9 @@ watch(domainId, () => void loadSubjects())
 watch(subjectId, () => void refresh())
 watch(signalKey, (key) => configureSignal(manifest.value?.telemetry_signals.find((item) => item.key === key)))
 watch(() => props.principalId, () => void loadSubjects())
+watch(trendLookbackMinutes, () => {
+  if (domainId.value === 'eldercare' && subjectId.value) void refresh()
+})
 
 onMounted(() => {
   void loadDomains()
@@ -341,6 +393,65 @@ onBeforeUnmount(() => {
           <span>{{ item.label }}</span>
           <strong>{{ metricValue(item.value, item.unit) }}</strong>
           <small>{{ item.observed_at ? formatTime(item.observed_at) : '暂无数据' }} · {{ item.source ?? '--' }}</small>
+        </article>
+      </div>
+    </section>
+
+    <section v-else-if="activeSection === 'history'" class="section-body">
+      <div class="section-heading">
+        <div>
+          <h2>健康历史记录与趋势</h2>
+          <p>展示近一段时间的生命体征和环境数据变化，支持血压、心率、血氧、温湿度查询</p>
+        </div>
+        <div class="trend-toolbar" v-if="domainId === 'eldercare'">
+          <span>时间窗口</span>
+          <select v-model="trendLookbackMinutes" aria-label="趋势时间窗口">
+            <option :value="30">近 30 分钟</option>
+            <option :value="180">近 3 小时</option>
+            <option :value="720">近 12 小时</option>
+          </select>
+        </div>
+      </div>
+      <div v-if="domainId !== 'eldercare'" class="empty-state">当前领域暂未提供统一趋势查询能力</div>
+      <div v-else class="trend-grid">
+        <article v-for="series in trend?.series ?? []" :key="series.sensor_type" class="trend-card">
+          <header>
+            <div>
+              <strong>{{ series.label }}</strong>
+              <small>{{ series.points.length }} 条记录</small>
+            </div>
+            <span>{{ trendLatest(series) }}</span>
+          </header>
+          <div class="trend-summary">
+            <span>主区间：{{ trendRange(series) }}</span>
+            <span v-if="series.sensor_type === 'blood_pressure'">舒张压区间：{{ trendRange(series, true) }}</span>
+            <span>起始：{{ formatTime(trend?.since ?? null) }}</span>
+          </div>
+          <div v-if="sparklinePath(series)" class="trend-chart">
+            <svg viewBox="0 0 220 64" preserveAspectRatio="none" aria-hidden="true">
+              <path :d="sparklinePath(series)" />
+              <path
+                v-if="series.sensor_type === 'blood_pressure' && sparklinePath(series, true)"
+                class="secondary"
+                :d="sparklinePath(series, true)"
+              />
+            </svg>
+          </div>
+          <div class="table-scroll trend-table">
+            <table>
+              <thead>
+                <tr><th>时间</th><th>值</th><th>来源</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="point in [...series.points].reverse().slice(0, 6)" :key="`${series.sensor_type}-${point.observed_at}`">
+                  <td>{{ formatTime(point.observed_at) }}</td>
+                  <td>{{ point.display_value }}{{ series.unit && series.sensor_type !== 'blood_pressure' ? ` ${series.unit}` : '' }}</td>
+                  <td>{{ point.source || '--' }}</td>
+                </tr>
+                <tr v-if="!series.points.length"><td colspan="3" class="empty-row">暂无历史数据</td></tr>
+              </tbody>
+            </table>
+          </div>
         </article>
       </div>
     </section>
@@ -507,7 +618,7 @@ onBeforeUnmount(() => {
 .platform-label { color: var(--teal); font-size: 9px; font-weight: 800; }
 .domain-heading h1 { margin: 2px 0 0; font-size: 20px; }
 .domain-heading p, .section-heading p { margin: 3px 0 0; color: var(--text-muted); font-size: 11px; }
-.domain-toolbar, .telemetry-form, .scenario-list { display: flex; align-items: center; gap: 8px; }
+.domain-toolbar, .telemetry-form, .scenario-list, .trend-toolbar { display: flex; align-items: center; gap: 8px; }
 select, input { height: 34px; border: 1px solid var(--line-strong); border-radius: 5px; padding: 0 9px; color: var(--text); background: #fff; }
 .domain-error { margin-top: 10px; padding: 9px 10px; color: var(--red); background: var(--red-soft); border: 1px solid #efcaca; border-radius: 5px; font-size: 12px; }
 .service-strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin-top: 14px; border: 1px solid var(--line); background: #fff; }
@@ -534,6 +645,20 @@ select, input { height: 34px; border: 1px solid var(--line-strong); border-radiu
 .metric-grid span, .metric-grid small { color: var(--text-muted); font-size: 9px; }
 .metric-grid strong { font-size: 18px; }
 .metric-grid small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.empty-state { padding: 28px 18px; border: 1px dashed var(--line-strong); border-radius: 12px; color: var(--text-muted); background: #fff; }
+.trend-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.trend-card { padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.trend-card > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.trend-card > header div { display: flex; flex-direction: column; gap: 4px; }
+.trend-card > header small { color: var(--text-muted); font-size: 10px; }
+.trend-card > header span { color: var(--teal); font-size: 15px; font-weight: 700; }
+.trend-summary { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.trend-summary span { padding: 4px 8px; border-radius: 999px; color: var(--text-muted); background: #f2f7f7; font-size: 10px; }
+.trend-chart { margin-top: 12px; border-radius: 8px; background: linear-gradient(180deg, #f6fbfb 0%, #ffffff 100%); }
+.trend-chart svg { width: 100%; height: 84px; }
+.trend-chart path { fill: none; stroke: #208177; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.trend-chart path.secondary { stroke: #76a7ff; stroke-dasharray: 5 4; }
+.trend-table { margin-top: 10px; }
 .actor-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .actor-grid article { min-width: 0; padding: 13px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
 .actor-grid header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
@@ -577,6 +702,7 @@ td small { margin-top: 3px; color: var(--text-faint); font-size: 9px; }
 @media (max-width: 900px) {
   .service-strip { grid-template-columns: repeat(3, 1fr); }
   .metric-grid { grid-template-columns: repeat(2, 1fr); }
+  .trend-grid { grid-template-columns: 1fr; }
   .telemetry-layout, .event-layout { grid-template-columns: 1fr; }
   .actor-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
