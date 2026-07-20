@@ -381,6 +381,44 @@ const guidance = computed(() => {
   color: var(--text-faint);
 }
 
+@media (max-width: 1280px) {
+  .workspace-header {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      "toggle title"
+      "trace trace";
+    row-gap: 4px;
+    min-height: 58px;
+    padding-top: 6px;
+    padding-bottom: 6px;
+    align-items: start;
+  }
+
+  .workspace-toggle {
+    grid-area: toggle;
+  }
+
+  .workspace-title {
+    grid-area: title;
+    justify-content: flex-start;
+  }
+
+  .workspace-title .conversation-title {
+    text-align: left;
+  }
+
+  .workspace-trace-status {
+    grid-area: trace;
+    justify-content: flex-start;
+    padding-left: 38px;
+    white-space: normal;
+  }
+
+  .workspace-header-mark {
+    display: none;
+  }
+}
+
 @media (max-width: 820px) {
   .workspace-header {
     grid-template-columns: minmax(0, 1fr) auto;
