@@ -1,5 +1,5 @@
 import { mount } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import InlineTraceTimeline from './InlineTraceTimeline.vue'
 import { EMPTY_USAGE, type RuntimeRun, type TraceEvent } from '../types/agent'
 
@@ -73,6 +73,51 @@ const run: RuntimeRun = {
 }
 
 describe('InlineTraceTimeline', () => {
+  beforeEach(() => {
+    localStorage.removeItem('wotagent-v2-console.trace-detail-level')
+  })
+
+  it('lets users switch between focus, standard, and full trace detail levels', async () => {
+    vi.useFakeTimers()
+    const detailedRun: RuntimeRun = {
+      ...run,
+      events: [
+        event(1, 'run.started'),
+        {
+          ...event(2, 'model.request.started'),
+          task_id: 'task-1',
+          data: { purpose: 'task_planning' },
+        },
+        {
+          ...event(3, 'model.request.completed'),
+          task_id: 'task-1',
+          data: { total_tokens: 128, raw_plan: { intent: 'control', steps: [{ id: 's1' }] } },
+        },
+        {
+          ...event(4, 'agent.tool.completed'),
+          data: { tool: 'ac_003__action__turn_on', step_id: 'step-1' },
+        },
+      ],
+    }
+    const wrapper = mount(InlineTraceTimeline, {
+      props: { run: detailedRun, selected: true },
+    })
+
+    await vi.advanceTimersByTimeAsync(220)
+    expect(wrapper.text()).toContain('技术细节 2 项')
+
+    await wrapper.findAll('.trace-detail-switch-button')[0].trigger('click')
+    expect(wrapper.text()).toContain('已过滤 2')
+    expect(wrapper.find('.trace-stage-detail-toggle').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('128 tokens')
+
+    await wrapper.findAll('.trace-detail-switch-button')[2].trigger('click')
+    expect(wrapper.text()).not.toContain('技术细节 2 项')
+    expect(wrapper.text()).toContain('128 tokens')
+    expect(localStorage.getItem('wotagent-v2-console.trace-detail-level')).toBe('full')
+    vi.useRealTimers()
+  })
+
   it('reveals Run events progressively while preserving hierarchy', async () => {
     vi.useFakeTimers()
     const wrapper = mount(InlineTraceTimeline, { props: { run, selected: true } })
@@ -198,6 +243,43 @@ describe('InlineTraceTimeline', () => {
     await vi.advanceTimersByTimeAsync(80)
 
     expect(scrollIntoView).toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it('collapses low-signal model events into technical details while keeping key events visible', async () => {
+    vi.useFakeTimers()
+    const detailedRun: RuntimeRun = {
+      ...run,
+      events: [
+        event(1, 'run.started'),
+        {
+          ...event(2, 'model.request.started'),
+          task_id: 'task-1',
+          data: { purpose: 'task_planning' },
+        },
+        {
+          ...event(3, 'model.request.completed'),
+          task_id: 'task-1',
+          data: { total_tokens: 128, raw_plan: { intent: 'control', steps: [{ id: 's1' }] } },
+        },
+        {
+          ...event(4, 'agent.tool.completed'),
+          data: { tool: 'ac_003__action__turn_on', step_id: 'step-1' },
+        },
+      ],
+    }
+    const wrapper = mount(InlineTraceTimeline, {
+      props: { run: detailedRun, selected: true },
+    })
+
+    await vi.advanceTimersByTimeAsync(220)
+
+    expect(wrapper.text()).toContain('技术细节 2 项')
+    expect(wrapper.text()).toContain('ac_003__action__turn_on')
+    expect(wrapper.text()).not.toContain('128 tokens')
+
+    await wrapper.find('.trace-stage-detail-toggle').trigger('click')
+    expect(wrapper.text()).toContain('128 tokens')
     vi.useRealTimers()
   })
 })

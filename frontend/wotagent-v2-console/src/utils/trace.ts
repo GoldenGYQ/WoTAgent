@@ -3,6 +3,8 @@ import type { TraceEvent } from '../types/agent'
 export type EventTone = 'neutral' | 'model' | 'policy' | 'tool' | 'verify' | 'success' | 'danger'
 
 export function eventTone(event: TraceEvent): EventTone {
+  if (event.type === 'plan.normalized') return 'verify'
+  if (event.type === 'plan.validation.failed') return 'danger'
   if (event.type.includes('failed') || event.type.includes('fallback')) return 'danger'
   if (event.type.startsWith('model.')) return 'model'
   if (event.type === 'context.built') return 'verify'
@@ -31,6 +33,8 @@ export function eventTitle(event: TraceEvent): string {
     'model.request.completed': '模型响应',
     'model.request.failed': '模型调用失败',
     'model.reasoning.summary': '推理摘要',
+    'plan.validation.failed': '计划校验失败',
+    'plan.normalized': '计划归一化',
     'policy.evaluated': '策略判定',
     'agent.tool.completed': '工具执行',
     'agent.tool.started': '调用工具',
@@ -79,12 +83,31 @@ export function eventSummary(event: TraceEvent): string {
   if (event.type === 'context.built') {
     return `${number(data.history_messages)} 条历史 · ${number(data.history_characters)} 字符`
   }
-  if (event.type === 'model.request.started') return String(data.purpose ?? '调用模型')
+  if (event.type === 'model.request.started') {
+    return String(
+      data.purpose === 'task_planning_repair'
+        ? '规划修复'
+        : data.purpose ?? '调用模型',
+    )
+  }
   if (event.type === 'model.request.failed') return String(data.error ?? '模型调用失败')
   if (event.type === 'model.request.completed') {
-    return `${number(data.total_tokens)} tokens · ${duration(Number(data.duration_ms ?? 0))}`
+    const plan = record(data.raw_plan)
+    const parts = [
+      planShapeSummary(plan),
+      `${number(data.total_tokens)} tokens`,
+      duration(Number(data.duration_ms ?? 0)),
+    ].filter(Boolean)
+    return parts.join(' · ')
   }
   if (event.type === 'model.reasoning.summary') return String(data.summary ?? data.intent ?? '')
+  if (event.type === 'plan.validation.failed') {
+    const violations = Array.isArray(data.violations) ? data.violations : []
+    return String(violations[0] ?? '结构化计划不满足当前契约')
+  }
+  if (event.type === 'plan.normalized') {
+    return `${String(data.from_intent ?? 'unknown')} → ${String(data.to_intent ?? 'chat')}`
+  }
   if (event.type === 'policy.evaluated') {
     const decisions = Array.isArray(data.decisions) ? data.decisions : []
     const denied = decisions.filter((item) => isRecord(item) && item.effect === 'deny').length
@@ -208,4 +231,11 @@ function outputState(value: unknown): string {
   if (output.verified === true || output.success === true) return '已获得结果'
   if (output.error_message || output.error) return '读取失败'
   return '已完成'
+}
+
+function planShapeSummary(value: Record<string, unknown>): string {
+  if (!Object.keys(value).length) return ''
+  const steps = Array.isArray(value.steps) ? value.steps.length : 0
+  const intent = value.intent ? String(value.intent) : 'plan'
+  return `${intent} · ${steps} steps`
 }

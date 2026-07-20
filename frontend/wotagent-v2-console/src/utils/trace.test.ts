@@ -22,11 +22,14 @@ function event(type: string, data: Record<string, unknown> = {}): TraceEvent {
 
 describe('trace presentation', () => {
   it('labels model and tool events with concise summaries', () => {
-    const model = event('model.request.completed', { total_tokens: 912 })
+    const model = event('model.request.completed', {
+      total_tokens: 912,
+      raw_plan: { intent: 'control', steps: [{ id: 's1' }] },
+    })
     const tool = event('agent.tool.completed', { tool: 'light_001__action__turn_on', step_id: 's1' })
 
     expect(eventTitle(model)).toBe('模型响应')
-    expect(eventSummary(model)).toBe('912 tokens · 1.23 s')
+    expect(eventSummary(model)).toBe('control · 1 steps · 912 tokens · 1.23 s')
     expect(eventTone(model)).toBe('model')
     expect(eventSummary(tool)).toContain('light_001__action__turn_on')
     expect(eventTone(tool)).toBe('tool')
@@ -47,5 +50,22 @@ describe('trace presentation', () => {
     expect(eventTitle(context)).toBe('会话上下文')
     expect(eventSummary(context)).toContain('4 条历史')
     expect(eventTone(context)).toBe('verify')
+  })
+
+  it('surfaces planner validation and normalization events', () => {
+    const failed = event('plan.validation.failed', {
+      violations: ['intent=control requires at least one executable step'],
+    })
+    const normalized = event('plan.normalized', {
+      from_intent: 'control',
+      to_intent: 'chat',
+    })
+
+    expect(eventTitle(failed)).toBe('计划校验失败')
+    expect(eventSummary(failed)).toContain('requires at least one executable step')
+    expect(eventTone(failed)).toBe('danger')
+    expect(eventTitle(normalized)).toBe('计划归一化')
+    expect(eventSummary(normalized)).toBe('control → chat')
+    expect(eventTone(normalized)).toBe('verify')
   })
 })

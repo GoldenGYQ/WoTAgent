@@ -332,12 +332,25 @@ class LangChainTaskPlanner:
                     "capability_context_characters": len(capability_message),
                     "history_messages": len(history),
                     "history_characters": sum(len(item["content"]) for item in history),
+                    "prompt_snapshot": _planner_prompt_snapshot(
+                        system=system,
+                        runtime_context=runtime_context,
+                        devices=devices,
+                        history=history,
+                        user_prompt=user_prompt,
+                    ),
                 },
             )
         started = time.perf_counter()
         result = await self.runnable.ainvoke(messages)
-        await self._record_model_completion(state, result, started, attempt=1)
         arguments = _extract_tool_arguments(result)
+        await self._record_model_completion(
+            state,
+            result,
+            started,
+            attempt=1,
+            raw_plan=arguments,
+        )
         schema_repaired = False
         repair_used = False
         try:
@@ -350,7 +363,11 @@ class LangChainTaskPlanner:
                     task_id=task_id,
                     type="plan.validation.failed",
                     node="planner",
-                    data={"attempt": 1, "violations": [str(exc)]},
+                    data={
+                        "attempt": 1,
+                        "violations": [str(exc)],
+                        "raw_plan": _trace_value(arguments),
+                    },
                 )
                 await self.trace_store.record(
                     task_id=task_id,
@@ -362,6 +379,24 @@ class LangChainTaskPlanner:
                         "attempt": 2,
                         "thinking": thinking,
                         "model_thinking": False,
+                        "repair_reason": _trace_text(str(exc), 1200),
+                        "prompt_snapshot": _planner_prompt_snapshot(
+                            system=system,
+                            runtime_context=runtime_context,
+                            devices=devices,
+                            history=history,
+                            user_prompt=(
+                                f"{state.get('message', '')}\n\nPlanner correction: "
+                                "The generated plan violates the structured TaskPlan contract."
+                            ),
+                            repair_prompt=(
+                                "The generated plan violates the structured TaskPlan contract: "
+                                f"{exc}. Regenerate the complete plan. query/control intents "
+                                "require at least one executable step. If the original objective "
+                                "is already complete and no further tool call is needed, use "
+                                "intent=chat with steps=[]. clarify also has no executable steps."
+                            ),
+                        ),
                     },
                 )
             repair_prompt = (
@@ -377,8 +412,14 @@ class LangChainTaskPlanner:
             ]
             repair_started = time.perf_counter()
             result = await self.runnable.ainvoke(repair_messages)
-            await self._record_model_completion(state, result, repair_started, attempt=2)
             arguments = _extract_tool_arguments(result)
+            await self._record_model_completion(
+                state,
+                result,
+                repair_started,
+                attempt=2,
+                raw_plan=arguments,
+            )
             try:
                 plan = TaskPlan.model_validate(arguments)
             except PydanticValidationError:
@@ -398,6 +439,7 @@ class LangChainTaskPlanner:
                             "reason": "repaired plan declared no remaining executable steps",
                             "from_intent": arguments.get("intent"),
                             "to_intent": "chat",
+                            "raw_plan": _trace_value(arguments),
                         },
                     )
         violations = _capability_violations(plan, devices, message)
@@ -412,7 +454,11 @@ class LangChainTaskPlanner:
                     task_id=task_id,
                     type="plan.validation.failed",
                     node="planner",
-                    data={"attempt": 1, "violations": violations},
+                    data={
+                        "attempt": 1,
+                        "violations": violations,
+                        "raw_plan": _trace_value(plan.model_dump(mode="json")),
+                    },
                 )
                 await self.trace_store.record(
                     task_id=task_id,
@@ -424,6 +470,25 @@ class LangChainTaskPlanner:
                         "attempt": 2,
                         "thinking": thinking,
                         "model_thinking": False,
+                        "repair_reason": _trace_text("; ".join(violations), 1200),
+                        "prompt_snapshot": _planner_prompt_snapshot(
+                            system=system,
+                            runtime_context=runtime_context,
+                            devices=devices,
+                            history=history,
+                            user_prompt=(
+                                f"{state.get('message', '')}\n\nPlanner correction: "
+                                "The generated plan violates the current TD capability contract."
+                            ),
+                            repair_prompt=(
+                                "The generated plan violates the current TD capability contract: "
+                                + "; ".join(violations)
+                                + ". Regenerate the complete plan using only the listed "
+                                "capabilities. Preserve the user's requested action direction; "
+                                "never replace turnOff with turnOn or turnOn with turnOff to "
+                                "make a plan valid. Clarify instead when needed."
+                            ),
+                        ),
                     },
                 )
             repair_prompt = (
@@ -442,8 +507,14 @@ class LangChainTaskPlanner:
             ]
             repair_started = time.perf_counter()
             result = await self.runnable.ainvoke(repair_messages)
-            await self._record_model_completion(state, result, repair_started, attempt=2)
             arguments = _extract_tool_arguments(result)
+            await self._record_model_completion(
+                state,
+                result,
+                repair_started,
+                attempt=2,
+                raw_plan=arguments,
+            )
             plan = TaskPlan.model_validate(arguments)
             repair_used = True
             violations = _capability_violations(plan, devices, message)
@@ -606,10 +677,12 @@ class LangChainTaskPlanner:
         started: float,
         *,
         attempt: int,
+        raw_plan: dict[str, Any] | None = None,
     ) -> None:
         task_id = state.get("task_id", "")
         if self.trace_store is None or not task_id:
             return
+        planner_result = _trace_value(raw_plan) if raw_plan is not None else _extract_result_plan(result)
         await self.trace_store.record(
             task_id=task_id,
             type="model.request.completed",
@@ -622,6 +695,7 @@ class LangChainTaskPlanner:
                 "model": _extract_model_name(result),
                 "thinking": bool(state.get("thinking", False)),
                 "model_thinking": False,
+                "raw_plan": planner_result,
                 **extract_usage_with_cost(result),
             },
         )
@@ -683,6 +757,63 @@ def _extract_content(result: Any) -> str:
             for item in content
         )
     return str(content or "")
+
+
+def _planner_prompt_snapshot(
+    *,
+    system: str,
+    runtime_context: dict[str, Any],
+    devices: list[dict[str, Any]],
+    history: list[dict[str, str]],
+    user_prompt: str,
+    repair_prompt: str = "",
+) -> dict[str, Any]:
+    snapshot = {
+        "system": _trace_text(system, 1200),
+        "user_prompt": _trace_text(user_prompt, 1200),
+        "history": _trace_value(history),
+        "runtime_context": _trace_value(runtime_context),
+        "capabilities": _trace_value(devices),
+    }
+    if repair_prompt:
+        snapshot["repair_prompt"] = _trace_text(repair_prompt, 1200)
+    return snapshot
+
+
+def _extract_result_plan(result: Any) -> dict[str, Any] | str:
+    try:
+        return _trace_value(_extract_tool_arguments(result))
+    except Exception as exc:  # pragma: no cover - defensive telemetry path
+        return f"[unavailable] {exc}"
+
+
+def _trace_text(value: Any, limit: int) -> str:
+    text = "" if value is None else str(value)
+    return text if len(text) <= limit else f"{text[:limit]}...[truncated]"
+
+
+def _trace_value(value: Any, *, depth: int = 0) -> Any:
+    if depth >= 4:
+        return "[truncated]"
+    if isinstance(value, str):
+        return _trace_text(value, 800)
+    if isinstance(value, dict):
+        items = list(value.items())[:24]
+        clipped = {
+            _trace_text(key, 120): _trace_value(item, depth=depth + 1)
+            for key, item in items
+        }
+        if len(value) > len(items):
+            clipped["__truncated__"] = f"{len(value) - len(items)} more fields"
+        return clipped
+    if isinstance(value, (list, tuple)):
+        items = [_trace_value(item, depth=depth + 1) for item in list(value)[:16]]
+        if len(value) > len(items):
+            items.append(f"...[truncated {len(value) - len(items)} items]")
+        return items
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    return _trace_text(value, 300)
 
 
 def _terminal_noop_after_execution(

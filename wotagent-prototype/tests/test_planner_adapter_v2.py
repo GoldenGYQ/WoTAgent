@@ -123,6 +123,53 @@ def test_invalid_dependency_is_rejected_before_graph_execution() -> None:
 
 
 def test_invalid_empty_control_plan_is_repaired_to_terminal_chat() -> None:
+    async def run():
+        class SequencedRunnable:
+            def __init__(self) -> None:
+                self.calls = 0
+                self.messages = []
+
+            async def ainvoke(self, messages):
+                self.calls += 1
+                self.messages.append(messages)
+                arguments = (
+                    {"intent": "control", "summary": "已经完成", "steps": []}
+                    if self.calls == 1
+                    else {"intent": "chat", "summary": "已经完成", "steps": []}
+                )
+                return SimpleNamespace(
+                    tool_calls=[{"name": "generate_plan", "args": arguments}],
+                    usage_metadata={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+                    response_metadata={"model_name": "fake-planner"},
+                )
+
+        store = InMemoryTraceStore()
+        await store.create(task_id="task-repair", session_id="sess", request_id="req")
+        runnable = SequencedRunnable()
+        plan = await LangChainTaskPlanner(runnable, trace_store=store)({
+            "task_id": "task-repair",
+            "message": "继续执行条件任务",
+        })
+        return runnable, plan, await store.events("task-repair")
+
+    runnable, plan, events = asyncio.run(run())
+
+    failed = next(event for event in events if event.type == "plan.validation.failed")
+    repaired = [event for event in events if event.type == "model.request.completed"]
+
+    assert failed.data["raw_plan"] == {"intent": "control", "summary": "已经完成", "steps": []}
+    assert repaired[0].data["raw_plan"] == {"intent": "control", "summary": "已经完成", "steps": []}
+    assert repaired[1].data["raw_plan"] == {"intent": "chat", "summary": "已经完成", "steps": []}
+    assert "repair_prompt" not in repaired[0].data["raw_plan"]
+    assert runnable.calls == 2
+    assert plan.intent == "chat"
+    assert plan.steps == []
+    assert "query/control intents require at least one executable step" in (
+        runnable.messages[1][-1][1]
+    )
+
+
+def test_invalid_empty_control_plan_records_prompt_snapshot_for_repair() -> None:
     class SequencedRunnable:
         def __init__(self) -> None:
             self.calls = 0
@@ -142,15 +189,21 @@ def test_invalid_empty_control_plan_is_repaired_to_terminal_chat() -> None:
                 response_metadata={"model_name": "fake-planner"},
             )
 
-    runnable = SequencedRunnable()
-    plan = asyncio.run(LangChainTaskPlanner(runnable)({"message": "继续执行条件任务"}))
+    async def run():
+        store = InMemoryTraceStore()
+        await store.create(task_id="task-repair-prompt", session_id="sess", request_id="req")
+        runnable = SequencedRunnable()
+        await LangChainTaskPlanner(runnable, trace_store=store)({
+            "task_id": "task-repair-prompt",
+            "message": "继续执行条件任务",
+        })
+        return await store.events("task-repair-prompt")
 
-    assert runnable.calls == 2
-    assert plan.intent == "chat"
-    assert plan.steps == []
-    assert "query/control intents require at least one executable step" in (
-        runnable.messages[1][-1][1]
-    )
+    events = asyncio.run(run())
+    started = [event for event in events if event.type == "model.request.started"]
+    assert "prompt_snapshot" in started[0].data
+    assert "runtime_context" in started[0].data["prompt_snapshot"]
+    assert "repair_prompt" in started[1].data["prompt_snapshot"]
 
 
 def test_repeated_empty_control_after_execution_is_safely_normalized() -> None:
@@ -470,6 +523,10 @@ def test_planner_records_usage_and_safe_reasoning_summary() -> None:
     assert started.data["capability_context_characters"] > 0
     assert started.data["selected_device_ids"] == ["light-001"]
     assert "light-001" in started.data["all_device_ids"]
+    assert started.data["prompt_snapshot"]["user_prompt"] == "打开客厅灯"
+    assert started.data["prompt_snapshot"]["capabilities"][0]["device_id"] == "light-001"
+    assert completed.data["raw_plan"]["intent"] == "control"
+    assert completed.data["raw_plan"]["steps"][0]["device_id"] == "light-001"
     summary = next(event for event in events if event.type == "model.reasoning.summary")
     assert summary.data == {"summary": "打开客厅灯", "intent": "control", "step_count": 1}
     assert all("reasoning_content" not in event.data for event in events)
