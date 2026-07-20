@@ -311,6 +311,7 @@ class ConversationStore:
                    WHERE conversation_id = ? AND run_id != ?
                      AND status IN (
                          'completed', 'partial_success', 'succeeded',
+                         'needs_more_information',
                          'responded', 'denied'
                      )
                      AND assistant_message != ''
@@ -386,7 +387,13 @@ class ConversationStore:
         plan = result.get("plan")
         if not isinstance(plan, dict) or plan.get("intent") not in {"control", "query"}:
             return None
-        if status not in {"denied", "failed", "partial_success", "waiting_confirmation"}:
+        if status not in {
+            "denied",
+            "failed",
+            "partial_success",
+            "waiting_confirmation",
+            "needs_more_information",
+        }:
             return None
         return {
             "source_run_id": run_id,

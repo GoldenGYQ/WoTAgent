@@ -16,6 +16,7 @@ RunStatus = Literal[
     "accepted",
     "running",
     "waiting_confirmation",
+    "needs_more_information",
     "completed",
     "partial_success",
     "failed",
@@ -261,6 +262,7 @@ class RunRecord(BaseModel):
     success_criteria: list[str] = Field(default_factory=list)
     task_ids: list[str] = Field(default_factory=list)
     final_response: str = ""
+    error: str | None = None
     usage: UsageSummary = Field(default_factory=UsageSummary)
     supervisor_iterations: int = Field(default=0, ge=0)
     agent_loops: int = Field(default=0, ge=0)

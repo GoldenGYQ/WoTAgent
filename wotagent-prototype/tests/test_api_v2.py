@@ -13,6 +13,7 @@ from wotagent.conversation import ConversationStore
 from wotagent.orchestration import (
     InMemoryRunStore,
     RunCoordinator,
+    RunRecord,
     SupervisorDecision,
     TaskScheduler,
 )
@@ -92,6 +93,7 @@ def test_run_api_exposes_task_and_agent_run_hierarchy(run_client) -> None:
         "message": "查询客厅灯",
         "conversation_id": "conv-api-test",
         "role": "viewer",
+        "phone_mode": True,
     })
 
     assert response.status_code == 202
@@ -99,6 +101,8 @@ def test_run_api_exposes_task_and_agent_run_hierarchy(run_client) -> None:
     assert created["run_id"].startswith("run_")
     assert created["conversation_id"] == "conv-api-test"
     assert created["turn_id"].startswith("turn_")
+    assert created["source_context"]["interaction_mode"]["channel"] == "phone"
+    assert created["source_context"]["response_style"]["spoken"] is True
 
     run_id = created["run_id"]
     run = client.get(f"/api/v2/runs/{run_id}")
@@ -174,6 +178,36 @@ def test_thinking_request_is_rejected_when_model_does_not_support_it(
 
     assert response.status_code == 409
     assert "not available" in response.json()["detail"]
+
+
+def test_run_api_persists_error_on_failed_run(monkeypatch, tmp_path) -> None:
+    store = InMemoryRunStore()
+    conversations = ConversationStore(tmp_path / "failed-run.db")
+
+    class FailingCoordinator:
+        async def execute(self, **_kwargs):
+            raise TimeoutError("supervisor model request timed out after 1.0s")
+
+    service = RunService(
+        conversations,
+        store,
+        lambda _context: FailingCoordinator(),
+        thinking_supported=lambda: True,
+    )
+    monkeypatch.setattr(app_module, "_run_store", store)
+    monkeypatch.setattr(app_module, "_run_service", service)
+
+    client = TestClient(app_module.app)
+    created = client.post("/api/v2/runs", json={
+        "message": "把张爷爷房间温度调到 24 度，并确认是否生效",
+    }).json()
+
+    run = client.get(f"/api/v2/runs/{created['run_id']}")
+    assert run.status_code == 200
+    payload = run.json()
+    assert payload["status"] == "failed"
+    assert payload["error"] == "supervisor model request timed out after 1.0s"
+    assert payload["final_response"] == "supervisor model request timed out after 1.0s"
 
 
 def test_capabilities_report_run_task_scheduler() -> None:

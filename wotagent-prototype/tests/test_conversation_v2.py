@@ -131,6 +131,41 @@ def test_conversation_store_keeps_pending_goal_and_current_role_as_structured_fa
     )["pending_goal"] is None
 
 
+def test_needs_more_information_turn_is_retained_for_follow_up_context(tmp_path) -> None:
+    store = ConversationStore(tmp_path / "clarify-context.db", history_turns=2)
+    conversation_id = store.create(role="operator")["conversation_id"]
+    plan = TaskPlan(intent="control", summary="调整空调温度", steps=[PlanStep(
+        id="temp-1",
+        kind="action",
+        device_id="ac-002",
+        action="setTemperature",
+    )]).model_dump(mode="json")
+
+    store.start_turn(
+        conversation_id=conversation_id,
+        run_id="run-clarify",
+        user_message="把张爷爷房间温度调到 24 度",
+        role="operator",
+    )
+    store.finish_turn(
+        "run-clarify",
+        response="请问张爷爷住在哪个房间？是 A-101 还是 A-102？",
+        status="needs_more_information",
+        result={
+            "status": "needs_more_information",
+            "plan": plan,
+        },
+    )
+
+    assert store.context(conversation_id, exclude_run_id="run-next") == [
+        {"role": "user", "content": "把张爷爷房间温度调到 24 度"},
+        {"role": "assistant", "content": "请问张爷爷住在哪个房间？是 A-101 还是 A-102？"},
+    ]
+    runtime = store.runtime_context(conversation_id, current_role="operator")
+    assert runtime["pending_goal"]["status"] == "needs_more_information"
+    assert runtime["pending_goal"]["user_message"] == "把张爷爷房间温度调到 24 度"
+
+
 def test_v2_reuses_conversation_context_but_isolates_runs(monkeypatch, tmp_path) -> None:
     conversation_store = ConversationStore(tmp_path / "api-conversations.db")
     run_store = InMemoryRunStore()

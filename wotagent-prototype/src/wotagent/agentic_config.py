@@ -26,7 +26,7 @@ class AgenticSettings:
     butler_max_iterations: int = 4
     max_tool_calls: int = 16
     total_timeout_seconds: float = 30.0
-    llm_timeout_seconds: float = 12.0
+    llm_timeout_seconds: float = 20.0
     max_compensations: int = 1
     supervisor_max_routes: int = 2
 
@@ -45,7 +45,7 @@ class AgenticSettings:
             butler_max_iterations=max(1, min(int(os.getenv("BUTLER_MAX_ITERATIONS", "4")), 8)),
             max_tool_calls=max(1, min(int(os.getenv("AGENT_MAX_TOOL_CALLS", "16")), 32)),
             total_timeout_seconds=max(1.0, float(os.getenv("AGENT_TOTAL_TIMEOUT_SECONDS", "30"))),
-            llm_timeout_seconds=max(1.0, float(os.getenv("AGENT_LLM_TIMEOUT_SECONDS", "12"))),
+            llm_timeout_seconds=max(1.0, float(os.getenv("AGENT_LLM_TIMEOUT_SECONDS", "20"))),
             max_compensations=max(0, min(int(os.getenv("AGENT_MAX_COMPENSATIONS", "1")), 2)),
             supervisor_max_routes=max(
                 1, min(int(os.getenv("SUPERVISOR_MAX_ROUTES", "2")), 4)

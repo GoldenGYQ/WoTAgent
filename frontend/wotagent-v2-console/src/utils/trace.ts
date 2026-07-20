@@ -53,6 +53,7 @@ export function eventTitle(event: TraceEvent): string {
   const runLabels: Record<string, string> = {
     'run.started': 'Run 开始',
     'run.completed': 'Run 完成',
+    'run.needs_more_information': 'Run 待补充信息',
     'run.partial_success': 'Run 部分完成',
     'run.failed': 'Run 失败',
     'supervisor.decision.completed': 'Supervisor 决策',

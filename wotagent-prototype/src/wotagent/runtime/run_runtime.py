@@ -21,6 +21,10 @@ from ..agents import (
 )
 from ..auth import DEMO_RESIDENT_ASSIGNMENTS, RelationshipAuthorizationService
 from ..domains.eldercare.entity_resolution import ResidentEntityResolver
+from ..domains.eldercare.health_freshness import (
+    apply_completed_health_freshness_guard,
+    has_actionable_health_alert_language,
+)
 from ..orchestration import (
     AgentTask,
     PendingConfirmation,
@@ -41,9 +45,29 @@ from ..telemetry import TraceEvent, extract_usage_with_cost
 
 SUPERVISOR_HISTORY_MESSAGES = 6
 SUPERVISOR_HISTORY_CHARACTERS = 400
+SUPERVISOR_CONTEXT_SOFT_CHARACTERS = 24000
 SUPERVISOR_FINDINGS = 6
 SUPERVISOR_EVIDENCE_PER_FINDING = 2
 SUPERVISOR_TOOL_CALLS_PER_FINDING = 3
+CONDITIONAL_TASK_MARKERS = (
+    "如果",
+    "若",
+    "异常则",
+    "否则",
+    "仅当",
+    "only if",
+    "if ",
+    "unless",
+    "otherwise",
+    "do nothing",
+)
+ROOM_ANSWER_MARKERS = ("A-101", "A-102", "A101", "A102")
+ROOM_CLARIFICATION_MARKERS = (
+    "住在哪个房间",
+    "住在 A-101 还是 A-102",
+    "是 A-101 还是 A-102",
+    "哪个房间",
+)
 
 
 class HealthFindingRepairError(ValueError):
@@ -87,9 +111,16 @@ def _supervisor_decider(
     async def decide(state: dict[str, Any]) -> SupervisorDecision:
         run_id = str(state["run"]["run_id"])
         iteration = int(state["supervisor_iteration"])
+        normalized_request = _normalize_supervisor_user_request(
+            state["message"],
+            base_context,
+        )
+        conversation_context, context_compacted, context_characters = (
+            _supervisor_prompt_context(base_context)
+        )
         payload = {
-            "user_request": state["message"],
-            "conversation_context": _compact_supervisor_context(base_context),
+            "user_request": normalized_request,
+            "conversation_context": conversation_context,
             "completed_findings": _compact_findings(state["findings"]),
             "decision_iteration": state["supervisor_iteration"],
         }
@@ -101,6 +132,10 @@ def _supervisor_decider(
             data={
                 "purpose": "supervisor_decision",
                 "input": payload,
+                "raw_user_request": state["message"],
+                "context_compacted": context_compacted,
+                "context_characters": context_characters,
+                "context_soft_limit": SUPERVISOR_CONTEXT_SOFT_CHARACTERS,
             },
         )
         started = time.perf_counter()
@@ -127,11 +162,19 @@ def _supervisor_decider(
                 data={
                     "purpose": "supervisor_decision",
                     "error": str(exc),
+                    "error_type": type(exc).__name__,
+                    "error_repr": repr(exc),
+                    "timeout_seconds": runtime.settings.llm_timeout_seconds,
                     "duration_ms": (
                         time.perf_counter() - started
                     ) * 1000,
                 },
             )
+            if isinstance(exc, TimeoutError):
+                raise TimeoutError(
+                    "supervisor model request timed out after "
+                    f"{runtime.settings.llm_timeout_seconds:.1f}s"
+                ) from exc
             raise
         messages = result.get("messages", [])
         usage = (
@@ -153,19 +196,56 @@ def _supervisor_decider(
                 **usage,
             },
         )
-        return SupervisorDecision.model_validate(
+        decision = SupervisorDecision.model_validate(
             result.get("structured_response")
         )
+        return _apply_supervisor_runtime_guards(decision)
 
     return decide
 
 
+def _normalize_supervisor_user_request(
+    message: str,
+    base_context: dict[str, Any],
+) -> str:
+    room = _extract_room_answer(message)
+    if room is None:
+        return message
+    history = base_context.get("history", [])
+    if len(history) < 2:
+        return message
+    previous_assistant = history[-1]
+    previous_user = history[-2]
+    if (
+        previous_assistant.get("role") != "assistant"
+        or previous_user.get("role") != "user"
+    ):
+        return message
+    assistant_text = str(previous_assistant.get("content", ""))
+    if not any(marker in assistant_text for marker in ROOM_CLARIFICATION_MARKERS):
+        return message
+    original_goal = str(previous_user.get("content", "")).strip()
+    if not original_goal:
+        return message
+    return f"{original_goal}\n补充信息：目标房间是 {room}。"
+
+
+def _extract_room_answer(message: str) -> str | None:
+    compact = "".join(str(message).upper().split())
+    for marker in ROOM_ANSWER_MARKERS:
+        candidate = marker.upper().replace("-", "")
+        if compact in {candidate, f"{candidate}啊！", f"{candidate}啊", f"{candidate}呀"}:
+            return marker if "-" in marker else marker[0] + "-" + marker[1:]
+    if "A-101" in message or "A101" in compact:
+        return "A-101"
+    if "A-102" in message or "A102" in compact:
+        return "A-102"
+    return None
+
+
 def _compact_supervisor_context(context: dict[str, Any]) -> dict[str, Any]:
     return {
-        "principal": {
-            "user_id": context.get("user_id", "local-user"),
-            "role": context.get("role", "operator"),
-        },
+        "principal": _supervisor_principal_context(context),
         "source": _bounded_value(context.get("source", {})),
         "deployment": _deployment_prompt_context(context),
         "history": compact_history(
@@ -175,6 +255,85 @@ def _compact_supervisor_context(context: dict[str, Any]) -> dict[str, Any]:
         ),
         "runtime": _bounded_value(context.get("runtime", {})),
     }
+
+
+def _supervisor_prompt_context(
+    context: dict[str, Any],
+) -> tuple[dict[str, Any], bool, int]:
+    full_context = _full_supervisor_context(context)
+    serialized_characters = _approx_serialized_characters(full_context)
+    if serialized_characters <= SUPERVISOR_CONTEXT_SOFT_CHARACTERS:
+        return full_context, False, serialized_characters
+    return (
+        _compact_supervisor_context(context),
+        True,
+        serialized_characters,
+    )
+
+
+def _full_supervisor_context(context: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "principal": _supervisor_principal_context(context),
+        "source": _json_safe_value(context.get("source", {})),
+        "deployment": _json_safe_value(context.get("deployment", {})),
+        "history": _json_safe_value(context.get("history", [])),
+        "runtime": _json_safe_value(context.get("runtime", {})),
+    }
+
+
+def _supervisor_principal_context(context: dict[str, Any]) -> dict[str, Any]:
+    principal = context.get("principal")
+    if isinstance(principal, dict) and principal:
+        payload = _json_safe_value(principal)
+        return payload if isinstance(payload, dict) else {}
+    return {
+        "principal_id": context.get("user_id", "local-user"),
+        "roles": [context.get("role", "operator")],
+    }
+
+
+def _apply_supervisor_runtime_guards(
+    decision: SupervisorDecision,
+) -> SupervisorDecision:
+    if decision.action != "create_tasks" or len(decision.tasks) <= 1:
+        return decision
+    tasks_by_local_id = {item.local_id: item for item in decision.tasks}
+    filtered = [
+        item
+        for item in decision.tasks
+        if not _should_defer_first_round_care_task(item, tasks_by_local_id)
+    ]
+    if not filtered or len(filtered) == len(decision.tasks):
+        return decision
+    return decision.model_copy(update={"tasks": filtered})
+
+
+def _should_defer_first_round_care_task(
+    task: Any,
+    tasks_by_local_id: dict[str, Any],
+) -> bool:
+    if task.agent_id != "care_agent" or not task.depends_on:
+        return False
+    upstream_agents = {
+        tasks_by_local_id[item].agent_id
+        for item in task.depends_on
+        if item in tasks_by_local_id
+    }
+    if "health_agent" not in upstream_agents:
+        return False
+    return _contains_conditional_language(" ".join([
+        task.objective,
+        task.reason,
+        *task.success_criteria,
+    ]))
+
+
+def _contains_conditional_language(text: str) -> bool:
+    lowered = text.lower()
+    return any(
+        marker in text or marker in lowered
+        for marker in CONDITIONAL_TASK_MARKERS
+    )
 
 
 def _compact_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -233,6 +392,22 @@ def _compact_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _bounded_text(value: Any, limit: int) -> str:
     return str(value or "")[:limit]
+
+
+def _json_safe_value(value: Any) -> Any:
+    try:
+        return json.loads(
+            json.dumps(value, ensure_ascii=False, default=str)
+        )
+    except (TypeError, ValueError):
+        return _bounded_value(value)
+
+
+def _approx_serialized_characters(value: Any) -> int:
+    try:
+        return len(json.dumps(value, ensure_ascii=False, default=str))
+    except (TypeError, ValueError):
+        return len(str(value))
 
 
 def _deployment_prompt_context(context: dict[str, Any]) -> dict[str, Any]:
@@ -362,7 +537,10 @@ def _health_executor(
             )
         structured = result.get("structured_response")
         if structured is not None:
-            return AgentFindingPayload.model_validate(structured)
+            return apply_completed_health_freshness_guard(
+                AgentFindingPayload.model_validate(structured),
+                objective=task.objective,
+            )
         transcript_finding = _finding_from_health_messages(
             result.get("messages", []),
             objective=task.objective,
@@ -403,7 +581,12 @@ def _health_executor(
                 timeout=runtime.settings.llm_timeout_seconds,
             )
             return AgentFindingPayload.model_validate(
-                _structured_tool_arguments(repaired)
+                apply_completed_health_freshness_guard(
+                    AgentFindingPayload.model_validate(
+                        _structured_tool_arguments(repaired)
+                    ),
+                    objective=task.objective,
+                )
             )
         except Exception as exc:
             raise HealthFindingRepairError(str(exc)) from exc
@@ -461,7 +644,7 @@ def _finding_from_health_messages(
         for item in successful
     ]
     complete = bool(successful) and len(successful) == len(tool_calls)
-    return AgentFindingPayload(
+    payload = AgentFindingPayload(
         status="completed" if complete else "needs_more_information",
         finding=(
             final_summary
@@ -475,6 +658,10 @@ def _finding_from_health_messages(
         evidence=evidence,
         unresolved_questions=[] if complete else [objective],
         tool_calls=tool_calls,
+    )
+    return apply_completed_health_freshness_guard(
+        payload,
+        objective=objective,
     )
 
 
@@ -561,6 +748,22 @@ def _task_preparer(runtime: Any) -> Callable[[AgentTask, str, dict[str, Any]], A
                 retryable=False,
             ))
         if task.agent_id not in {"health_agent", "care_agent"}:
+            if (
+                deployment.get("domain_id") == "eldercare"
+                and task.target_mention
+            ):
+                try:
+                    task.target_type = "resident"
+                    task.target = resolver.resolve(
+                        target_type="resident",
+                        mention=task.target_mention,
+                        text=f"{message}\n{task.objective}",
+                    )
+                except EntityResolutionError:
+                    # Environment/security style tasks can still run with
+                    # principal-scoped devices even when resident mention
+                    # resolution is unavailable.
+                    pass
             if (
                 task.principal is None
                 or not task.principal.granted_capabilities
@@ -753,6 +956,9 @@ def _care_executor(
     store: RunStore | None = None,
 ) -> Callable[[AgentTask], Any]:
     async def execute(task: AgentTask) -> AgentFinding:
+        conditional_noop = _conditional_care_noop(task)
+        if conditional_noop is not None:
+            return conditional_noop
         await _ensure_legacy_trace(runtime, task)
         unsubscribe = _subscribe_trace_projection(
             runtime,
@@ -779,6 +985,38 @@ def _care_executor(
     return execute
 
 
+def _conditional_care_noop(task: AgentTask) -> AgentFinding | None:
+    if task.agent_id != "care_agent" or not task.dependency_findings:
+        return None
+    if not _contains_conditional_language(" ".join([
+        task.objective,
+        task.reason,
+        *task.success_criteria,
+    ])):
+        return None
+    health_findings = [
+        item for item in task.dependency_findings
+        if item.agent_id == "health_agent"
+    ]
+    if not health_findings:
+        return None
+    latest = health_findings[-1]
+    if latest.status != "completed":
+        return None
+    if (
+        latest.recommended_actions
+        or has_actionable_health_alert_language(latest.finding)
+    ):
+        return None
+    return AgentFinding(
+        agent=task.agent_id,
+        objective=task.objective,
+        status="completed",
+        finding="上游健康调查未发现需要通知的异常，本次 Care Task 已安全跳过。",
+        confidence=1,
+        unresolved_questions=[],
+        task_id=task.task_id,
+    )
 def _device_executor(
     runtime: Any,
     graph: Any,
@@ -794,6 +1032,32 @@ def _device_executor(
         )
         deployment = context.get("deployment", {})
         device_ids = _execution_device_scope(task, deployment)
+        resident_context = _resident_runtime_context(runtime, task)
+        if store is not None:
+            await store.record_event(
+                task.run_id,
+                "task.execution.context",
+                node=task.agent_id,
+                task_id=task.task_id,
+                data={
+                    "target": (
+                        task.target.model_dump(mode="json")
+                        if task.target else None
+                    ),
+                    "target_type": task.target_type,
+                    "target_mention": task.target_mention,
+                    "effective_scope": (
+                        task.effective_scope.model_dump(mode="json")
+                        if task.effective_scope else None
+                    ),
+                    "execution_device_ids": device_ids,
+                    "delegated_runtime_context": {
+                        **context.get("runtime", {}),
+                        "deployment": _deployment_prompt_context(context),
+                        "resident_context": resident_context,
+                    },
+                },
+            )
         try:
             with deployment_device_scope(
                 device_ids
@@ -813,6 +1077,11 @@ def _device_executor(
                         "runtime": {
                             **context.get("runtime", {}),
                             "deployment": _deployment_prompt_context(context),
+                            "resident_context": resident_context,
+                            "resolved_target": (
+                                task.target.model_dump(mode="json")
+                                if task.target else None
+                            ),
                         },
                         "delegated_agent": task.agent_id,
                         "original_message": task.objective,
@@ -882,6 +1151,26 @@ def _execution_device_scope(
         if scoped:
             return scoped
     return deployment.get("device_ids")
+
+
+def _resident_runtime_context(
+    runtime: Any,
+    task: AgentTask,
+) -> dict[str, Any] | None:
+    if task.target is None or task.target.type != "resident":
+        return None
+    resident = runtime.eldercare_store.get_resident(task.target.id)
+    if resident is None:
+        return None
+    return {
+        "resident_id": resident.resident_id,
+        "name": resident.name,
+        "room": resident.room,
+        "environment_device_id": resident.environment_device_id,
+        "environment_sensor_device_id": resident.environment_sensor_device_id,
+        "wristband_device_id": resident.wristband_device_id,
+        "mattress_device_id": resident.mattress_device_id,
+    }
 
 
 def _subscribe_trace_projection(

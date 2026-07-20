@@ -100,7 +100,7 @@ function createRuntimeRun(record: RunRecord, roleValue: AgentRole, thinkingValue
     durationMs: record.duration_ms,
     createdAt: record.created_at,
     updatedAt: record.updated_at,
-    error: '',
+    error: record.error ?? '',
     streamState: 'idle',
   }
 }
@@ -120,6 +120,7 @@ function applyRecord(run: RuntimeRun, record: RunRecord): void {
   run.recoveryCount = record.recoveries
   run.durationMs = record.duration_ms
   run.updatedAt = record.updated_at
+  run.error = record.error ?? run.error
 }
 
 function syncTurn(run: RuntimeRun): void {
@@ -345,7 +346,10 @@ async function ensureConversation(): Promise<RuntimeConversation> {
   return conversation
 }
 
-async function submit(message: string): Promise<RuntimeRun> {
+async function submit(
+  message: string,
+  options?: { phoneMode?: boolean },
+): Promise<RuntimeRun> {
   const conversation = await ensureConversation()
   const record = await agentV2Api.createRun(
     message,
@@ -354,6 +358,7 @@ async function submit(message: string): Promise<RuntimeRun> {
     thinking.value && thinkingSupported.value,
     userId.value,
     activeProfileId.value || undefined,
+    options,
   )
   const run = createRuntimeRun(record, role.value, thinking.value && thinkingSupported.value)
   runs.unshift(run)

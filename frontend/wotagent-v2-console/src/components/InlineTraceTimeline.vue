@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import {
   Bot,
   CheckCircle2,
@@ -52,7 +52,9 @@ const ACTIVE_RUN_STATUSES = new Set([
   'running',
   'waiting_confirmation',
 ])
+const TRACE_REVEAL_INTERVAL_MS = 44
 const TERMINAL_RUN_STATUSES = new Set([
+  'needs_more_information',
   'completed',
   'partial_success',
   'failed',
@@ -62,14 +64,22 @@ const TERMINAL_RUN_STATUSES = new Set([
 const expandedEvents = ref(new Set<number>())
 const expandedGroups = ref(new Set<string>())
 const expandedTimeline = ref(ACTIVE_RUN_STATUSES.has(props.run.status))
+const visibleEventIds = ref(new Set<string>())
+const traceEndRef = ref<HTMLElement | null>(null)
+
+let revealTimer: ReturnType<typeof window.setTimeout> | null = null
+let scrollFrame = 0
 
 const orderedEvents = computed(() => (
   [...props.run.events].sort((a, b) => a.sequence - b.sequence)
 ))
+const visibleEvents = computed(() => (
+  orderedEvents.value.filter((event) => visibleEventIds.value.has(event.event_id))
+))
 const isLive = computed(() => ['accepted', 'received', 'running'].includes(props.run.status))
 const traceGroups = computed<TraceGroup[]>(() => {
   const groups: TraceGroup[] = []
-  const runEvents = orderedEvents.value.filter((event) => !event.task_id)
+  const runEvents = visibleEvents.value.filter((event) => !event.task_id)
   if (runEvents.length) {
     groups.push({
       id: 'run',
@@ -82,7 +92,8 @@ const traceGroups = computed<TraceGroup[]>(() => {
     })
   }
   for (const task of props.run.tasks) {
-    const taskEvents = orderedEvents.value.filter((event) => event.task_id === task.task_id)
+    const taskEvents = visibleEvents.value.filter((event) => event.task_id === task.task_id)
+    if (!taskEvents.length) continue
     groups.push({
       id: task.task_id,
       label: task.agent_id,
@@ -106,7 +117,8 @@ const traceGroups = computed<TraceGroup[]>(() => {
     ),
   ]
   for (const taskId of orphanTaskIds) {
-    const taskEvents = orderedEvents.value.filter((event) => event.task_id === taskId)
+    const taskEvents = visibleEvents.value.filter((event) => event.task_id === taskId)
+    if (!taskEvents.length) continue
     groups.push({
       id: taskId,
       label: '专业 Agent',
@@ -119,6 +131,14 @@ const traceGroups = computed<TraceGroup[]>(() => {
   }
   return groups
 })
+
+watch(
+  orderedEvents,
+  (events) => {
+    syncVisibleEvents(events)
+  },
+  { immediate: true },
+)
 
 watch(
   () => props.run.status,
@@ -147,6 +167,20 @@ watch(
   { immediate: true },
 )
 
+watch(
+  () => visibleEvents.value.at(-1)?.event_id,
+  () => {
+    scrollToLatestTrace()
+  },
+)
+
+watch(
+  () => expandedTimeline.value,
+  (expanded) => {
+    if (expanded) scrollToLatestTrace(false)
+  },
+)
+
 function toggleEvent(event: TraceEvent): void {
   const next = new Set(expandedEvents.value)
   next.has(event.sequence) ? next.delete(event.sequence) : next.add(event.sequence)
@@ -157,6 +191,7 @@ function toggleGroup(groupId: string): void {
   const next = new Set(expandedGroups.value)
   next.has(groupId) ? next.delete(groupId) : next.add(groupId)
   expandedGroups.value = next
+  if (next.has(groupId)) scrollToLatestTrace(false)
 }
 
 function iconFor(event: TraceEvent) {
@@ -195,6 +230,7 @@ function statusLabel(status: string): string {
     ready: '就绪',
     running: '执行中',
     waiting_confirmation: '待确认',
+    needs_more_information: '待补充信息',
     completed: '已完成',
     partial_success: '部分完成',
     failed: '失败',
@@ -297,6 +333,63 @@ function hasValue(value: unknown): boolean {
 function pretty(value: unknown): string {
   return typeof value === 'string' ? value : JSON.stringify(value, null, 2)
 }
+
+function syncVisibleEvents(events: TraceEvent[]): void {
+  const nextIds = new Set(events.map((event) => event.event_id))
+  const retained = new Set(
+    [...visibleEventIds.value].filter((eventId) => nextIds.has(eventId)),
+  )
+  visibleEventIds.value = retained
+  clearRevealTimer()
+  const queue = events.filter((event) => !retained.has(event.event_id))
+  if (!queue.length) return
+
+  const revealNext = () => {
+    const next = queue.shift()
+    if (!next) {
+      revealTimer = null
+      return
+    }
+    const visible = new Set(visibleEventIds.value)
+    visible.add(next.event_id)
+    visibleEventIds.value = visible
+    if (!queue.length) {
+      revealTimer = null
+      return
+    }
+    revealTimer = window.setTimeout(revealNext, TRACE_REVEAL_INTERVAL_MS)
+  }
+
+  revealNext()
+}
+
+function clearRevealTimer(): void {
+  if (revealTimer !== null) {
+    window.clearTimeout(revealTimer)
+    revealTimer = null
+  }
+}
+
+function scrollToLatestTrace(smooth = true): void {
+  if (!expandedTimeline.value || (!props.selected && !isLive.value)) return
+  if (!visibleEvents.value.length) return
+  void nextTick(() => {
+    if (scrollFrame) window.cancelAnimationFrame(scrollFrame)
+    scrollFrame = window.requestAnimationFrame(() => {
+      traceEndRef.value?.scrollIntoView({
+        behavior: smooth ? 'smooth' : 'auto',
+        block: 'end',
+        inline: 'nearest',
+      })
+      scrollFrame = 0
+    })
+  })
+}
+
+onBeforeUnmount(() => {
+  clearRevealTimer()
+  if (scrollFrame) window.cancelAnimationFrame(scrollFrame)
+})
 </script>
 
 <template>
@@ -339,7 +432,7 @@ function pretty(value: unknown): string {
               <span class="trace-group-status">
                 <LoaderCircle v-if="groupIsLive(group)" :size="15" class="trace-running-icon" />
                 <CheckCircle2 v-else-if="group.status === 'completed'" :size="15" />
-                <TriangleAlert v-else-if="['failed', 'blocked'].includes(group.status)" :size="15" />
+                <TriangleAlert v-else-if="['failed', 'blocked', 'needs_more_information'].includes(group.status)" :size="15" />
                 <Route v-else :size="15" />
               </span>
               <span class="trace-group-copy">
@@ -434,6 +527,7 @@ function pretty(value: unknown): string {
           <span class="runtime-spinner" />
           <span>等待第一个运行事件</span>
         </div>
+        <div ref="traceEndRef" class="trace-scroll-anchor" aria-hidden="true" />
       </div>
     </Transition>
   </section>

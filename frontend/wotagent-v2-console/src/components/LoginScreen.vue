@@ -31,9 +31,10 @@ const emit = defineEmits<{
   register: [payload: PrincipalRegistration]
 }>()
 
-const mode = ref<'accounts' | 'pin' | 'register'>('accounts')
+const mode = ref<'accounts' | 'pin' | 'password' | 'register'>('accounts')
 const selectedAccount = ref<LoginAccount | null>(null)
 const loginPin = ref('')
+const loginPassword = ref('')
 const displayName = ref('')
 const registerPin = ref('')
 const templateId = ref('')
@@ -59,12 +60,23 @@ function chooseAccount(account: LoginAccount): void {
     mode.value = 'pin'
     return
   }
+  if (account.loginMode === 'password') {
+    selectedAccount.value = account
+    loginPassword.value = ''
+    mode.value = 'password'
+    return
+  }
   emit('login', account)
 }
 
 function submitPin(): void {
   if (!selectedAccount.value || !/^\d{4,12}$/.test(loginPin.value)) return
   emit('login', selectedAccount.value, loginPin.value)
+}
+
+function submitPassword(): void {
+  if (!selectedAccount.value || loginPassword.value.length < 8) return
+  emit('login', selectedAccount.value, loginPassword.value)
 }
 
 function startRegistration(): void {
@@ -97,6 +109,7 @@ function back(): void {
   mode.value = 'accounts'
   selectedAccount.value = null
   loginPin.value = ''
+  loginPassword.value = ''
 }
 
 const capabilityLabels: Record<string, string> = {
@@ -139,7 +152,7 @@ const capabilityLabels: Record<string, string> = {
         <div class="section-heading">
           <div>
             <strong>选择账号</strong>
-            <small>默认账号可一键进入，注册账号使用 PIN</small>
+            <small>支持演示账号一键进入，以及账号密码 / PIN 登录</small>
           </div>
           <button class="register-entry" type="button" @click="startRegistration">
             <UserPlus :size="15" />注册新主体
@@ -162,10 +175,12 @@ const capabilityLabels: Record<string, string> = {
               <span class="account-title">
                 <strong>{{ account.accountId }}</strong>
                 <i v-if="account.loginMode === 'pin'">PIN</i>
+                <i v-else-if="account.loginMode === 'password'">账号密码</i>
                 <i v-else>演示</i>
               </span>
               <small>{{ account.displayName }}</small>
               <em>{{ account.roleLabels.join(' / ') }} · {{ account.role }}</em>
+              <span v-if="account.loginName">账号：{{ account.loginName }}</span>
               <span>{{ account.relationships[0]?.target_label ?? sceneTitle }}</span>
             </span>
             <LogIn :size="17" />
@@ -194,6 +209,34 @@ const capabilityLabels: Record<string, string> = {
           >
         </label>
         <button class="primary-action" type="submit" :disabled="busy || !/^\d{4,12}$/.test(loginPin)">
+          <LogIn :size="16" />{{ busy ? '正在验证' : '进入当前场景' }}
+        </button>
+      </form>
+
+      <form v-else-if="mode === 'password'" class="auth-form" @submit.prevent="submitPassword">
+        <div class="form-intro">
+          <span class="account-icon"><LockKeyhole :size="21" /></span>
+          <div>
+            <strong>{{ selectedAccount?.displayName }}</strong>
+            <small>
+              {{ selectedAccount?.loginName || selectedAccount?.accountId }}
+              · {{ selectedAccount?.roleLabels.join(' / ') }}
+            </small>
+          </div>
+        </div>
+        <label>
+          <span>登录密码</span>
+          <input
+            v-model="loginPassword"
+            type="password"
+            minlength="8"
+            maxlength="64"
+            autocomplete="current-password"
+            placeholder="输入账号密码"
+            autofocus
+          >
+        </label>
+        <button class="primary-action" type="submit" :disabled="busy || loginPassword.length < 8">
           <LogIn :size="16" />{{ busy ? '正在验证' : '进入当前场景' }}
         </button>
       </form>

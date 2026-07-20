@@ -1,8 +1,9 @@
 export type AgentRole = 'viewer' | 'operator' | 'admin'
-export type LoginMode = 'one_click' | 'pin' | 'disabled'
+export type LoginMode = 'one_click' | 'pin' | 'password' | 'disabled'
 
 export interface LoginAccount {
   accountId: string
+  loginName?: string
   displayName: string
   role: AgentRole
   domainRoles: string[]
@@ -25,6 +26,7 @@ export interface PrincipalContext {
   principal_id: string
   principal_type: 'human' | 'service'
   display_name: string
+  login_name?: string | null
   domain_id: string
   roles: AgentRole[]
   domain_roles: string[]
@@ -67,6 +69,30 @@ export interface PrincipalRegistration {
   domain_id: string
   role_template_id: string
   target_id: string
+}
+
+export interface ManagedUserRecord {
+  principal_id: string
+  display_name: string
+  login_name?: string | null
+  domain_id: string
+  roles: AgentRole[]
+  domain_roles: string[]
+  role_labels: string[]
+  granted_capabilities: string[]
+  resource_ids: string[]
+  relationships: PrincipalRelationship[]
+  login_mode: LoginMode
+  login_enabled: boolean
+}
+
+export interface ManagedUserCreatePayload {
+  display_name: string
+  login_name: string
+  password: string
+  domain_id: string
+  platform_role: 'admin' | 'viewer'
+  target_id?: string
 }
 
 export interface UsageSummary {
@@ -122,6 +148,7 @@ export interface RunRecord {
   success_criteria: string[]
   task_ids: string[]
   final_response: string
+  error: string | null
   usage: UsageSummary
   supervisor_iterations: number
   agent_loops: number

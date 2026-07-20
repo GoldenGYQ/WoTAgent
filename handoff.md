@@ -1,6 +1,6 @@
 # WoTAgent 2.0 Project Handoff
 
-Last updated: 2026-07-19
+Last updated: 2026-07-20
 Current branch: `codex/run-task-dag`
 Current release baseline: `v2.8.0`
 Current implementation target: `v3.0.0` scene-scoped P1
@@ -37,6 +37,25 @@ successor to `99afb3d feat: harden agent context and real model health flow`
 > runs `run_26882ea68f92` and `run_c39a0fcf6a75` completed successfully; the
 > first verified `light-001` as on at 45%, and the second confirmed no
 > cross-Run model-call-limit failure.
+
+> 2026-07-20 orchestration clarification: a real eldercare health-check Run
+> returned the correct final business answer but exposed two design bugs. The
+> Supervisor created `health_agent` and `care_agent` in the same first-round
+> plan, using `depends_on` only as an execution-order constraint. Because the
+> runtime has no conditional Task skip semantics, the Scheduler still launched
+> `care_agent` after Health completed, even though the Health Finding showed no
+> alert condition. The legacy Care adapter could not interpret the natural
+> language conditional objective and returned `needs_more_information`, causing
+> the fixed Task-status aggregator to mark the Run `partial_success` before the
+> second Supervisor round correctly answered that no notification was needed.
+> The more serious evidence issue is that the latest health data was already
+> many hours stale; the system should only have said the most recent reading was
+> normal but current status could not be fully confirmed. Corrective direction:
+> force Supervisor to use "investigate first, delegate conditionally in the next
+> round" for cross-Agent conditional actions, add explicit conditional/skip Task
+> semantics if such planning is ever allowed, and require Health to surface
+> stale critical data as `needs_more_information` or a data-quality abnormality
+> instead of high-confidence `completed`.
 
 ## 2026-07-19 Scene-Scoped P1 Update
 
@@ -384,8 +403,8 @@ LLM timeout: 12 seconds
 | Agent | Current implementation | LLM-driven | Current status |
 |---|---|---:|---|
 | Butler Supervisor | LangChain `create_agent`, structured `SupervisorDecision` | Yes | Active, but outer loop is Python |
-| `health_agent` | `create_agent` with scoped health resource tools | Yes | Active but real production flow currently broken |
-| `care_agent` | Adapter to legacy `EldercareChatAgent` | Partly | Not yet a uniform create_agent specialist |
+| `health_agent` | `create_agent` with scoped health resource tools | Yes | Active, but stale-data handling and confidence gating still need correction |
+| `care_agent` | Adapter to legacy `EldercareChatAgent` | Partly | Legacy adapter; cannot safely execute natural-language conditional Tasks |
 | `environment_agent` | Device LangGraph with domain prompt/profile | Yes + deterministic execution | Active |
 | `security_agent` | Device LangGraph with scoped AgentSpec | Yes + deterministic execution | Active |
 | `energy_agent` | Device LangGraph with scoped AgentSpec | Yes + deterministic execution | Active |
@@ -729,6 +748,101 @@ An eventual Task should carry typed fields similar to:
 The MCP client must independently reject a model-supplied resident outside the
 authorized scope.
 
+## 12.1 Real Run Semantics Bug: Conditional Delegation And Stale Evidence
+
+Another real eldercare request exposed a different failure mode from the older
+identity/ID-resolution bug:
+
+```text
+查看张爷爷今天的健康状态；如果异常则通知护理员
+```
+
+What actually happened:
+
+1. the Supervisor created two Tasks in the first round:
+   - `health_agent`: query Zhang's health status;
+   - `care_agent`: notify caregiver if abnormal;
+2. the Health Task completed successfully and found heart rate `78`, SpO2 `97%`
+   and no fall;
+3. the Care Task had `depends_on`, but that only means "wait for upstream
+   completion", not "execute only if the condition is true";
+4. the Scheduler therefore launched Care anyway after Health finished;
+5. the current Care path still uses the legacy `EldercareChatAgent` adapter and
+   could not safely interpret the conditional objective "notify only if
+   abnormal, otherwise do nothing", so it returned `needs_more_information`;
+6. because Health succeeded and Care was blocked, the fixed Task-status
+   aggregation marked the Run `partial_success`;
+7. in the next Supervisor round, the model correctly read the Health Finding and
+   returned the final answer: no notification was needed.
+
+Important interpretation:
+
+- the screenshot/result showing a Care failure was a partial failure of one
+  prematurely created Task;
+- it was not proof that the overall business goal failed;
+- the final answer was directionally correct, but the execution plan was not.
+
+Root cause split:
+
+- orchestration bug: cross-Agent conditional work was created too early;
+- evidence-quality bug: stale health data was treated as sufficient evidence for
+  "today is normal".
+
+Why the plan was wrong:
+
+```text
+Current buggy pattern
+Supervisor round 1
+-> create Health Task
+-> create Care Task with depends_on=Health
+-> Scheduler waits for Health, then still runs Care
+```
+
+`depends_on` currently models ordering only. It does not encode:
+
+- conditional execution;
+- skip-on-upstream-false;
+- branch guards;
+- no-op semantics for downstream Tasks.
+
+More appropriate execution pattern:
+
+```text
+Supervisor round 1
+-> create Health Task only
+-> Health returns structured Finding
+-> Supervisor round 2 evaluates the Finding
+-> abnormal: create Care Task
+-> normal: finish directly
+```
+
+The current architecture already supports second-round Supervisor decisions. The
+failure is that the model was allowed to create a natural-language conditional
+Care Task in round 1, while the runtime does not yet implement condition/skip
+semantics for such Tasks.
+
+Evidence-quality problem:
+
+- the latest health reading was already many hours old;
+- the system therefore should not state with high confidence that "today's
+  health is normal";
+- the correct statement is closer to: the most recent available reading looked
+  normal, but the data is stale, so the current status cannot be fully
+  confirmed.
+
+Required remediation direction:
+
+1. constrain Supervisor prompting and validation so conditional cross-Agent
+   actions follow "investigate first, delegate later";
+2. reject or rewrite first-round conditional Tasks when the runtime only
+   supports pure ordering dependencies;
+3. add explicit Task semantics in the future if conditional branches are needed,
+   such as `guard`, `skip_reason` or a platform-attested no-op outcome;
+4. require Health to downgrade confidence when critical readings are stale;
+5. return `needs_more_information` or a structured data-quality abnormality
+   instead of `completed` when freshness is insufficient for the requested
+   claim.
+
 ## 13. Monitor Status
 
 The intended Monitor is not an LLM Agent. It should:
@@ -912,6 +1026,10 @@ without checking with the user.
    the isolated Health/Scope contract test.
 4. Preserve `source_request` as the immutable user-goal boundary while allowing
    the Supervisor to propose narrower specialist objectives.
+5. Prevent first-round creation of cross-Agent conditional Tasks unless the
+   runtime has explicit guard/skip semantics.
+6. Make health evidence freshness a first-class completion gate so stale data
+   cannot produce a high-confidence "today is normal" conclusion.
 
 ### P1: Complete Authorization
 

@@ -8,6 +8,7 @@ from typing import Any
 
 from ...telemetry import InMemoryTraceStore
 from .health_gateway import ScopedHealthMCPClient
+from .health_freshness import apply_completed_health_freshness_guard
 from .models import (
     AgentFinding,
     Delegation,
@@ -92,7 +93,7 @@ class HealthAgentLoop:
                 status = decision.status
                 if not evidence and status == "completed":
                     status = "needs_more_information"
-                return AgentFinding(
+                finding = AgentFinding(
                     agent="health_agent",
                     objective=delegation.objective,
                     status=status,
@@ -102,6 +103,10 @@ class HealthAgentLoop:
                     recommended_actions=decision.recommended_actions,
                     unresolved_questions=decision.unresolved_questions,
                     tool_calls=tool_calls,
+                )
+                return apply_completed_health_freshness_guard(
+                    finding,
+                    objective=delegation.objective,
                 )
             if len(tool_calls) >= self.max_tool_calls:
                 break

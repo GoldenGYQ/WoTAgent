@@ -9,6 +9,17 @@ import LoginScreen from './LoginScreen.vue'
 
 const accounts: LoginAccount[] = [
   {
+    accountId: 'ADMIN-1',
+    loginName: 'admin',
+    displayName: '系统管理员',
+    role: 'admin',
+    domainRoles: ['system_admin'],
+    roleLabels: ['系统管理员'],
+    capabilities: ['*'],
+    relationships: [],
+    loginMode: 'password',
+  },
+  {
     accountId: 'JH-1',
     displayName: '王敏',
     role: 'operator',
@@ -69,23 +80,35 @@ describe('LoginScreen', () => {
   it('keeps seeded accounts one-click and emits the selected identity', async () => {
     const wrapper = mountLogin()
 
-    await wrapper.findAll('.login-account-list > button')[0].trigger('click')
+    await wrapper.findAll('.login-account-list > button')[1].trigger('click')
 
     expect(wrapper.text()).toContain('JH-1')
     expect(wrapper.text()).toContain('USR-1234')
+    expect(wrapper.text()).toContain('账号：admin')
     expect(wrapper.text()).toContain('注册新主体')
-    expect(wrapper.emitted('login')?.[0]).toEqual([accounts[0]])
+    expect(wrapper.emitted('login')?.[0]).toEqual([accounts[1]])
+  })
+
+  it('requires an account password for password users', async () => {
+    const wrapper = mountLogin()
+
+    await wrapper.findAll('.login-account-list > button')[0].trigger('click')
+    await wrapper.find('input[type="password"]').setValue('Admin@123')
+    await wrapper.find('form').trigger('submit')
+
+    expect(wrapper.text()).toContain('系统管理员')
+    expect(wrapper.emitted('login')?.[0]).toEqual([accounts[0], 'Admin@123'])
   })
 
   it('requires a PIN for a registered persistent account', async () => {
     const wrapper = mountLogin()
 
-    await wrapper.findAll('.login-account-list > button')[1].trigger('click')
+    await wrapper.findAll('.login-account-list > button')[2].trigger('click')
     await wrapper.find('input[type="password"]').setValue('2468')
     await wrapper.find('form').trigger('submit')
 
     expect(wrapper.text()).toContain('周女士')
-    expect(wrapper.emitted('login')?.[0]).toEqual([accounts[1], '2468'])
+    expect(wrapper.emitted('login')?.[0]).toEqual([accounts[2], '2468'])
   })
 
   it('registers with a role template and resource target, not raw grants', async () => {

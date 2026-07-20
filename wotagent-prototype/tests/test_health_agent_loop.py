@@ -175,6 +175,72 @@ def test_health_agent_rejects_repeated_plan() -> None:
     assert len(finding.tool_calls) == 1
 
 
+def test_health_agent_downgrades_normal_completion_when_critical_data_is_stale() -> None:
+    class StaleNormalGateway(FakeHealthGateway):
+        async def call(self, tool_name: str, arguments: dict[str, Any]) -> ToolExecutionResult:
+            self.calls.append(tool_name)
+            payloads = {
+                "read_health_summary": {
+                    "latest": {
+                        "heart_rate": {"value": 78, "observed_at": "2026-07-16T00:00:00Z"},
+                        "spo2": {"value": 97, "observed_at": "2026-07-16T00:00:00Z"},
+                    },
+                },
+                "check_data_quality": {
+                    "sensors": {
+                        "heart_rate": {"fresh": False, "age_seconds": 43200},
+                        "spo2": {"fresh": False, "age_seconds": 43200},
+                        "fall_detected": {"fresh": False, "age_seconds": 43200},
+                    },
+                },
+            }
+            return ToolExecutionResult(
+                success=True,
+                verified=True,
+                tool_name=tool_name,
+                arguments=arguments,
+                result=payloads[tool_name],
+                observed_state=payloads[tool_name],
+            )
+
+    class NormalButStaleLLM:
+        async def __call__(self, context: dict[str, Any]) -> HealthAgentDecision:
+            sources = {item["source"] for item in context["evidence"]}
+            if "read_health_summary" not in sources:
+                return HealthAgentDecision(
+                    action="use_tool",
+                    tool_name="read_health_summary",
+                    reason="先读取摘要",
+                )
+            if "check_data_quality" not in sources:
+                return HealthAgentDecision(
+                    action="use_tool",
+                    tool_name="check_data_quality",
+                    reason="检查关键传感器是否过期",
+                )
+            return HealthAgentDecision(
+                action="finish",
+                reason="最近一次数据未见异常",
+                status="completed",
+                finding="最近一次生命体征未见明确异常。",
+                confidence=0.9,
+            )
+
+    finding = asyncio.run(HealthAgentLoop(
+        StaleNormalGateway(),
+        NormalButStaleLLM(),
+        max_iterations=4,
+    ).run(
+        task_id="",
+        resident_id="elderly-001",
+        delegation=delegation(),
+    ))
+
+    assert finding.status == "needs_more_information"
+    assert "关键健康数据已过期" in finding.finding
+    assert finding.confidence <= 0.45
+
+
 def test_scoped_health_mcp_client_blocks_unregistered_resource(tmp_path) -> None:
     gateway = ScopedHealthMCPClient(
         EldercareStore(tmp_path / "eldercare.db"),

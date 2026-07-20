@@ -21,6 +21,12 @@ SUPERVISOR_TASK_DECOMPOSITION_RULES = (
     "系统会把上游结构化 Finding 传给下游，不要要求下游重新查询已经取得且仍然"
     "有效的事实。resource_claims 仍应根据每个 Task 可能访问或改变的资源，由你"
     "结合目标合理生成；Scheduler 只负责校验冲突和决定是否并行。\n\n"
+    "跨专业 Agent 的条件委派规则：当下游动作是否需要执行，取决于上游调查结果"
+    "是否异常、是否命中阈值、是否需要通知或是否满足某个条件时，第一轮只创建"
+    "上游调查 Task，不要同时创建自然语言条件式下游 Task。必须等待上游返回"
+    "结构化 Finding 后，再由 Supervisor 在下一轮决定是 finish 还是创建下游"
+    "动作 Task。`depends_on` 只表示顺序依赖，不表示“条件成立才执行”，因此"
+    "不要用 `depends_on` 表达“如果异常则通知，否则不操作”这类条件语义。\n\n"
 )
 
 
@@ -60,6 +66,10 @@ def build_run_supervisor_agent(
             "集合，后续是否补查由专业 Agent 根据实际观察决定。\n\n"
             "每次决策必须遵守输入中的 deployment 上下文，只能选择 "
             "enabled_agents 中的 Agent，不得引用当前场景之外的空间、居民或设备。\n\n"
+            "如果输入里的 source.interaction_mode.channel 为 `phone`，则 final_response "
+            "必须适合电话播报：口语化、自然、简短，先给结论再补一句必要说明；避免"
+            "书面报告腔、避免项目符号、避免 Markdown 表格，也不要输出“根据系统分析”"
+            "这类生硬开场。\n\n"
             f"{SUPERVISOR_TASK_DECOMPOSITION_RULES}"
             f"当前可用专业 Agent：\n{agent_catalog}"
         ),

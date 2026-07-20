@@ -494,7 +494,7 @@ def test_failed_payload_becomes_structured_task_failure() -> None:
     assert task.failure.retryable is False
 
 
-def test_clarification_after_failed_finding_does_not_mark_run_completed() -> None:
+def test_clarification_after_failed_finding_marks_run_needing_more_information() -> None:
     async def scenario():
         decisions = iter([
             _decision([
@@ -533,7 +533,7 @@ def test_clarification_after_failed_finding_does_not_mark_run_completed() -> Non
 
     run = asyncio.run(scenario())
 
-    assert run.status == "failed"
+    assert run.status == "needs_more_information"
     assert run.final_response == "需要更多信息。"
 
 

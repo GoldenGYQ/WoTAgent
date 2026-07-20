@@ -13,16 +13,23 @@ from wotagent.agents import (
 )
 from wotagent.orchestration import (
     AgentTask,
+    DependencyFinding,
     InMemoryRunStore,
     PendingConfirmation,
     ResourceScope,
+    RunCoordinator,
     RunRecord,
+    SupervisorDecision,
+    TaskScheduler,
     TaskTarget,
 )
 from wotagent.runtime.run_runtime import (
+    _care_executor,
     _device_executor,
     _device_resumer,
     _health_executor,
+    _normalize_supervisor_user_request,
+    _supervisor_decider,
 )
 from wotagent.telemetry import InMemoryTraceStore
 
@@ -160,14 +167,17 @@ def test_device_trace_events_are_projected_into_run_event_stream() -> None:
 
     events = asyncio.run(scenario())
 
-    assert [event.type for event in events] == ["agent.tool.completed"]
-    assert events[0].task_id == "task-trace"
-    assert events[0].tool_call_id == "step-1"
-    assert events[0].data["input"] == {
+    assert [event.type for event in events] == [
+        "task.execution.context",
+        "agent.tool.completed",
+    ]
+    assert events[1].task_id == "task-trace"
+    assert events[1].tool_call_id == "step-1"
+    assert events[1].data["input"] == {
         "device_id": "light-001",
         "action": "read_state",
     }
-    assert events[0].data["output"]["raw_result"] == {"on": False}
+    assert events[1].data["output"]["raw_result"] == {"on": False}
 
 
 def test_health_executor_repairs_missing_structured_response_once() -> None:
@@ -335,3 +345,343 @@ def test_health_executor_attests_verified_tool_transcript_without_repair() -> No
     assert result.evidence[0].value == {"spo2": 89, "heart_rate": 78}
     assert result.tool_calls[0].verified is True
     assert repair.calls == 0
+
+
+def test_supervisor_decider_defers_conditional_care_task_until_health_finishes() -> None:
+    async def scenario():
+        store = InMemoryRunStore()
+        await store.create_run(RunRecord(
+            run_id="run-supervisor-guard",
+            conversation_id="conv-1",
+            turn_id="turn-1",
+            root_goal="查看张爷爷健康状态，如异常通知护理员",
+        ))
+
+        class SupervisorAgent:
+            async def ainvoke(self, _value):
+                return {
+                    "structured_response": {
+                        "action": "create_tasks",
+                        "goal": "查看张爷爷健康状态，如异常通知护理员",
+                        "reason": "先查健康，再在异常时通知护理员",
+                        "tasks": [
+                            {
+                                "local_id": "health",
+                                "agent_id": "health_agent",
+                                "objective": "查询张爷爷健康状态",
+                                "reason": "先确认是否存在异常",
+                                "success_criteria": ["获得当前健康结论"],
+                                "depends_on": [],
+                            },
+                            {
+                                "local_id": "care",
+                                "agent_id": "care_agent",
+                                "objective": "如果异常则通知护理员，否则不操作",
+                                "reason": "仅在健康结果异常时才通知",
+                                "success_criteria": ["如果异常则完成通知，否则不操作"],
+                                "depends_on": ["health"],
+                            },
+                        ],
+                        "success_criteria": ["正确回答健康状态并仅在必要时通知"],
+                    },
+                    "messages": [],
+                }
+
+        runtime = SimpleNamespace(
+            run_supervisor_agent=SupervisorAgent(),
+            settings=SimpleNamespace(llm_timeout_seconds=2),
+        )
+        decider = _supervisor_decider(
+            runtime,
+            {
+                "history": [],
+                "user_id": "JH-1",
+                "role": "operator",
+                "source": {},
+                "deployment": {},
+                "runtime": {},
+            },
+            store,
+        )
+        return await decider({
+            "run": {"run_id": "run-supervisor-guard"},
+            "message": "查看张爷爷健康状态，如异常通知护理员",
+            "findings": [],
+            "supervisor_iteration": 1,
+        })
+
+    decision = asyncio.run(scenario())
+
+    assert decision.action == "create_tasks"
+    assert [task.agent_id for task in decision.tasks] == ["health_agent"]
+
+
+def test_supervisor_normalizes_room_answer_as_follow_up_to_prior_goal() -> None:
+    request = _normalize_supervisor_user_request(
+        "A-101 啊！",
+        {
+            "history": [
+                {
+                    "role": "user",
+                    "content": "把张爷爷房间温度调到 24 度，并确认是否生效",
+                },
+                {
+                    "role": "assistant",
+                    "content": "请问张爷爷住在哪个房间？是 A-101 还是 A-102？",
+                },
+            ],
+        },
+    )
+    assert request == (
+        "把张爷爷房间温度调到 24 度，并确认是否生效\n"
+        "补充信息：目标房间是 A-101。"
+    )
+
+
+def test_supervisor_keeps_plain_room_answer_unchanged_without_room_clarification() -> None:
+    request = _normalize_supervisor_user_request(
+        "A-101",
+        {
+            "history": [
+                {"role": "user", "content": "今天状态怎么样"},
+                {"role": "assistant", "content": "今天生命体征整体稳定。"},
+            ],
+        },
+    )
+    assert request == "A-101"
+
+
+def test_care_executor_skips_conditional_noop_when_health_dependency_is_normal() -> None:
+    async def scenario():
+        class LegacyCareAgent:
+            calls = 0
+
+            async def run(self, **_kwargs):
+                self.calls += 1
+                raise AssertionError("conditional noop should skip legacy care execution")
+
+        runtime = SimpleNamespace(
+            eldercare_chat_agent=LegacyCareAgent(),
+            settings=SimpleNamespace(total_timeout_seconds=2),
+        )
+        task = AgentTask(
+            task_id="task-care-skip",
+            run_id="run-care-skip",
+            local_id="care",
+            agent_id="care_agent",
+            objective="如果健康异常则通知护理员，否则不操作",
+            reason="仅在健康异常时才需要通知",
+            success_criteria=["如果异常则完成通知，否则保持空操作"],
+            dependency_findings=[
+                DependencyFinding(
+                    task_id="task-health",
+                    agent_id="health_agent",
+                    objective="查询张爷爷健康状态",
+                    status="completed",
+                    finding="未发现需要升级处置的明确异常。",
+                    recommended_actions=[],
+                )
+            ],
+        )
+        result = await _care_executor(
+            runtime,
+            {"history": [], "role": "operator", "thinking": False},
+        )(task)
+        return result, runtime.eldercare_chat_agent.calls
+
+    result, calls = asyncio.run(scenario())
+
+    assert result.status == "completed"
+    assert "安全跳过" in result.finding
+    assert calls == 0
+
+
+def test_health_executor_downgrades_completed_answer_when_critical_data_is_stale() -> None:
+    async def scenario():
+        class Gateway:
+            @contextmanager
+            def authorized_scope(self, _scope):
+                yield
+
+        class HealthAgent:
+            async def ainvoke(self, _value):
+                return {
+                    "structured_response": AgentFindingPayload(
+                        status="completed",
+                        finding="最近一次生命体征未见明确异常。",
+                        confidence=0.92,
+                        tool_calls=[
+                            ToolExecutionResult(
+                                success=True,
+                                verified=True,
+                                tool_name="check_data_quality",
+                                arguments={"resident_id": "elderly-001"},
+                                result={
+                                    "sensors": {
+                                        "heart_rate": {"fresh": False},
+                                        "spo2": {"fresh": False},
+                                        "fall_detected": {"fresh": False},
+                                    }
+                                },
+                            )
+                        ],
+                    ).model_dump(mode="json"),
+                    "messages": [],
+                }
+
+        runtime = SimpleNamespace(
+            health_gateway=Gateway(),
+            health_react_agent=HealthAgent(),
+            health_finding_repair_runnable=None,
+            settings=SimpleNamespace(
+                total_timeout_seconds=2,
+                llm_timeout_seconds=2,
+            ),
+        )
+        task = AgentTask(
+            task_id="task-health-stale",
+            run_id="run-health-stale",
+            local_id="health",
+            agent_id="health_agent",
+            objective="查看张爷爷当前健康状态",
+            source_request="查看张爷爷今天健康状态",
+            reason="用户请求",
+            success_criteria=["给出健康状态结论"],
+            target=TaskTarget(
+                type="resident",
+                id="elderly-001",
+                display_name="张爷爷",
+            ),
+            effective_scope=ResourceScope(
+                resource_ids=["resident:elderly-001"],
+                capabilities=["health.status.read"],
+            ),
+        )
+        return await _health_executor(runtime)(task)
+
+    result = asyncio.run(scenario())
+
+    assert result.status == "needs_more_information"
+    assert "关键健康数据已过期" in result.finding
+    assert result.confidence <= 0.45
+
+
+def test_run_coordinator_filters_first_round_conditional_care_and_finishes_next_round() -> None:
+    async def scenario():
+        class SupervisorAgent:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            async def ainvoke(self, _value):
+                self.calls += 1
+                if self.calls == 1:
+                    return {
+                        "structured_response": {
+                            "action": "create_tasks",
+                            "goal": "查看张爷爷健康状态，如异常通知护理员",
+                            "reason": "需要先确认健康状态，再决定是否通知",
+                            "tasks": [
+                                {
+                                    "local_id": "health",
+                                    "agent_id": "health_agent",
+                                    "objective": "查询张爷爷健康状态",
+                                    "reason": "先核实是否存在异常",
+                                    "success_criteria": ["获得健康状态结论"],
+                                    "depends_on": [],
+                                },
+                                {
+                                    "local_id": "care",
+                                    "agent_id": "care_agent",
+                                    "objective": "如果异常则通知护理员，否则不操作",
+                                    "reason": "只有异常时才需要通知",
+                                    "success_criteria": ["如果异常则通知，否则不操作"],
+                                    "depends_on": ["health"],
+                                },
+                            ],
+                            "success_criteria": ["给出健康判断，并仅在必要时通知"],
+                        },
+                        "messages": [],
+                    }
+                return {
+                    "structured_response": {
+                        "action": "finish",
+                        "goal": "查看张爷爷健康状态，如异常通知护理员",
+                        "final_response": "最近一次可用健康数据未见明确异常，无需通知护理员。",
+                        "reason": "健康结果未触发通知条件",
+                    },
+                    "messages": [],
+                }
+
+        store = InMemoryRunStore()
+        await store.create_run(RunRecord(
+            run_id="run-conditional-care",
+            conversation_id="conv-1",
+            turn_id="turn-1",
+            root_goal="查看张爷爷健康状态，如异常通知护理员",
+        ))
+        supervisor_runtime = SimpleNamespace(
+            run_supervisor_agent=SupervisorAgent(),
+            settings=SimpleNamespace(llm_timeout_seconds=2),
+        )
+        care_calls = 0
+
+        async def execute_health(_task):
+            return AgentFindingPayload(
+                status="completed",
+                finding="最近一次生命体征未见明确异常。",
+                confidence=0.8,
+            )
+
+        async def execute_care(_task):
+            nonlocal care_calls
+            care_calls += 1
+            raise AssertionError("conditional care task should be filtered before execution")
+
+        coordinator = RunCoordinator(
+            store,
+            TaskScheduler(
+                available_agents={"health_agent", "care_agent"},
+                task_id_factory=lambda: "task-health",
+            ),
+            _supervisor_decider(
+                supervisor_runtime,
+                {
+                    "history": [],
+                    "user_id": "JH-1",
+                    "role": "operator",
+                    "source": {},
+                    "deployment": {},
+                    "runtime": {},
+                },
+                store,
+            ),
+            {
+                "health_agent": execute_health,
+                "care_agent": execute_care,
+            },
+            max_supervisor_iterations=2,
+            run_id_factory=lambda: "run-conditional-care",
+        )
+        run = await coordinator.execute(
+            conversation_id="conv-1",
+            turn_id="turn-1",
+            message="查看张爷爷健康状态，如异常通知护理员",
+            run_id="run-conditional-care",
+        )
+        return (
+            run,
+            care_calls,
+            await store.tasks_for_run(run.run_id),
+            await store.events(run.run_id),
+        )
+
+    run, care_calls, tasks, events = asyncio.run(scenario())
+
+    assert run.status == "completed"
+    assert run.final_response == "最近一次可用健康数据未见明确异常，无需通知护理员。"
+    assert care_calls == 0
+    assert len(tasks) == 1
+    assert tasks[0].agent_id == "health_agent"
+    assert all(task.agent_id != "care_agent" for task in tasks)
+    assert [event.type for event in events].count("task.created") == 1
+    assert [event.type for event in events].count("supervisor.decision.completed") == 2

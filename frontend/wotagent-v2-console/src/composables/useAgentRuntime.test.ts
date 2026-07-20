@@ -33,6 +33,7 @@ const run: RunRecord = {
   duration_ms: 3000,
   finished_at: '2026-07-18T10:00:03Z',
   final_response: '已完成',
+  error: null,
   thinking: false,
   created_at: '2026-07-18T10:00:00Z',
   updated_at: '2026-07-18T10:00:03Z',

@@ -34,6 +34,7 @@ def create_run_router(
             user_id=request.user_id,
             thinking=request.thinking,
             profile_id=request.profile_id,
+            phone_mode=request.phone_mode,
             auth_token=_bearer_token(authorization),
             background_tasks=background_tasks,
         )

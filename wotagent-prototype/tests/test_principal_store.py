@@ -95,6 +95,20 @@ def test_pin_principal_requires_valid_login_session(tmp_path) -> None:
     assert "security.use" not in resolved.granted_capabilities
 
 
+def test_password_principal_can_login_by_account_name(tmp_path) -> None:
+    store = _store(tmp_path)
+
+    principal, token = store.login(
+        login_name="admin",
+        domain_id="eldercare",
+        password="Admin@123",
+    )
+
+    assert principal.roles == ["admin"]
+    assert principal.login_name == "admin"
+    assert store.resolve_session(token, "eldercare").principal_id == "ADMIN-1"
+
+
 def test_principal_api_registers_from_template_and_rejects_raw_grants(
     tmp_path,
 ) -> None:
@@ -138,6 +152,60 @@ def test_principal_api_registers_from_template_and_rejects_raw_grants(
         session.json()["principal"]["principal_id"]
         == body["principal"]["principal_id"]
     )
+
+
+def test_admin_can_create_and_reassign_password_users_via_api(tmp_path) -> None:
+    store = _store(tmp_path)
+    _, admin_token = store.login(
+        login_name="admin",
+        domain_id="eldercare",
+        password="Admin@123",
+    )
+    app = FastAPI()
+    app.include_router(create_principal_router(lambda: store))
+    client = TestClient(app)
+
+    created = client.post(
+        "/api/v2/principals/users",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={
+            "display_name": "测试普通用户",
+            "login_name": "test.user",
+            "password": "User@123456",
+            "domain_id": "eldercare",
+            "platform_role": "viewer",
+            "target_id": "elderly-001",
+        },
+    )
+    assert created.status_code == 201
+    created_body = created.json()
+    assert created_body["principal"]["roles"] == ["viewer"]
+    assert created_body["principal"]["login_name"] == "test.user"
+
+    users = client.get(
+        "/api/v2/principals/users?domain_id=eldercare",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert users.status_code == 200
+    payload = users.json()["users"]
+    assert any(item["login_name"] == "admin" for item in payload)
+    created_principal = next(
+        item
+        for item in payload
+        if item["login_name"] == "test.user"
+    )
+    assert created_principal["role_labels"] == ["普通用户"]
+
+    updated = client.put(
+        f"/api/v2/principals/users/{created_principal['principal_id']}/role",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={
+            "domain_id": "eldercare",
+            "platform_role": "admin",
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["principal"]["roles"] == ["admin"]
 
 
 class _VillaGateway:

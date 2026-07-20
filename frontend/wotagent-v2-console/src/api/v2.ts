@@ -16,6 +16,8 @@ import type {
   DomainSubject,
   DeploymentProfile,
   HealthSummary,
+  ManagedUserCreatePayload,
+  ManagedUserRecord,
   MonitorStatus,
   PrincipalContext,
   PrincipalRegistration,
@@ -80,13 +82,21 @@ export const agentV2Api = {
       body: JSON.stringify(payload),
     })
   },
-  loginPrincipal(principalId: string, domainId: string, pin?: string): Promise<PrincipalSession> {
+  loginPrincipal(payload: {
+    principalId?: string
+    loginName?: string
+    domainId: string
+    pin?: string
+    password?: string
+  }): Promise<PrincipalSession> {
     return request('/api/v2/principals/login', {
       method: 'POST',
       body: JSON.stringify({
-        principal_id: principalId,
-        domain_id: domainId,
-        pin: pin || undefined,
+        principal_id: payload.principalId || undefined,
+        login_name: payload.loginName || undefined,
+        domain_id: payload.domainId,
+        pin: payload.pin || undefined,
+        password: payload.password || undefined,
       }),
     })
   },
@@ -95,6 +105,25 @@ export const agentV2Api = {
   },
   getPrincipalContext(principalId: string, domainId: string): Promise<PrincipalContext> {
     return request(`/api/v2/principals/${encodeURIComponent(principalId)}/context?domain_id=${encodeURIComponent(domainId)}`)
+  },
+  listManagedUsers(domainId: string): Promise<{ domain_id: string; users: ManagedUserRecord[] }> {
+    return request(`/api/v2/principals/users?domain_id=${encodeURIComponent(domainId)}`)
+  },
+  createManagedUser(payload: ManagedUserCreatePayload): Promise<PrincipalSession> {
+    return request('/api/v2/principals/users', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+  updateManagedUserRole(principalId: string, payload: {
+    domain_id: string
+    platform_role: 'admin' | 'viewer'
+    target_id?: string
+  }): Promise<PrincipalSession> {
+    return request(`/api/v2/principals/users/${encodeURIComponent(principalId)}/role`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    })
   },
   activateDeploymentProfile(profileId: string): Promise<{ profile: DeploymentProfile }> {
     return request('/api/v2/deployment/active', {
@@ -157,10 +186,26 @@ export const agentV2Api = {
     return request(`/api/v2/conversations/${encodeURIComponent(conversationId)}`, { method: 'DELETE' })
   },
 
-  createRun(message: string, conversationId: string, role: AgentRole, thinking: boolean, userId = 'local-user', profileId?: string): Promise<RunRecord> {
+  createRun(
+    message: string,
+    conversationId: string,
+    role: AgentRole,
+    thinking: boolean,
+    userId = 'local-user',
+    profileId?: string,
+    options?: { phoneMode?: boolean },
+  ): Promise<RunRecord> {
     return request('/api/v2/runs', {
       method: 'POST',
-      body: JSON.stringify({ message, conversation_id: conversationId, role, thinking, user_id: userId, profile_id: profileId }),
+      body: JSON.stringify({
+        message,
+        conversation_id: conversationId,
+        role,
+        thinking,
+        user_id: userId,
+        profile_id: profileId,
+        phone_mode: options?.phoneMode ?? false,
+      }),
     })
   },
   getRun(runId: string): Promise<RunRecord> {

@@ -8,6 +8,7 @@ const label = computed(() => ({
   received: '已接收',
   running: '运行中',
   waiting_confirmation: '待确认',
+  needs_more_information: '待补充信息',
   succeeded: '已完成',
   responded: '已回复',
   failed: '失败',

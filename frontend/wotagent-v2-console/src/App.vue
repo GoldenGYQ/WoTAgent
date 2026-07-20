@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import {
   AudioLines,
   Boxes,
@@ -10,6 +10,7 @@ import {
   MessageSquare,
   Mic,
   PanelLeft,
+  PhoneCall,
   RefreshCw,
   SendHorizontal,
   ShieldCheck,
@@ -19,9 +20,11 @@ import {
 } from 'lucide-vue-next'
 import TaskSidebar from './components/TaskSidebar.vue'
 import DomainOperationsCenter from './components/DomainOperationsCenter.vue'
+import IdentityWorkbench from './components/IdentityWorkbench.vue'
 import LoginScreen from './components/LoginScreen.vue'
 import TaskWorkspace from './components/TaskWorkspace.vue'
 import { agentV2Api } from './api/v2'
+import { usePhoneSpeech } from './composables/usePhoneSpeech'
 import { useAgentRuntime } from './composables/useAgentRuntime'
 import { useVoiceInput } from './composables/useVoiceInput'
 import type {
@@ -79,6 +82,7 @@ function accountFromPrincipal(
   const subject = principal.relationships.find((item) => item.target_type === 'resident')
   return {
     accountId: principal.principal_id,
+    loginName: principal.login_name ?? undefined,
     displayName: principal.display_name,
     role: principal.roles[0] ?? 'viewer',
     domainRoles: principal.domain_roles,
@@ -111,7 +115,7 @@ const submitting = ref(false)
 const submitError = ref('')
 const drawerOpen = ref(false)
 const sidebarCollapsed = ref(false)
-const appView = ref<'agent' | 'domains'>('agent')
+const appView = ref<'agent' | 'domains' | 'identity'>('agent')
 const composer = ref<HTMLTextAreaElement | null>(null)
 const inputMode = ref<'text' | 'voice'>('text')
 const voiceGestureActive = ref(false)
@@ -127,8 +131,14 @@ const voiceInput = useVoiceInput(
     void nextTick(() => composer.value?.focus())
   },
 )
+const phoneSpeech = usePhoneSpeech()
 const conversationRuns = computed(() => runs.filter(
   (run) => run.conversationId === activeConversationId.value,
+))
+const composerPlaceholder = computed(() => (
+  phoneSpeech.enabled.value
+    ? '输入任务，AI 会用更口语化的电话播报方式回复'
+    : '输入任务，Enter 发送，Shift + Enter 换行'
 ))
 
 async function send(): Promise<void> {
@@ -137,7 +147,7 @@ async function send(): Promise<void> {
   submitting.value = true
   submitError.value = ''
   try {
-    await submit(message)
+    await submit(message, { phoneMode: phoneSpeech.enabled.value })
     draft.value = ''
   } catch (error) {
     submitError.value = error instanceof Error ? error.message : String(error)
@@ -243,17 +253,19 @@ async function activateAccount(
   await switchIdentity(account.accountId, account.role)
 }
 
-async function login(account: LoginAccount, pin?: string): Promise<void> {
+async function login(account: LoginAccount, secret?: string): Promise<void> {
   const domainId = activeDeployment.value?.domain_id
   if (!domainId) return
   authBusy.value = true
   authError.value = ''
   try {
-    const session = await agentV2Api.loginPrincipal(
-      account.accountId,
+    const session = await agentV2Api.loginPrincipal({
+      principalId: account.loginMode === 'password' ? undefined : account.accountId,
+      loginName: account.loginMode === 'password' ? account.loginName : undefined,
       domainId,
-      pin,
-    )
+      pin: account.loginMode === 'pin' ? secret : undefined,
+      password: account.loginMode === 'password' ? secret : undefined,
+    })
     await activateAccount(
       accountFromPrincipal(session.principal, session.login_mode),
       session.token ?? '',
@@ -263,6 +275,10 @@ async function login(account: LoginAccount, pin?: string): Promise<void> {
   } finally {
     authBusy.value = false
   }
+}
+
+function togglePhoneMode(): void {
+  phoneSpeech.setEnabled(!phoneSpeech.enabled.value)
 }
 
 async function register(payload: PrincipalRegistration): Promise<void> {
@@ -374,6 +390,20 @@ onMounted(async () => {
     if (saved?.loginMode === 'one_click') await login(saved)
   }
 })
+
+watch(
+  conversationRuns,
+  (items) => {
+    items.forEach((run) => {
+      if (
+        !run.response
+        || ['accepted', 'received', 'running', 'waiting_confirmation'].includes(run.status)
+      ) return
+      phoneSpeech.speakFinal(run.id, run.response)
+    })
+  },
+  { deep: true },
+)
 </script>
 
 <template>
@@ -402,6 +432,9 @@ onMounted(async () => {
       <nav class="app-view-switch" aria-label="工作视图">
         <button type="button" :class="{ active: appView === 'agent' }" @click="appView = 'agent'"><MessageSquare :size="14" />Agent 会话</button>
         <button type="button" :class="{ active: appView === 'domains' }" @click="appView = 'domains'"><Boxes :size="14" />领域运行</button>
+        <button type="button" :class="{ active: appView === 'identity' }" @click="appView = 'identity'">
+          <ShieldCheck :size="14" />{{ currentAccount.role === 'admin' ? '用户管理' : '个人信息' }}
+        </button>
       </nav>
       <div class="header-status">
         <label class="deployment-selector" title="当前设备与空间场景">
@@ -466,7 +499,27 @@ onMounted(async () => {
             :data-mode="inputMode"
             :data-recording="voiceInput.recording.value"
             :data-canceling="voiceCancelIntent"
+            :data-phone-mode="phoneSpeech.enabled.value"
+            :data-speaking="phoneSpeech.speaking.value"
+            :style="{ '--speech-activity': String(phoneSpeech.activityLevel.value) }"
           >
+            <div v-if="phoneSpeech.enabled.value" class="phone-live-strip">
+              <div class="phone-live-copy">
+                <span class="phone-live-chip">
+                  <PhoneCall :size="13" />
+                  电话模式
+                </span>
+                <strong>{{ phoneSpeech.speaking.value ? 'Live 播报中' : 'Live 待命中' }}</strong>
+                <small>{{ phoneSpeech.statusLabel.value }}</small>
+              </div>
+              <div class="phone-live-visual" aria-hidden="true">
+                <i
+                  v-for="(level, index) in phoneSpeech.waveform.value"
+                  :key="index"
+                  :style="{ '--voice-level': String(level) }"
+                />
+              </div>
+            </div>
             <div class="composer-input-area">
               <textarea
                 v-if="inputMode === 'text'"
@@ -474,7 +527,7 @@ onMounted(async () => {
                 v-model="draft"
                 rows="1"
                 maxlength="2000"
-                placeholder="输入任务，Enter 发送，Shift + Enter 换行"
+                :placeholder="composerPlaceholder"
                 aria-label="任务指令"
                 @keydown="keyboardSubmit"
               />
@@ -532,6 +585,20 @@ onMounted(async () => {
               </span>
               <div class="composer-actions">
                 <button
+                  v-if="phoneSpeech.supported.value"
+                  class="thinking-toggle phone-toggle"
+                  type="button"
+                  role="switch"
+                  :aria-checked="phoneSpeech.enabled.value"
+                  :class="{ active: phoneSpeech.enabled.value }"
+                  :title="phoneSpeech.enabled.value ? '关闭电话模式' : '开启电话模式'"
+                  @click="togglePhoneMode"
+                >
+                  <PhoneCall :size="15" />
+                  <span>{{ phoneSpeech.enabled.value ? '电话模式开' : '电话模式关' }}</span>
+                  <i aria-hidden="true" />
+                </button>
+                <button
                   v-if="thinkingSupported"
                   class="thinking-toggle"
                   type="button"
@@ -575,6 +642,14 @@ onMounted(async () => {
       </div>
 
     </div>
+
+    <IdentityWorkbench
+      v-else-if="appView === 'identity'"
+      :current-account="currentAccount"
+      :domain-id="activeDeployment?.domain_id ?? ''"
+      :active-profile="activeDeployment"
+      :registration-targets="registrationTargets"
+    />
 
     <DomainOperationsCenter
       v-else

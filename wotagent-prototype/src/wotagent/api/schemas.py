@@ -15,6 +15,7 @@ class RunCreateRequest(BaseModel):
     user_id: str = "local-user"
     thinking: bool = False
     profile_id: str | None = None
+    phone_mode: bool = False
 
 
 class RunConfirmationRequest(BaseModel):

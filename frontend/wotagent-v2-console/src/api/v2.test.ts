@@ -46,7 +46,9 @@ describe('agentV2Api', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    await agentV2Api.createRun('打开客厅灯', 'conv-1', 'operator', true)
+    await agentV2Api.createRun('打开客厅灯', 'conv-1', 'operator', true, 'local-user', undefined, {
+      phoneMode: true,
+    })
 
     expect(fetchMock).toHaveBeenCalledOnce()
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v2/runs')
@@ -55,6 +57,7 @@ describe('agentV2Api', () => {
       conversation_id: 'conv-1',
       role: 'operator',
       thinking: true,
+      phone_mode: true,
     })
   })
 
@@ -149,6 +152,43 @@ describe('agentV2Api', () => {
       target_id: 'villa-demo',
     })
     expect(body).not.toHaveProperty('capabilities')
+  })
+
+  it('logs in password users with login_name and password', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        token: 'session-token',
+        login_mode: 'password',
+        principal: { principal_id: 'ADMIN-1' },
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await agentV2Api.loginPrincipal({
+      loginName: 'admin',
+      domainId: 'eldercare',
+      password: 'Admin@123',
+    })
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body).toEqual({
+      login_name: 'admin',
+      domain_id: 'eldercare',
+      password: 'Admin@123',
+    })
+  })
+
+  it('requests managed users for the current domain', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ domain_id: 'eldercare', users: [] }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await agentV2Api.listManagedUsers('eldercare')
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v2/principals/users?domain_id=eldercare')
   })
 
   it('attaches the principal session token to later API requests', async () => {

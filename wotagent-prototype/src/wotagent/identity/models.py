@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 
 PrincipalType = Literal["human", "service"]
-LoginMode = Literal["one_click", "pin", "disabled"]
+LoginMode = Literal["one_click", "pin", "password", "disabled"]
 
 
 class PrincipalRelationship(BaseModel):
@@ -38,6 +38,8 @@ class PrincipalProfile(BaseModel):
     display_name: str = Field(min_length=1)
     login_enabled: bool = False
     login_mode: LoginMode = "disabled"
+    login_name: str | None = None
+    bootstrap_secret: str | None = None
     bindings: list[DomainRoleBinding] = Field(default_factory=list)
 
 
@@ -68,6 +70,7 @@ class TaskPrincipal(BaseModel):
     principal_type: PrincipalType = "human"
     display_name: str = ""
     domain_id: str = ""
+    login_name: str | None = None
     # Legacy execution role remains explicit while domain roles are adopted.
     roles: list[str] = Field(default_factory=list, min_length=1)
     domain_roles: list[str] = Field(default_factory=list)

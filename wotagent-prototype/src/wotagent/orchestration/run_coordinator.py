@@ -155,14 +155,9 @@ class RunCoordinator:
                 data=decision.model_dump(mode="json"),
             )
             if decision.action == "clarify":
-                clarification_status = (
-                    _completion_status(findings)
-                    if findings
-                    else "completed"
-                )
                 return await self._finish_run(
                     run.run_id,
-                    status=clarification_status,
+                    status="needs_more_information",
                     response=decision.clarification,
                 )
             if decision.action == "finish":

@@ -1,5 +1,5 @@
 import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import InlineTraceTimeline from './InlineTraceTimeline.vue'
 import { EMPTY_USAGE, type RuntimeRun, type TraceEvent } from '../types/agent'
 
@@ -73,11 +73,17 @@ const run: RuntimeRun = {
 }
 
 describe('InlineTraceTimeline', () => {
-  it('shows Run events and its child Task hierarchy', () => {
+  it('reveals Run events progressively while preserving hierarchy', async () => {
+    vi.useFakeTimers()
     const wrapper = mount(InlineTraceTimeline, { props: { run, selected: true } })
+    expect(wrapper.findAll('.inline-trace-event')).toHaveLength(1)
+
+    await vi.advanceTimersByTimeAsync(60)
+
     expect(wrapper.text()).toContain('environment_agent')
     expect(wrapper.text()).toContain('读取客厅灯状态')
     expect(wrapper.findAll('.inline-trace-event')).toHaveLength(2)
+    vi.useRealTimers()
   })
 
   it('keeps completed Run history collapsible', async () => {
@@ -87,6 +93,25 @@ describe('InlineTraceTimeline', () => {
     expect(wrapper.find('.inline-trace-body').exists()).toBe(false)
     await wrapper.find('.inline-trace-header').trigger('click')
     expect(wrapper.find('.inline-trace-body').exists()).toBe(true)
+  })
+
+  it('treats needs_more_information as a terminal clarification state', async () => {
+    const wrapper = mount(InlineTraceTimeline, {
+      props: {
+        run: {
+          ...run,
+          status: 'needs_more_information',
+          response: '请补充房间信息。',
+          streamState: 'closed',
+        },
+        selected: false,
+      },
+    })
+    expect(wrapper.find('.inline-trace-body').exists()).toBe(false)
+
+    await wrapper.find('.inline-trace-header').trigger('click')
+
+    expect(wrapper.text()).toContain('待补充信息')
   })
 
   it('opens while running and folds when the Run reaches a terminal status', async () => {
@@ -112,6 +137,7 @@ describe('InlineTraceTimeline', () => {
   })
 
   it('nests tool input and output under an active Task event', async () => {
+    vi.useFakeTimers()
     const toolEvent = {
       ...event(3, 'agent.tool.completed'),
       data: {
@@ -130,6 +156,8 @@ describe('InlineTraceTimeline', () => {
       props: { run: activeRun, selected: true },
     })
 
+    await vi.advanceTimersByTimeAsync(120)
+
     const toolRow = wrapper.findAll('.inline-trace-event').find(
       (item) => item.text().includes('light_001__read_state'),
     )
@@ -144,5 +172,32 @@ describe('InlineTraceTimeline', () => {
     expect(wrapper.find('.trace-stage[data-stage="execution"]').exists()).toBe(true)
     expect(wrapper.find('.trace-stage-events .inline-trace-event').exists()).toBe(true)
     expect(wrapper.find('.trace-waiting .runtime-spinner').exists()).toBe(true)
+    vi.useRealTimers()
+  })
+
+  it('scrolls to the latest trace event when new events arrive', async () => {
+    vi.useFakeTimers()
+    const scrollIntoView = vi.fn()
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    })
+    const wrapper = mount(InlineTraceTimeline, { props: { run, selected: true } })
+
+    await vi.advanceTimersByTimeAsync(60)
+    expect(scrollIntoView).toHaveBeenCalled()
+
+    scrollIntoView.mockClear()
+    await wrapper.setProps({
+      run: {
+        ...run,
+        events: [...run.events, event(3, 'agent.tool.completed')],
+      },
+    })
+
+    await vi.advanceTimersByTimeAsync(80)
+
+    expect(scrollIntoView).toHaveBeenCalled()
+    vi.useRealTimers()
   })
 })

@@ -50,6 +50,7 @@ class RunService:
         user_id: str,
         thinking: bool,
         profile_id: str | None = None,
+        phone_mode: bool = False,
         auth_token: str | None = None,
         background_tasks: BackgroundTasks,
     ) -> RunRecord:
@@ -94,6 +95,7 @@ class RunService:
             domain_id=profile.domain_id,
             profile_id=profile.profile_id,
             site_id=profile.site_id,
+            source_context=_interaction_source_context(phone_mode=phone_mode),
             status="accepted",
         ))
         background_tasks.add_task(
@@ -390,8 +392,25 @@ class RunService:
                 )
 
 
+def _interaction_source_context(*, phone_mode: bool) -> dict[str, Any]:
+    if not phone_mode:
+        return {}
+    return {
+        "interaction_mode": {
+            "channel": "phone",
+            "voice_reply": True,
+        },
+        "response_style": {
+            "spoken": True,
+            "concise": True,
+            "tone": "warm_phone_call",
+        },
+    }
+
+
 def _fail_run(run: RunRecord, error: str) -> None:
     run.status = "failed"
+    run.error = error
     run.final_response = error
 
 
