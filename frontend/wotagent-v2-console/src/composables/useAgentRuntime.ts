@@ -157,15 +157,15 @@ async function refreshRun(runId: string): Promise<void> {
   const run = runById(runId)
   if (!run) return
   try {
-    const shouldReplay = run.events.length === 0
+    const after = run.events.at(-1)?.sequence ?? 0
     const [record, taskResponse, replay] = await Promise.all([
       agentV2Api.getRun(runId),
       agentV2Api.getRunTasks(runId),
-      shouldReplay ? agentV2Api.getEvents(runId, 0) : Promise.resolve(null),
+      agentV2Api.getEvents(runId, after),
     ])
     applyRecord(run, record)
     run.tasks = taskResponse.tasks
-    replay?.events.forEach((event) => addEvent(run, event, false))
+    replay.events.forEach((event) => addEvent(run, event, false))
     syncTurn(run)
     if (!ACTIVE_STATUSES.has(run.status)) {
       stopTransport(runId)

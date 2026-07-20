@@ -163,4 +163,100 @@ describe('useAgentRuntime refresh recovery', () => {
 
     wrapper.unmount()
   })
+
+  it('pulls trailing events before closing a terminal run transport', async () => {
+    const activeRun: RunRecord = {
+      ...run,
+      run_id: 'run-terminal-tail',
+      turn_id: 'turn-terminal-tail',
+      conversation_id: 'conv-terminal-tail',
+      status: 'running',
+      final_response: '',
+      updated_at: '2026-07-18T10:00:01Z',
+    }
+    const terminalRun: RunRecord = {
+      ...activeRun,
+      status: 'completed',
+      final_response: '已完成',
+      updated_at: '2026-07-18T10:00:03Z',
+    }
+    const startedEvent = {
+      ...events[0],
+      event_id: 'run-terminal-tail:1',
+      run_id: activeRun.run_id,
+      turn_id: activeRun.turn_id,
+      timestamp: activeRun.created_at,
+    }
+    const tailEvent = {
+      ...events[1],
+      event_id: 'run-terminal-tail:2',
+      run_id: activeRun.run_id,
+      turn_id: activeRun.turn_id,
+      type: 'run.completed',
+      data: { response: '已完成' },
+    }
+    const getEvents = vi.spyOn(agentV2Api, 'getEvents')
+      .mockResolvedValueOnce({
+        run_id: activeRun.run_id,
+        events: [startedEvent],
+        next_cursor: 1,
+      })
+      .mockResolvedValueOnce({
+        run_id: activeRun.run_id,
+        events: [tailEvent],
+        next_cursor: 2,
+      })
+    vi.spyOn(agentV2Api, 'listConversations').mockResolvedValue({
+      conversations: [{
+        conversation_id: activeRun.conversation_id,
+        user_id: activeRun.user_id,
+        role: 'operator',
+        title: '终态补拉',
+        created_at: activeRun.created_at,
+        updated_at: terminalRun.updated_at,
+        turn_count: 1,
+      }],
+    })
+    vi.spyOn(agentV2Api, 'getConversationTurns').mockResolvedValue({
+      conversation_id: activeRun.conversation_id,
+      turns: [{
+        turn_id: activeRun.turn_id,
+        conversation_id: activeRun.conversation_id,
+        run_id: activeRun.run_id,
+        user_message: activeRun.root_goal,
+        assistant_message: terminalRun.final_response,
+        status: terminalRun.status,
+        created_at: activeRun.created_at,
+        updated_at: terminalRun.updated_at,
+      }],
+    })
+    const getRun = vi.spyOn(agentV2Api, 'getRun')
+    getRun
+      .mockResolvedValueOnce(activeRun)
+      .mockResolvedValueOnce(terminalRun)
+    vi.spyOn(agentV2Api, 'getRunTasks').mockResolvedValue({
+      run_id: activeRun.run_id,
+      tasks: [],
+    })
+
+    let runtime!: ReturnType<typeof useAgentRuntime>
+    const wrapper = mount(defineComponent({
+      setup() {
+        runtime = useAgentRuntime()
+        return () => null
+      },
+    }))
+
+    await runtime.switchIdentity('JH-1', 'operator')
+    await runtime.inspectRun(activeRun.run_id)
+    await nextTick()
+
+    expect(runtime.runs[0].events.map((event) => event.sequence)).toEqual([1, 2])
+    expect(runtime.runs[0].status).toBe('completed')
+    expect(runtime.runs[0].streamState).toBe('closed')
+    expect(getEvents).toHaveBeenNthCalledWith(1, activeRun.run_id)
+    expect(getEvents).toHaveBeenNthCalledWith(2, activeRun.run_id, 1)
+
+    wrapper.unmount()
+  })
 })

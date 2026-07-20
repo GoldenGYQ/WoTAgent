@@ -361,7 +361,20 @@ watch(
 </template>
 
 <style scoped>
-.identity-workbench { display: flex; flex-direction: column; gap: 14px; }
+.identity-workbench {
+  box-sizing: border-box;
+  min-height: 0;
+  height: calc(100dvh - 50px);
+  max-height: calc(100dvh - 50px);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 18px 22px 30px;
+  background: #f6f7f9;
+}
 .identity-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .identity-header strong { font-size: 16px; }
 .identity-header small { display: block; margin-top: 4px; color: var(--text-muted); }

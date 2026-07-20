@@ -143,8 +143,8 @@ def load_tds() -> list[ThingDescription]:
 
 _LOCATION_SYNONYMS: dict[str, set[str]] = {
     "living_room": {"living_room", "living room", "parlor", "客厅", "起居室", "大堂"},
-    "bedroom1": {"bedroom1", "bedroom 1", "主卧", "卧室1", "master bedroom"},
-    "bedroom2": {"bedroom2", "bedroom 2", "次卧", "卧室2", "guest bedroom"},
+    "bedroom1": {"bedroom1", "bedroom 1", "主卧", "卧室1", "master bedroom", "a-101", "a101"},
+    "bedroom2": {"bedroom2", "bedroom 2", "次卧", "卧室2", "guest bedroom", "a-102", "a102"},
     "bathroom1": {"bathroom1", "bathroom 1", "主卫", "卫生间1", "浴室1"},
     "bathroom2": {"bathroom2", "bathroom 2", "客卫", "卫生间2", "浴室2"},
     "kitchen": {"kitchen", "厨房"},
@@ -155,10 +155,10 @@ _LOCATION_SYNONYMS: dict[str, set[str]] = {
 def _match_location(td_loc: str, query: str) -> bool:
     if td_loc == query:
         return True
-    # Check synonym groups
     for canonical, aliases in _LOCATION_SYNONYMS.items():
-        if query in aliases:
-            return td_loc == canonical
+        group = {canonical, *aliases}
+        if td_loc in group and query in group:
+            return True
     # Prefix match: e.g. "bedroom" matches "bedroom1", "bedroom2"
     if td_loc.startswith(query) or query.startswith(td_loc):
         return True

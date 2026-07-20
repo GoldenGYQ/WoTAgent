@@ -69,6 +69,7 @@ describe('TaskWorkspace', () => {
         currentAccountRole: 'viewer',
         currentAccountRoleLabel: '家属观察者',
         currentSubjectName: '李奶奶',
+        currentDomainId: 'eldercare',
         sidebarCollapsed: false,
       },
     })
@@ -90,19 +91,42 @@ describe('TaskWorkspace', () => {
         currentAccountName: '王护理员',
         currentAccountRole: 'operator',
         currentSubjectName: '张爷爷',
+        currentDomainId: 'eldercare',
         sidebarCollapsed: false,
       },
     })
 
     expect(wrapper.text()).toContain('设备控制')
     expect(wrapper.text()).toContain('条件联动任务')
+    expect(wrapper.text()).toContain('打开张爷爷房间的灯并调到 45% 亮度')
+    expect(wrapper.text()).not.toContain('打开客厅灯并调到 45% 亮度')
     const example = wrapper.findAll('.guidance-examples button').find(
-      (item) => item.text().includes('奇数就打开空调'),
+      (item) => item.text().includes('如果偏热就降温'),
     )
     expect(example).toBeDefined()
     await example!.trigger('click')
     expect(wrapper.emitted('example')?.[0]).toEqual([
-      '检查开着的灯数量，奇数就打开空调，偶数就打开加湿器',
+      '检查张爷爷房间当前温湿度，如果偏热就降温，如果偏干就提醒补充湿度',
     ])
+  })
+
+  it('shows smart home examples when the current domain is smart_home', () => {
+    const wrapper = mount(TaskWorkspace, {
+      props: {
+        conversation: null,
+        runs: [],
+        activeRun: null,
+        currentAccountId: 'JH-9',
+        currentAccountName: '周管家',
+        currentAccountRole: 'operator',
+        currentSubjectName: '别墅',
+        currentDomainId: 'smart_home',
+        sidebarCollapsed: false,
+      },
+    })
+
+    expect(wrapper.text()).toContain('打开客厅灯并调到 45% 亮度')
+    expect(wrapper.text()).toContain('检查开着的灯数量，奇数就打开空调，偶数就打开加湿器')
+    expect(wrapper.text()).not.toContain('打开别墅房间的灯并调到 45% 亮度')
   })
 })

@@ -25,8 +25,8 @@ from ..wot import load_tds
 
 _LOCATION_TERMS: dict[str, tuple[str, ...]] = {
     "living_room": ("客厅", "起居室", "living room", "parlor"),
-    "bedroom1": ("主卧", "卧室1", "bedroom1", "master bedroom"),
-    "bedroom2": ("次卧", "卧室2", "bedroom2", "guest bedroom"),
+    "bedroom1": ("主卧", "卧室1", "bedroom1", "master bedroom", "A-101", "A101"),
+    "bedroom2": ("次卧", "卧室2", "bedroom2", "guest bedroom", "A-102", "A102"),
     "kitchen": ("厨房", "kitchen"),
     "study": ("书房", "study"),
     "bathroom1": ("主卫", "卫生间1", "bathroom1"),
@@ -260,10 +260,14 @@ class LangChainTaskPlanner:
             state.get("conversation_history", []),
         )
         loop_context = state.get("context", {}).get("agent_loop")
-        devices = select_capability_context(
-            all_devices,
-            selection_text,
-            max_devices=24 if loop_context else 8,
+        devices = (
+            list(all_devices)
+            if provided and loop_context
+            else select_capability_context(
+                all_devices,
+                selection_text,
+                max_devices=24 if loop_context else 8,
+            )
         )
         runtime_context = dict(state.get("context", {}).get("runtime", {}))
         if loop_context:
@@ -310,6 +314,12 @@ class LangChainTaskPlanner:
                     "prompt_version": "planner-v3",
                     "device_count": len(devices),
                     "all_device_count": len(all_devices),
+                    "selected_device_ids": [
+                        str(device.get("device_id", "")) for device in devices
+                    ],
+                    "all_device_ids": [
+                        str(device.get("device_id", "")) for device in all_devices
+                    ],
                     "message_length": len(state.get("message", "")),
                     "attempt": 1,
                     "thinking": thinking,

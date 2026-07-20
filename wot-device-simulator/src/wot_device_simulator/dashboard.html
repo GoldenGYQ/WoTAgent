@@ -320,6 +320,23 @@
       min-width: 40px;
       text-align: right;
     }
+    .vitals-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .vitals-grid label {
+      display: grid;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 700;
+    }
+    .remote-footnote {
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
     .toggle-switch {
       position: relative;
       display: inline-flex;
@@ -651,8 +668,12 @@
 
     function statusChips(device, state) {
       const out = [];
-      const on = state?.on === true;
-      out.push(`<span class="chip ${on ? 'good' : 'warn'}">${on ? '运行中' : '关闭'}</span>`);
+      if ('on' in (state || {}) || hasAction(device, 'turnOn') || hasAction(device, 'turnOff')) {
+        const on = state?.on === true;
+        out.push(`<span class="chip ${on ? 'good' : 'warn'}">${on ? '运行中' : '关闭'}</span>`);
+      } else if ((device.capabilities || []).includes('health')) {
+        out.push('<span class="chip good">健康采集</span>');
+      }
       if (device.location) out.push(`<span class="chip">${device.location}</span>`);
       (device.capabilities || []).slice(0, 2).forEach(c => out.push(`<span class="chip">${c}</span>`));
       return out.join('');
@@ -674,6 +695,17 @@
       return actions.includes(name);
     }
 
+    function deviceDomId(deviceId) {
+      return String(deviceId).replace(/[^a-zA-Z0-9_-]/g, '_');
+    }
+
+    function temperatureControlSpec(device, value = 26) {
+      if (hasAction(device, 'setTemperature')) {
+        return { action: 'setTemperature', params: { temperature: Number(value) } };
+      }
+      return { action: 'setTemp', params: { temp: Number(value) } };
+    }
+
     function controlButtons(device, state) {
       const deviceId = JSON.stringify(device.device_id);
       const buttons = [];
@@ -683,7 +715,10 @@
       if (hasAction(device, 'setMistLevel')) buttons.push(`<button class="btn-soft" onclick='askAndControl(${deviceId}, "setMistLevel", {"level":1})'>雾量</button>`);
       if (hasAction(device, 'setSpeed')) buttons.push(`<button class="btn-soft" onclick='askAndControl(${deviceId}, "setSpeed", {"speed":2})'>风速</button>`);
       if (hasAction(device, 'setBrightness') || hasAction(device, 'setBrightnessLevel')) buttons.push(`<button class="btn-secondary" onclick='askAndControl(${deviceId}, "setBrightness", {"level":80})'>亮度</button>`);
-      if (hasAction(device, 'setTemp') || hasAction(device, 'setTemperature')) buttons.push(`<button class="btn-secondary" onclick='askAndControl(${deviceId}, "setTemp", {"temp":26})'>温度</button>`);
+      if (hasAction(device, 'setTemp') || hasAction(device, 'setTemperature')) {
+        const spec = temperatureControlSpec(device, 26);
+        buttons.push(`<button class="btn-secondary" onclick='askAndControl(${deviceId}, "${spec.action}", ${JSON.stringify(spec.params)})'>温度</button>`);
+      }
       if (buttons.length === 0) buttons.push(`<button class="btn-ghost" onclick='fillControlFromState(${deviceId}, ${JSON.stringify(device.actions || [])})'>手动</button>`);
       return buttons.join('');
     }
@@ -728,7 +763,7 @@
       } else if (kind === 'temperature') {
         label = '温度';
         value = Number(state.targetTemp ?? state.currentTemperature ?? 26);
-        action = hasAction(device, 'setTemp') ? 'setTemp' : 'setTemperature';
+        action = temperatureControlSpec(device, value).action;
         min = 16;
         max = 30;
         step = 0.5;
@@ -756,6 +791,48 @@
             <input type="range" min="${min}" max="${max}" step="${step}" value="${value}" oninput='this.nextElementSibling.textContent = this.value${suffix ? ` + "${suffix}"` : ''}' onchange='applySlider(${deviceId}, "${action}", this.value, "${kind}")' />
             <span class="remote-value">${value}${suffix}</span>
           </div>
+        </div>
+      `;
+    }
+
+    function vitalsEditor(device, state) {
+      if (!hasAction(device, 'updateVitals')) return '';
+      const domId = deviceDomId(device.device_id);
+      const heartRate = Number(state.heartRate ?? 78);
+      const bloodPressure = escapeHtml(state.bloodPressure ?? '122/78');
+      const spo2 = Number(state.spo2 ?? 97);
+      const observedAt = escapeHtml(state.observedAt ?? '');
+      return `
+        <div class="remote">
+          <div class="remote-label">生命体征编辑</div>
+          <div class="vitals-grid">
+            <label>
+              心率
+              <input id="${domId}-heartRate" type="number" min="30" max="220" value="${heartRate}" />
+            </label>
+            <label>
+              血氧
+              <input id="${domId}-spo2" type="number" min="50" max="100" value="${spo2}" />
+            </label>
+            <label>
+              血压
+              <input id="${domId}-bloodPressure" type="text" value="${bloodPressure}" placeholder="例如 128/82" />
+            </label>
+            <label>
+              采集时间
+              <input id="${domId}-observedAt" type="datetime-local" value="${observedAt ? observedAt.slice(0, 16) : ''}" />
+            </label>
+          </div>
+          <div class="remote-row inline">
+            <span class="remote-label">跌倒标记</span>
+            <label class="toggle-switch">
+              <input id="${domId}-fallDetected" type="checkbox" ${state.fallDetected === true ? 'checked' : ''} />
+              <span class="toggle-slider"></span>
+            </label>
+            <span class="remote-value">${state.fallDetected === true ? '告警' : '正常'}</span>
+          </div>
+          <button class="btn-primary" onclick='applyVitals(${JSON.stringify(device.device_id)})'>更新手环数据</button>
+          <div class="remote-footnote">直接调用 <code>updateVitals</code>，用于在仿真端注入最新心率、血压、血氧和跌倒状态。</div>
         </div>
       `;
     }
@@ -791,6 +868,8 @@
       if (mist) blocks.push(mist);
       const mode = selectControl(device, state);
       if (mode) blocks.push(mode);
+      const vitals = vitalsEditor(device, state);
+      if (vitals) blocks.push(vitals);
       return blocks.length ? `<div class="remote">${blocks.join('')}</div>` : '';
     }
 
@@ -828,8 +907,13 @@
         if (t !== null) stateRows.push(renderMeter('温度', t, '°C', 40));
         if (h !== null) stateRows.push(renderMeter('湿度', h, '%', 100));
         if (pm !== null) stateRows.push(renderMeter('PM2.5', pm, '', 150));
+        if (state.heartRate !== undefined) stateRows.push(renderMeter('心率', state.heartRate, ' bpm', 180));
+        if (state.spo2 !== undefined) stateRows.push(renderMeter('血氧', state.spo2, '%', 100));
         if (state.brightness !== undefined) stateRows.push(renderMeter('亮度', state.brightness, '%', 100));
         if (state.targetTemp !== undefined) stateRows.push(`<div class="device-detail">目标温度 <code>${state.targetTemp}</code></div>`);
+        if (state.bloodPressure !== undefined) stateRows.push(`<div class="device-detail">血压 <code>${escapeHtml(state.bloodPressure)}</code></div>`);
+        if (state.fallDetected !== undefined) stateRows.push(`<div class="device-detail">跌倒状态 <code>${state.fallDetected ? 'true' : 'false'}</code></div>`);
+        if (state.observedAt !== undefined) stateRows.push(`<div class="device-detail">采集时间 <code>${escapeHtml(state.observedAt || '--')}</code></div>`);
         const stateText = Object.entries(state).slice(0, 5).map(([k,v]) => `${k}=${v}`).join(' · ') || '暂无状态';
         return `
           <article class="device-card ${inf.active ? 'active' : 'offline'}">
@@ -964,7 +1048,10 @@
       document.getElementById('ctrlAction').value = action;
       const params = {};
       if (kind === 'brightness') params.level = Number(value);
-      if (kind === 'temperature') params.temp = Number(value);
+      if (kind === 'temperature') {
+        if (action === 'setTemperature') params.temperature = Number(value);
+        else params.temp = Number(value);
+      }
       if (kind === 'speed') params.speed = Number(value);
       if (kind === 'mist') params.level = Number(value);
       document.getElementById('ctrlParams').value = JSON.stringify(params, null, 2);
@@ -983,6 +1070,19 @@
       document.getElementById('ctrlAction').value = action;
       document.getElementById('ctrlParams').value = JSON.stringify(params, null, 2);
       await controlDevice();
+    }
+
+    async function applyVitals(deviceId) {
+      const domId = deviceDomId(deviceId);
+      const observedAtInput = document.getElementById(`${domId}-observedAt`).value;
+      const params = {
+        heartRate: Number(document.getElementById(`${domId}-heartRate`).value || 0),
+        bloodPressure: document.getElementById(`${domId}-bloodPressure`).value.trim() || '122/78',
+        spo2: Number(document.getElementById(`${domId}-spo2`).value || 0),
+        fallDetected: document.getElementById(`${domId}-fallDetected`).checked,
+        observedAt: observedAtInput ? new Date(observedAtInput).toISOString() : new Date().toISOString(),
+      };
+      await askAndControl(deviceId, 'updateVitals', params);
     }
 
     async function controlDevice() {

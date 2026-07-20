@@ -105,3 +105,15 @@ class TestTDLoading:
         assert len(parlor) == len(living_room)
         for d in parlor:
             assert d.location == "living_room"
+
+    def test_bedroom_aliases_match_a101_and_bedroom1_devices(self):
+        """A-101 style and bedroom1 style location aliases resolve to the same room group."""
+        from wot_device_simulator.td import find_devices
+
+        bedroom1_ids = {device.device_id for device in find_devices(location="bedroom1")}
+        a101_ids = {device.device_id for device in find_devices(location="A-101")}
+
+        assert "ac-002" in bedroom1_ids
+        assert "environment-sensor-001" in bedroom1_ids
+        assert "ac-002" in a101_ids
+        assert "environment-sensor-001" in a101_ids

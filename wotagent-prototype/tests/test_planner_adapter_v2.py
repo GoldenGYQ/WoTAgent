@@ -310,6 +310,47 @@ def test_observe_act_planner_receives_observations_and_all_relevant_devices() ->
     assert all(device["device_id"] in capability_prompt for device in devices)
 
 
+def test_observe_act_planner_keeps_all_scoped_devices_for_follow_up_control() -> None:
+    runnable = FakeRunnable({"intent": "chat", "summary": "done", "steps": []})
+    devices = [
+        {
+            "device_id": "environment-sensor-001",
+            "title": "Environment Sensor",
+            "location": "bedroom1",
+            "device_type": "environment_sensor",
+            "actions": [{"name": "updateEnvironment", "input_schema": {"type": "object"}}],
+            "properties": ["temperature"],
+        },
+        {
+            "device_id": "ac-002",
+            "title": "Bedroom AC",
+            "location": "bedroom1",
+            "device_type": "air_conditioner",
+            "actions": [{"name": "setTemperature", "input_schema": {"type": "object"}}],
+            "properties": ["targetTemp", "on"],
+        },
+    ]
+
+    asyncio.run(LangChainTaskPlanner(runnable)({
+        "message": "对张爷爷房间（A-101）执行降温操作，将温度降至28℃以下",
+        "context": {
+            "devices": devices,
+            "agent_loop": {
+                "execution_mode": "observe_act_loop",
+                "iteration": 2,
+                "observations": [{
+                    "device_id": "environment-sensor-001",
+                    "result": {"temperature": 30.5},
+                }],
+            },
+        },
+    }))
+
+    capability_prompt = runnable.messages[2][1]
+    assert '"environment-sensor-001"' in capability_prompt
+    assert '"ac-002"' in capability_prompt
+
+
 def test_conditional_plan_reviewer_blocks_inactive_branch_and_repairs_plan() -> None:
     class SequencedPlanner:
         def __init__(self) -> None:
@@ -427,6 +468,8 @@ def test_planner_records_usage_and_safe_reasoning_summary() -> None:
     assert started.data["agent_id"] == "environment_agent"
     assert started.data["system_characters"] > 0
     assert started.data["capability_context_characters"] > 0
+    assert started.data["selected_device_ids"] == ["light-001"]
+    assert "light-001" in started.data["all_device_ids"]
     summary = next(event for event in events if event.type == "model.reasoning.summary")
     assert summary.data == {"summary": "打开客厅灯", "intent": "control", "step_count": 1}
     assert all("reasoning_content" not in event.data for event in events)

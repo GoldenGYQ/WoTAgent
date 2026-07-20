@@ -1,0 +1,50 @@
+{
+  "@context": "https://www.w3.org/2022/wot/td/v1.1",
+  "id": "urn:dev:wot:light-102",
+  "title": "A-102 Light",
+  "description": "Dedicated room light for eldercare room A-102.",
+  "location": "A-102",
+  "capabilities": [
+    "luminance"
+  ],
+  "actions": {
+    "turnOn": {
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "turnOff": {
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "setBrightness": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "brightness": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "brightness"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "properties": {
+    "on": {
+      "type": "boolean"
+    },
+    "brightness": {
+      "type": "number"
+    }
+  }
+}

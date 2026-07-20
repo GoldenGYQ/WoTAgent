@@ -157,7 +157,7 @@ const guidance = computed(() => {
       icon: SlidersHorizontal,
       examples: [
         `把${subject}房间温度调到 24 度，并确认是否生效`,
-        '打开客厅灯并调到 45% 亮度',
+        `打开${subject}房间的灯并调到 45% 亮度`,
       ],
     },
     {
@@ -165,7 +165,7 @@ const guidance = computed(() => {
       description: '让 Agent 观察状态、计算条件并选择后续动作',
       icon: ShieldCheck,
       examples: [
-        '检查开着的灯数量，奇数就打开空调，偶数就打开加湿器',
+        `检查${subject}房间当前温湿度，如果偏热就降温，如果偏干就提醒补充湿度`,
         `同时检查${subject}的健康状态和房间环境，有风险时创建护理任务`,
       ],
     },

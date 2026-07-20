@@ -16,10 +16,12 @@
         "wristband-001",
         "mattress-001",
         "environment-sensor-001",
+        "light-101",
         "ac-002",
         "wristband-002",
         "mattress-002",
         "environment-sensor-002",
+        "light-102",
         "ac-003"
       ],
       "enabled_agents": [
