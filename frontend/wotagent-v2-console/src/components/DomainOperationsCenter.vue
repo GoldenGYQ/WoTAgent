@@ -26,6 +26,7 @@ import type {
   EldercareTrendResponse,
   EldercareTrendSeries,
   MonitorStatus,
+  RiskEventStatus,
 } from '../types/agent'
 
 const props = defineProps<{
@@ -54,6 +55,8 @@ const signalKey = ref('')
 const signalValue = ref('')
 const signalUnit = ref('')
 const trendLookbackMinutes = ref(180)
+const eventSeverityFilter = ref('')
+const eventStatusFilter = ref('')
 let refreshTimer: ReturnType<typeof setInterval> | undefined
 let refreshInFlight = false
 
@@ -112,6 +115,17 @@ function executionLabel(action: DomainAction): string {
     recorded: '平台记录',
   }
   return labels[action.execution_mode] ?? action.execution_mode
+}
+
+function riskStatusLabel(status: RiskEventStatus): string {
+  const labels: Record<RiskEventStatus, string> = {
+    open: '待确认',
+    acknowledged: '已确认',
+    in_progress: '处理中',
+    resolved: '已解决',
+    false_positive: '误报',
+  }
+  return labels[status]
 }
 
 function numericSeriesValues(series: EldercareTrendSeries, secondary = false): number[] {
@@ -196,7 +210,15 @@ async function refresh(): Promise<void> {
       agentV2Api.getDomainOverview(domainId.value, subjectId.value, props.principalId),
       trendRequest,
       agentV2Api.listDomainResources(domainId.value, subjectId.value, props.principalId),
-      agentV2Api.listDomainEvents(domainId.value, subjectId.value, props.principalId),
+      agentV2Api.listDomainEvents(
+        domainId.value,
+        subjectId.value,
+        props.principalId,
+        {
+          severity: eventSeverityFilter.value || undefined,
+          status: eventStatusFilter.value || undefined,
+        },
+      ),
       agentV2Api.listDomainActions(domainId.value, subjectId.value, props.principalId),
       agentV2Api.getDomainMonitorStatus(domainId.value),
     ])
@@ -267,11 +289,16 @@ async function runScenario(scenario: string): Promise<void> {
   }
 }
 
-async function acknowledge(eventId: string): Promise<void> {
+async function updateEventStatus(eventId: string, status: RiskEventStatus): Promise<void> {
   loading.value = true
   error.value = ''
   try {
-    await agentV2Api.acknowledgeDomainEvent(domainId.value, eventId, props.principalId)
+    await agentV2Api.updateDomainEventStatus(
+      domainId.value,
+      eventId,
+      props.principalId,
+      status,
+    )
     await refresh()
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause)
@@ -303,6 +330,9 @@ watch(signalKey, (key) => configureSignal(manifest.value?.telemetry_signals.find
 watch(() => props.principalId, () => void loadSubjects())
 watch(trendLookbackMinutes, () => {
   if (domainId.value === 'eldercare' && subjectId.value) void refresh()
+})
+watch([eventSeverityFilter, eventStatusFilter], () => {
+  if (activeSection.value === 'events') void refresh()
 })
 
 onMounted(() => {
@@ -550,12 +580,13 @@ onBeforeUnmount(() => {
       </div>
       <div class="table-scroll">
         <table>
-          <thead><tr><th>规则</th><th>判定条件</th><th>数据窗口</th><th>事件处理</th></tr></thead>
+          <thead><tr><th>规则</th><th>判定条件</th><th>数据窗口</th><th>等级策略</th><th>事件处理</th></tr></thead>
           <tbody>
             <tr v-for="rule in manifest?.monitor_rules ?? []" :key="rule.key">
               <td><strong>{{ rule.label }}</strong><small>{{ rule.key }}</small></td>
               <td>{{ rule.condition }}</td>
               <td>{{ rule.freshness }}</td>
+              <td><code>{{ rule.severity_policy || '--' }}</code></td>
               <td>{{ rule.default_response }}</td>
             </tr>
           </tbody>
@@ -565,7 +596,26 @@ onBeforeUnmount(() => {
 
     <section v-else class="event-layout">
       <div class="section-body">
-        <div class="section-heading"><div><h2>领域事件</h2><p>Monitor 事件与关联智能体 Run</p></div><span>{{ events.length }} 项</span></div>
+        <div class="section-heading event-heading">
+          <div><h2>领域事件</h2><p>Monitor 事件、风险等级、处置状态与关联智能体 Run</p></div>
+          <div class="event-filters">
+            <select v-model="eventSeverityFilter" aria-label="风险等级筛选">
+              <option value="">全部等级</option>
+              <option value="critical">紧急</option>
+              <option value="high">高风险</option>
+              <option value="medium">中风险</option>
+            </select>
+            <select v-model="eventStatusFilter" aria-label="处置状态筛选">
+              <option value="">全部状态</option>
+              <option value="open">待确认</option>
+              <option value="acknowledged">已确认</option>
+              <option value="in_progress">处理中</option>
+              <option value="resolved">已解决</option>
+              <option value="false_positive">误报</option>
+            </select>
+            <span>{{ events.length }} 项</span>
+          </div>
+        </div>
         <div class="table-scroll">
           <table>
             <thead><tr><th>时间</th><th>级别</th><th>事件</th><th>关联 Run</th><th>状态</th></tr></thead>
@@ -580,9 +630,14 @@ onBeforeUnmount(() => {
                   </button>
                   <span v-else class="pending-label">等待处置</span>
                 </td>
-                <td>
-                  <button v-if="item.status === 'open'" class="ack-button" type="button" @click="acknowledge(item.event_id)"><Check :size="13" />确认</button>
-                  <span v-else>已处理</span>
+                <td class="risk-status-cell">
+                  <span class="risk-status" :data-status="item.status">{{ riskStatusLabel(item.status) }}</span>
+                  <button v-if="item.status === 'open'" class="event-action" type="button" @click="updateEventStatus(item.event_id, 'acknowledged')"><Check :size="13" />确认</button>
+                  <button v-else-if="item.status === 'acknowledged'" class="event-action" type="button" @click="updateEventStatus(item.event_id, 'in_progress')"><Play :size="13" />开始处置</button>
+                  <template v-else-if="item.status === 'in_progress'">
+                    <button class="event-action" type="button" @click="updateEventStatus(item.event_id, 'resolved')"><Check :size="13" />解决</button>
+                    <button class="event-action quiet" type="button" @click="updateEventStatus(item.event_id, 'false_positive')">误报</button>
+                  </template>
                 </td>
               </tr>
               <tr v-if="!events.length"><td colspan="5" class="empty-row">暂无领域事件</td></tr>
@@ -618,7 +673,7 @@ onBeforeUnmount(() => {
 .platform-label { color: var(--teal); font-size: 9px; font-weight: 800; }
 .domain-heading h1 { margin: 2px 0 0; font-size: 20px; }
 .domain-heading p, .section-heading p { margin: 3px 0 0; color: var(--text-muted); font-size: 11px; }
-.domain-toolbar, .telemetry-form, .scenario-list, .trend-toolbar { display: flex; align-items: center; gap: 8px; }
+.domain-toolbar, .telemetry-form, .scenario-list, .trend-toolbar, .event-filters { display: flex; align-items: center; gap: 8px; }
 select, input { height: 34px; border: 1px solid var(--line-strong); border-radius: 5px; padding: 0 9px; color: var(--text); background: #fff; }
 .domain-error { margin-top: 10px; padding: 9px 10px; color: var(--red); background: var(--red-soft); border: 1px solid #efcaca; border-radius: 5px; font-size: 12px; }
 .service-strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin-top: 14px; border: 1px solid var(--line); background: #fff; }
@@ -689,13 +744,33 @@ td small { margin-top: 3px; color: var(--text-faint); font-size: 9px; }
 .telemetry-form, .scenario-list { flex-wrap: wrap; padding: 14px 0; }
 .telemetry-form input { width: 120px; }
 .telemetry-form .unit-input { width: 70px; }
-.telemetry-form button, .scenario-list button, .ack-button, .run-link { height: 32px; display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line-strong); border-radius: 5px; padding: 0 10px; background: #fff; font-size: 10px; }
+.telemetry-form button, .scenario-list button, .event-action, .run-link { height: 32px; display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line-strong); border-radius: 5px; padding: 0 10px; background: #fff; font-size: 10px; }
 .telemetry-form button { color: #fff; border-color: var(--teal); background: var(--teal); }
 .scenario-list button:hover { border-color: var(--teal); color: var(--teal); }
 .severity { display: inline-flex; padding: 2px 5px; border-radius: 3px; color: var(--amber); background: var(--amber-soft); }
 .severity[data-level="critical"] { color: var(--red); background: var(--red-soft); }
 .severity[data-level="high"] { color: #9b4a13; background: #fff0e7; }
-.ack-button { height: 26px; color: var(--green); border-color: #b9d9cc; background: var(--green-soft); }
+.event-heading { align-items: flex-end; }
+.event-filters { flex-wrap: wrap; justify-content: flex-end; }
+.event-filters select { height: 30px; font-size: 10px; }
+.event-filters > span { color: var(--text-muted); font-size: 10px; white-space: nowrap; }
+.risk-status-cell { min-width: 195px; }
+.risk-status {
+  display: inline-flex;
+  min-width: 48px;
+  justify-content: center;
+  margin-right: 5px;
+  padding: 3px 6px;
+  color: var(--text-muted);
+  background: var(--surface-muted);
+  font-size: 9px;
+}
+.risk-status[data-status="open"] { color: var(--red); background: var(--red-soft); }
+.risk-status[data-status="acknowledged"] { color: var(--amber); background: var(--amber-soft); }
+.risk-status[data-status="in_progress"] { color: var(--teal); background: var(--teal-soft); }
+.risk-status[data-status="resolved"] { color: var(--green); background: var(--green-soft); }
+.event-action { height: 26px; color: var(--green); border-color: #b9d9cc; background: var(--green-soft); }
+.event-action.quiet { color: var(--text-muted); border-color: var(--line-strong); background: #fff; }
 .run-link { height: 25px; max-width: 150px; overflow: hidden; color: var(--teal); border: 0; padding: 0; background: transparent; font-family: "Cascadia Code", Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .pending-label, .empty-row { color: var(--text-faint); }
 .empty-row { padding: 22px; text-align: center; }

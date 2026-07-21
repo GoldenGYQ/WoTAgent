@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
@@ -37,6 +37,16 @@ class ScenarioRequest(BaseModel):
 
 class EventAcknowledgeRequest(BaseModel):
     principal_id: str = "local-user"
+
+
+class EventStatusUpdateRequest(BaseModel):
+    principal_id: str = "local-user"
+    status: Literal[
+        "acknowledged",
+        "in_progress",
+        "resolved",
+        "false_positive",
+    ]
 
 
 def create_domain_router(
@@ -169,6 +179,14 @@ def create_domain_router(
         domain_id: str,
         subject_id: str,
         principal_id: str = "local-user",
+        severity: Literal["medium", "high", "critical"] | None = None,
+        status: Literal[
+            "open",
+            "acknowledged",
+            "in_progress",
+            "resolved",
+            "false_positive",
+        ] | None = None,
         authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
         principal_id = authorized_principal(
@@ -183,6 +201,8 @@ def create_domain_router(
                 lambda: adapter(domain_id).events(
                     subject_id,
                     principal_id,
+                    severity,
+                    status,
                 )
             ),
         }
@@ -268,6 +288,26 @@ def create_domain_router(
             lambda: adapter(domain_id).acknowledge(
                 event_id,
                 principal_id,
+            )
+        )
+
+    @router.post("/{domain_id}/events/{event_id}/status")
+    async def update_event_status(
+        domain_id: str,
+        event_id: str,
+        request: EventStatusUpdateRequest,
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        principal_id = authorized_principal(
+            domain_id,
+            request.principal_id,
+            authorization,
+        )
+        return guarded(
+            lambda: adapter(domain_id).update_event_status(
+                event_id,
+                principal_id,
+                request.status,
             )
         )
 

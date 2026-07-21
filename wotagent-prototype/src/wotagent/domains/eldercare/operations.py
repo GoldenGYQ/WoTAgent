@@ -103,6 +103,7 @@ class EldercareDomainPlugin:
                 DomainScenario(key="low_spo2", label="低血氧"),
                 DomainScenario(key="fall", label="模拟跌倒"),
                 DomainScenario(key="hot_room", label="房间过热"),
+                DomainScenario(key="dry_room", label="房间湿度过低"),
             ],
             monitor_rules=[
                 MonitorRuleDefinition(
@@ -110,13 +111,23 @@ class EldercareDomainPlugin:
                     label="持续高心率",
                     condition="连续约 5 分钟 > 100 bpm",
                     freshness="5 分钟",
+                    severity_policy="high",
                     default_response="创建风险事件并交由 Supervisor 协调",
+                ),
+                MonitorRuleDefinition(
+                    key="high_blood_pressure",
+                    label="持续高血压",
+                    condition="至少 3 次读数持续约 5 分钟 >= 140/90 mmHg",
+                    freshness="10 分钟",
+                    severity_policy=">= 180/120: critical；其他: high",
+                    default_response="创建高风险事件并要求人工复核",
                 ),
                 MonitorRuleDefinition(
                     key="low_spo2",
                     label="低血氧",
                     condition="SpO2 < 92%",
                     freshness="5 分钟",
+                    severity_policy="< 88%: critical；88%-92%: high",
                     default_response="创建高风险事件并通知人工",
                 ),
                 MonitorRuleDefinition(
@@ -124,6 +135,7 @@ class EldercareDomainPlugin:
                     label="疑似跌倒",
                     condition="fall_detected = true",
                     freshness="1 分钟",
+                    severity_policy="critical",
                     default_response="创建紧急事件并通知人工",
                 ),
                 MonitorRuleDefinition(
@@ -131,7 +143,16 @@ class EldercareDomainPlugin:
                     label="房间过热",
                     condition="室温 > 28 C",
                     freshness="10 分钟",
+                    severity_policy="medium",
                     default_response="委派环境与照护 Agent",
+                ),
+                MonitorRuleDefinition(
+                    key="room_humidity_out_of_range",
+                    label="湿度超出舒适范围",
+                    condition="湿度 < 35% 或 > 70%",
+                    freshness="10 分钟",
+                    severity_policy="medium",
+                    default_response="创建中风险事件并委派环境 Agent",
                 ),
             ],
             actors=[
@@ -280,6 +301,8 @@ class EldercareDomainPlugin:
         self,
         subject_id: str,
         principal_id: str,
+        severity: str | None = None,
+        status: str | None = None,
     ) -> list[dict[str, Any]]:
         self._require_access(subject_id, principal_id)
         return [
@@ -294,7 +317,11 @@ class EldercareDomainPlugin:
                 "source": item.source,
                 "run_id": item.run_id,
             }
-            for item in self.get_store().list_risks(subject_id)
+            for item in self.get_store().list_risks(
+                subject_id,
+                severity=severity,
+                status=status,
+            )
         ]
 
     def actions(
@@ -369,13 +396,35 @@ class EldercareDomainPlugin:
         if event is None:
             raise KeyError("risk event not found")
         self._require_access(event.resident_id, principal_id)
-        handled = self.get_store().handle_risk(event_id)
-        if handled is None:
+        acknowledged = self.get_store().update_risk_status(
+            event_id,
+            "acknowledged",
+        )
+        if acknowledged is None:
             raise KeyError("risk event not found")
         return {
-            "event_id": handled.event_id,
-            "status": handled.status,
-            "run_id": handled.run_id,
+            "event_id": acknowledged.event_id,
+            "status": acknowledged.status,
+            "run_id": acknowledged.run_id,
+        }
+
+    def update_event_status(
+        self,
+        event_id: str,
+        principal_id: str,
+        status: str,
+    ) -> dict[str, Any]:
+        event = self.get_store().get_risk(event_id)
+        if event is None:
+            raise KeyError("risk event not found")
+        self._require_access(event.resident_id, principal_id)
+        updated = self.get_store().update_risk_status(event_id, status)
+        if updated is None:
+            raise KeyError("risk event not found")
+        return {
+            "event_id": updated.event_id,
+            "status": updated.status,
+            "run_id": updated.run_id,
         }
 
     @staticmethod

@@ -31,6 +31,7 @@ class MonitorRuleDefinition(BaseModel):
     condition: str
     freshness: str
     default_response: str
+    severity_policy: str = ""
 
 
 class DomainActorDefinition(BaseModel):
@@ -85,6 +86,8 @@ class DomainPlugin(Protocol):
         self,
         subject_id: str,
         principal_id: str,
+        severity: str | None = None,
+        status: str | None = None,
     ) -> list[dict[str, Any]]: ...
 
     def actions(
@@ -113,6 +116,13 @@ class DomainPlugin(Protocol):
         self,
         event_id: str,
         principal_id: str,
+    ) -> dict[str, Any]: ...
+
+    def update_event_status(
+        self,
+        event_id: str,
+        principal_id: str,
+        status: str,
     ) -> dict[str, Any]: ...
 
 

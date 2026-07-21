@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
 
@@ -74,6 +74,14 @@ def create_eldercare_router(
     @router.get("/events")
     async def list_events(
         resident_id: str | None = None,
+        severity: Literal["medium", "high", "critical"] | None = None,
+        status: Literal[
+            "open",
+            "acknowledged",
+            "in_progress",
+            "resolved",
+            "false_positive",
+        ] | None = None,
         limit: int = 100,
     ) -> dict[str, Any]:
         return {
@@ -81,6 +89,8 @@ def create_eldercare_router(
                 item.model_dump(mode="json")
                 for item in get_store().list_risks(
                     resident_id,
+                    severity=severity,
+                    status=status,
                     limit=min(max(limit, 1), 500),
                 )
             ]
@@ -116,7 +126,7 @@ def create_eldercare_router(
 
     @router.post("/events/{event_id}/acknowledge")
     async def acknowledge_event(event_id: str) -> dict[str, Any]:
-        event = get_store().handle_risk(event_id)
+        event = get_store().update_risk_status(event_id, "acknowledged")
         if event is None:
             raise HTTPException(status_code=404, detail="risk event not found")
         return event.model_dump(mode="json")

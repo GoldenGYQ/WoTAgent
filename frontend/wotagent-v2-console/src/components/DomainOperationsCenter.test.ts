@@ -46,7 +46,21 @@ describe('DomainOperationsCenter', () => {
       }],
     })
     vi.spyOn(agentV2Api, 'listDomainResources').mockResolvedValue({ resources: [] })
-    vi.spyOn(agentV2Api, 'listDomainEvents').mockResolvedValue({ events: [] })
+    const listEvents = vi.spyOn(agentV2Api, 'listDomainEvents').mockResolvedValue({ events: [{
+      event_id: 'risk-1',
+      subject_id: 'elderly-001',
+      event_type: 'low_spo2',
+      severity: 'high',
+      message: '血氧偏低',
+      status: 'open',
+      occurred_at: '2026-07-18T08:00:00Z',
+      source: 'health-monitor',
+      run_id: 'run-1',
+    }] })
+    const updateEventStatus = vi.spyOn(agentV2Api, 'updateDomainEventStatus').mockResolvedValue({
+      event_id: 'risk-1',
+      status: 'acknowledged',
+    })
     vi.spyOn(agentV2Api, 'listDomainActions').mockResolvedValue({ actions: [] })
     vi.spyOn(agentV2Api, 'getDomainMonitorStatus').mockResolvedValue({
       service_id: 'eldercare-monitor',
@@ -76,6 +90,24 @@ describe('DomainOperationsCenter', () => {
     await wrapper.get('[data-section="history"]').trigger('click')
     expect(wrapper.text()).toContain('健康历史记录与趋势')
     expect(wrapper.text()).toContain('血压')
+    await wrapper.get('[data-section="events"]').trigger('click')
+    expect(wrapper.text()).toContain('血氧偏低')
+    expect(wrapper.text()).toContain('待确认')
+    expect(wrapper.find('[aria-label="风险等级筛选"]').exists()).toBe(true)
+    await wrapper.get('.event-action').trigger('click')
+    await flushPromises()
+    expect(updateEventStatus).toHaveBeenCalledWith(
+      'eldercare',
+      'risk-1',
+      'JH-1',
+      'acknowledged',
+    )
+    expect(listEvents).toHaveBeenCalledWith(
+      'eldercare',
+      'elderly-001',
+      'JH-1',
+      { severity: undefined, status: undefined },
+    )
     wrapper.unmount()
   })
 

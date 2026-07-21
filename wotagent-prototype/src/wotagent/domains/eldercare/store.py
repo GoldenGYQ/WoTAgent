@@ -11,7 +11,14 @@ from typing import Any
 from uuid import uuid4
 
 from ...paths import data_path
-from .models import HealthSummary, Resident, RiskEvent, SensorReading
+from .models import (
+    HealthSummary,
+    Resident,
+    RiskEvent,
+    RiskSeverity,
+    RiskStatus,
+    SensorReading,
+)
 
 
 class EldercareStore:
@@ -125,6 +132,10 @@ class EldercareStore:
                 connection.execute(
                     "ALTER TABLE risk_events ADD COLUMN run_id TEXT"
                 )
+            connection.execute(
+                "UPDATE risk_events SET status = 'resolved' "
+                "WHERE status = 'handled'"
+            )
 
     def upsert_resident(self, resident: Resident) -> Resident:
         with self._lock, self._connect() as connection:
@@ -457,12 +468,28 @@ class EldercareStore:
             "age_seconds": round(age_seconds, 3),
         }
 
-    def list_risks(self, resident_id: str | None = None, *, limit: int = 100) -> list[RiskEvent]:
+    def list_risks(
+        self,
+        resident_id: str | None = None,
+        *,
+        severity: RiskSeverity | None = None,
+        status: RiskStatus | None = None,
+        limit: int = 100,
+    ) -> list[RiskEvent]:
         query = "SELECT * FROM risk_events"
         params: list[Any] = []
+        conditions: list[str] = []
         if resident_id:
-            query += " WHERE resident_id = ?"
+            conditions.append("resident_id = ?")
             params.append(resident_id)
+        if severity:
+            conditions.append("severity = ?")
+            params.append(severity)
+        if status:
+            conditions.append("status = ?")
+            params.append(status)
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
         query += " ORDER BY occurred_at DESC LIMIT ?"
         params.append(limit)
         with self._lock, self._connect() as connection:
@@ -477,19 +504,50 @@ class EldercareStore:
             ).fetchone()
         return self._risk(row) if row else None
 
-    def handle_risk(self, event_id: str) -> RiskEvent | None:
+    def update_risk_status(
+        self,
+        event_id: str,
+        status: RiskStatus,
+    ) -> RiskEvent | None:
+        allowed: dict[str, set[str]] = {
+            "open": {"acknowledged"},
+            "acknowledged": {"in_progress", "resolved", "false_positive"},
+            "in_progress": {"resolved", "false_positive"},
+            "resolved": set(),
+            "false_positive": set(),
+        }
         with self._lock, self._connect() as connection:
-            cursor = connection.execute(
-                "UPDATE risk_events SET status = 'handled' WHERE event_id = ?",
+            current = connection.execute(
+                "SELECT status FROM risk_events WHERE event_id = ?",
                 (event_id,),
-            )
-            if cursor.rowcount == 0:
+            ).fetchone()
+            if current is None:
                 return None
+            current_status = str(current["status"])
+            if current_status != status:
+                if status not in allowed.get(current_status, set()):
+                    raise ValueError(
+                        f"risk status cannot transition from "
+                        f"'{current_status}' to '{status}'"
+                    )
+                connection.execute(
+                    "UPDATE risk_events SET status = ? WHERE event_id = ?",
+                    (status, event_id),
+                )
             row = connection.execute(
                 "SELECT * FROM risk_events WHERE event_id = ?",
                 (event_id,),
             ).fetchone()
         return self._risk(row) if row else None
+
+    def handle_risk(self, event_id: str) -> RiskEvent | None:
+        """Compatibility helper for callers that mean 'resolve this risk'."""
+        event = self.get_risk(event_id)
+        if event is None:
+            return None
+        if event.status == "open":
+            self.update_risk_status(event_id, "acknowledged")
+        return self.update_risk_status(event_id, "resolved")
 
     def link_risk_run(self, event_id: str, run_id: str) -> None:
         with self._lock, self._connect() as connection:
@@ -511,7 +569,11 @@ class EldercareStore:
             resident=resident,
             latest=self.latest(resident_id),
             heart_rate_avg=round(sum(numeric) / len(numeric), 1) if numeric else None,
-            open_risks=[item for item in self.list_risks(resident_id) if item.status == "open"],
+            open_risks=[
+                item
+                for item in self.list_risks(resident_id)
+                if item.status in {"open", "acknowledged", "in_progress"}
+            ],
         )
 
     def trend(

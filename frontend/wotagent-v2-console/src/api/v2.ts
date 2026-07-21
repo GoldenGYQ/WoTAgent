@@ -153,8 +153,11 @@ export const agentV2Api = {
   listDomainResources(domainId: string, subjectId: string, principalId: string): Promise<{ resources: DomainResource[] }> {
     return request(`/api/v2/domains/${encodeURIComponent(domainId)}/subjects/${encodeURIComponent(subjectId)}/resources?principal_id=${encodeURIComponent(principalId)}`)
   },
-  listDomainEvents(domainId: string, subjectId: string, principalId: string): Promise<{ events: DomainEvent[] }> {
-    return request(`/api/v2/domains/${encodeURIComponent(domainId)}/subjects/${encodeURIComponent(subjectId)}/events?principal_id=${encodeURIComponent(principalId)}`)
+  listDomainEvents(domainId: string, subjectId: string, principalId: string, filters?: { severity?: string; status?: string }): Promise<{ events: DomainEvent[] }> {
+    const query = new URLSearchParams({ principal_id: principalId })
+    if (filters?.severity) query.set('severity', filters.severity)
+    if (filters?.status) query.set('status', filters.status)
+    return request(`/api/v2/domains/${encodeURIComponent(domainId)}/subjects/${encodeURIComponent(subjectId)}/events?${query.toString()}`)
   },
   listDomainActions(domainId: string, subjectId: string, principalId: string): Promise<{ actions: DomainAction[] }> {
     return request(`/api/v2/domains/${encodeURIComponent(domainId)}/subjects/${encodeURIComponent(subjectId)}/actions?principal_id=${encodeURIComponent(principalId)}`)
@@ -170,6 +173,9 @@ export const agentV2Api = {
   },
   acknowledgeDomainEvent(domainId: string, eventId: string, principalId: string): Promise<Record<string, unknown>> {
     return request(`/api/v2/domains/${encodeURIComponent(domainId)}/events/${encodeURIComponent(eventId)}/acknowledge`, { method: 'POST', body: JSON.stringify({ principal_id: principalId }) })
+  },
+  updateDomainEventStatus(domainId: string, eventId: string, principalId: string, status: string): Promise<Record<string, unknown>> {
+    return request(`/api/v2/domains/${encodeURIComponent(domainId)}/events/${encodeURIComponent(eventId)}/status`, { method: 'POST', body: JSON.stringify({ principal_id: principalId, status }) })
   },
 
   createConversation(role: AgentRole, userId = 'local-user'): Promise<ConversationRecord> {

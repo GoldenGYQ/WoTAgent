@@ -300,4 +300,4 @@ def test_device_inventory_and_alert_acknowledgement(monkeypatch, tmp_path) -> No
     }
     assert inventory.json()["devices"][-1]["state"]["targetTemp"] == 24
     assert acknowledged.status_code == 200
-    assert acknowledged.json()["status"] == "handled"
+    assert acknowledged.json()["status"] == "acknowledged"

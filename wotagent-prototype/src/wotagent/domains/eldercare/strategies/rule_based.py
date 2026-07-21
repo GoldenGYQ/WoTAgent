@@ -29,7 +29,12 @@ def legacy_delegation_plan(event: RiskEvent) -> list[DelegatedTask]:
             "urgency": event.severity,
         },
     )]
-    if event.event_type in {"high_heart_rate", "low_spo2", "fall_detected"}:
+    if event.event_type in {
+        "high_heart_rate",
+        "high_blood_pressure",
+        "low_spo2",
+        "fall_detected",
+    }:
         care_actions.append(DelegatedAction(
             name="create_care_task",
             arguments={

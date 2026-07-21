@@ -201,6 +201,7 @@ export interface DomainMonitorRule {
   label: string
   condition: string
   freshness: string
+  severity_policy?: string
   default_response: string
 }
 
@@ -286,13 +287,20 @@ export interface DomainResource {
   error: string | null
 }
 
+export type RiskEventStatus =
+  | 'open'
+  | 'acknowledged'
+  | 'in_progress'
+  | 'resolved'
+  | 'false_positive'
+
 export interface DomainEvent {
   event_id: string
   subject_id: string
   event_type: string
   severity: 'medium' | 'high' | 'critical'
   message: string
-  status: string
+  status: RiskEventStatus
   occurred_at: string
   source: string
   run_id: string | null
@@ -429,9 +437,9 @@ export interface RiskEvent {
   resident_id: string
   event_type: string
   severity: 'medium' | 'high' | 'critical'
-  value: number | boolean
+  value: number | boolean | string
   message: string
-  status: string
+  status: RiskEventStatus
   occurred_at: string
 }
 

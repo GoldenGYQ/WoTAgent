@@ -45,6 +45,63 @@ def test_short_heart_rate_spike_does_not_create_an_event(tmp_path) -> None:
     assert monitor.evaluate_resident("elderly-001", now=now) == []
 
 
+def test_sustained_high_blood_pressure_is_classified_by_latest_value(tmp_path) -> None:
+    store = make_store(tmp_path)
+    monitor = HealthMonitor(store)
+    now = datetime(2026, 7, 16, 8, 0, tzinfo=UTC)
+    for minutes, value in [(8, "154/96"), (5, "158/98"), (2, "162/101"), (0, "160/99")]:
+        store.add_reading(SensorReading(
+            resident_id="elderly-001",
+            sensor_type="blood_pressure",
+            value=value,
+            unit="mmHg",
+            observed_at=now - timedelta(minutes=minutes),
+        ))
+
+    events = monitor.evaluate_resident("elderly-001", now=now)
+
+    assert [(event.event_type, event.severity) for event in events] == [
+        ("high_blood_pressure", "high")
+    ]
+    assert events[0].value == "160/99"
+
+
+def test_extreme_sustained_blood_pressure_is_critical(tmp_path) -> None:
+    store = make_store(tmp_path)
+    monitor = HealthMonitor(store)
+    now = datetime(2026, 7, 16, 8, 0, tzinfo=UTC)
+    for minutes, value in [(7, "170/108"), (4, "176/114"), (0, "181/121")]:
+        store.add_reading(SensorReading(
+            resident_id="elderly-001",
+            sensor_type="blood_pressure",
+            value=value,
+            observed_at=now - timedelta(minutes=minutes),
+        ))
+
+    events = monitor.evaluate_resident("elderly-001", now=now)
+
+    assert events[0].severity == "critical"
+
+
+def test_fresh_out_of_range_humidity_creates_medium_risk(tmp_path) -> None:
+    store = make_store(tmp_path)
+    monitor = HealthMonitor(store)
+    now = datetime(2026, 7, 16, 8, 0, tzinfo=UTC)
+    store.add_reading(SensorReading(
+        resident_id="elderly-001",
+        sensor_type="room_humidity",
+        value=28,
+        unit="%",
+        observed_at=now,
+    ))
+
+    events = monitor.evaluate_resident("elderly-001", now=now)
+
+    assert [(event.event_type, event.severity) for event in events] == [
+        ("room_humidity_out_of_range", "medium")
+    ]
+
+
 def test_monitor_emits_immediate_fall_and_deduplicates_repeated_scan(tmp_path) -> None:
     store = make_store(tmp_path)
     monitor = HealthMonitor(store)
@@ -102,6 +159,13 @@ def test_stale_fall_and_environment_readings_do_not_retrigger(tmp_path) -> None:
         sensor_type="room_temperature",
         value=31,
         unit="C",
+        observed_at=now - timedelta(minutes=11),
+    ))
+    store.add_reading(SensorReading(
+        resident_id="elderly-001",
+        sensor_type="room_humidity",
+        value=20,
+        unit="%",
         observed_at=now - timedelta(minutes=11),
     ))
 

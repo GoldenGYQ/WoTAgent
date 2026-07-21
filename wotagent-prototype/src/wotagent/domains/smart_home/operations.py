@@ -222,7 +222,7 @@ class SmartHomeDomainPlugin:
             ],
             "open_event_count": len([
                 item for item in self._events
-                if item["status"] == "open"
+                if item["status"] in {"open", "acknowledged", "in_progress"}
             ]),
             "generated_at": datetime.now(UTC).isoformat(),
         }
@@ -257,9 +257,16 @@ class SmartHomeDomainPlugin:
         self,
         subject_id: str,
         principal_id: str,
+        severity: str | None = None,
+        status: str | None = None,
     ) -> list[dict[str, Any]]:
         self._require(subject_id, principal_id, "domain.read")
-        return list(reversed(self._events))
+        return [
+            item
+            for item in reversed(self._events)
+            if (severity is None or item["severity"] == severity)
+            and (status is None or item["status"] == status)
+        ]
 
     def actions(
         self,
@@ -409,6 +416,38 @@ class SmartHomeDomainPlugin:
         return {
             "event_id": event_id,
             "status": event["status"],
+            "run_id": event.get("run_id"),
+        }
+
+    def update_event_status(
+        self,
+        event_id: str,
+        principal_id: str,
+        status: str,
+    ) -> dict[str, Any]:
+        self._require("villa-demo", principal_id, "event.acknowledge")
+        event = next(
+            (item for item in self._events if item["event_id"] == event_id),
+            None,
+        )
+        if event is None:
+            raise KeyError("smart-home event not found")
+        allowed = {
+            "open": {"acknowledged"},
+            "acknowledged": {"in_progress", "resolved", "false_positive"},
+            "in_progress": {"resolved", "false_positive"},
+            "resolved": set(),
+            "false_positive": set(),
+        }
+        current = str(event["status"])
+        if status != current and status not in allowed.get(current, set()):
+            raise ValueError(
+                f"event status cannot transition from '{current}' to '{status}'"
+            )
+        event["status"] = status
+        return {
+            "event_id": event_id,
+            "status": status,
             "run_id": event.get("run_id"),
         }
 

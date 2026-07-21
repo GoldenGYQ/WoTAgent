@@ -65,16 +65,28 @@ def test_normal_scenario_does_not_create_agent_task(tmp_path) -> None:
     assert latest["room_humidity"]["value"] == 52
 
 
-def test_high_blood_pressure_scenario_records_trendable_readings(tmp_path) -> None:
+def test_high_blood_pressure_scenario_records_trend_and_risk(tmp_path) -> None:
     runtime = make_runtime(tmp_path)
 
     result = asyncio.run(runtime.simulate("high_blood_pressure", "elderly-001"))
 
-    assert result["events"] == []
-    assert result["tasks"] == []
+    assert result["events"][0]["event_type"] == "high_blood_pressure"
+    assert result["events"][0]["severity"] == "high"
+    assert result["tasks"][0]["status"] == "succeeded"
     trend = runtime.store.trend(
         "elderly-001",
         since=datetime.now(UTC) - timedelta(hours=1),
     )
     blood_pressure = next(item for item in trend["series"] if item["sensor_type"] == "blood_pressure")
     assert blood_pressure["points"][-1]["display_value"] == "160/99"
+
+
+def test_dry_room_scenario_creates_medium_humidity_risk(tmp_path) -> None:
+    runtime = make_runtime(tmp_path)
+
+    result = asyncio.run(runtime.simulate("dry_room", "elderly-001"))
+
+    assert result["events"][0]["event_type"] == (
+        "room_humidity_out_of_range"
+    )
+    assert result["events"][0]["severity"] == "medium"

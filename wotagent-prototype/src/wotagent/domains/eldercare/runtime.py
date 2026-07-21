@@ -421,6 +421,17 @@ class EldercareRuntime:
                     observed_at=now,
                 ),
             ]
+        elif scenario == "dry_room":
+            readings = [
+                SensorReading(
+                    resident_id=resident_id,
+                    sensor_type="room_humidity",
+                    value=28,
+                    unit="%",
+                    source="scenario-simulator",
+                    observed_at=now,
+                ),
+            ]
         elif scenario == "low_spo2":
             readings = [SensorReading(
                 resident_id=resident_id,

@@ -30,6 +30,14 @@ SensorType = Literal[
     "room_temperature",
     "room_humidity",
 ]
+RiskSeverity = Literal["medium", "high", "critical"]
+RiskStatus = Literal[
+    "open",
+    "acknowledged",
+    "in_progress",
+    "resolved",
+    "false_positive",
+]
 
 
 class Resident(BaseModel):
@@ -76,13 +84,19 @@ class RiskEvent(BaseModel):
     event_id: str = Field(default_factory=lambda: f"risk_{uuid4().hex[:12]}")
     resident_id: str
     event_type: Literal[
-        "high_heart_rate", "low_spo2", "fall_detected", "room_overheat", "user_request"
+        "high_heart_rate",
+        "high_blood_pressure",
+        "low_spo2",
+        "fall_detected",
+        "room_overheat",
+        "room_humidity_out_of_range",
+        "user_request",
     ]
-    severity: Literal["medium", "high", "critical"]
-    value: float | bool
+    severity: RiskSeverity
+    value: float | bool | str
     message: str
     source: str = "health-monitor"
-    status: Literal["open", "handled"] = "open"
+    status: RiskStatus = "open"
     run_id: str | None = None
     occurred_at: datetime = Field(default_factory=utc_now)
     context: dict[str, Any] = Field(default_factory=dict)

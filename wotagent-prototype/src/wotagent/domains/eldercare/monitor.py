@@ -46,6 +46,44 @@ class HealthMonitor:
                 latest,
             ))
 
+        blood_pressures = self.store.readings_since(
+            resident_id,
+            "blood_pressure",
+            observed_at - timedelta(minutes=10, seconds=5),
+        )
+        parsed_pressure = [
+            (item, self._blood_pressure(item.value))
+            for item in blood_pressures
+        ]
+        valid_pressure = [
+            (item, pressure)
+            for item, pressure in parsed_pressure
+            if pressure is not None
+        ]
+        if (
+            len(valid_pressure) >= 3
+            and valid_pressure[-1][0].observed_at
+            - valid_pressure[0][0].observed_at >= timedelta(minutes=5)
+            and all(
+                systolic >= 140 or diastolic >= 90
+                for _, (systolic, diastolic) in valid_pressure
+            )
+        ):
+            systolic, diastolic = valid_pressure[-1][1]
+            candidates.append(self._event(
+                resident_id,
+                "high_blood_pressure",
+                (
+                    "critical"
+                    if systolic >= 180 or diastolic >= 120
+                    else "high"
+                ),
+                f"{systolic}/{diastolic}",
+                "血压在观测窗口内持续高于实验预警阈值",
+                observed_at,
+                latest,
+            ))
+
         spo2 = self._fresh_value(
             latest, "spo2", observed_at, max_age=timedelta(minutes=5)
         )
@@ -88,6 +126,23 @@ class HealthMonitor:
                 latest,
             ))
 
+        humidity = self._fresh_value(
+            latest, "room_humidity", observed_at, max_age=timedelta(minutes=10)
+        )
+        if (
+            isinstance(humidity, (int, float))
+            and (float(humidity) < 35 or float(humidity) > 70)
+        ):
+            candidates.append(self._event(
+                resident_id,
+                "room_humidity_out_of_range",
+                "medium",
+                float(humidity),
+                "房间湿度超出 35% 至 70% 的实验舒适范围",
+                observed_at,
+                latest,
+            ))
+
         created: list[RiskEvent] = []
         for event in candidates:
             stored = self.store.create_risk(event)
@@ -113,11 +168,21 @@ class HealthMonitor:
         return item.get("value") if timedelta(0) <= age <= max_age else None
 
     @staticmethod
+    def _blood_pressure(value: Any) -> tuple[int, int] | None:
+        parts = str(value).strip().split("/")
+        if len(parts) != 2:
+            return None
+        try:
+            return int(parts[0]), int(parts[1])
+        except ValueError:
+            return None
+
+    @staticmethod
     def _event(
         resident_id: str,
         event_type: str,
         severity: str,
-        value: float | bool,
+        value: float | bool | str,
         message: str,
         occurred_at: datetime,
         latest: dict[str, Any],

@@ -2419,3 +2419,52 @@ input exists. The Run ends as `needs_more_information`, preserving the useful
 evidence and recommended human action without presenting it as either success
 or system failure. Finish decisions with non-empty `unsatisfied_criteria` are
 also normalized to `goal_completed=false` before orchestration.
+
+### 30.11 Risk acceptance requires a complete data-to-disposition chain
+
+The acceptance item for health monitoring initially looked complete because
+heart rate, blood pressure, oxygen saturation, temperature and humidity were
+all stored and could be plotted. A code audit showed a more important
+distinction: a metric being visible and trendable does not mean that it
+participates in Monitor risk classification. Blood pressure and humidity had
+no deterministic risk rules, while one old test explicitly treated high blood
+pressure as a non-event.
+
+The Monitor now implements bounded, deterministic rules for sustained high
+blood pressure and fresh out-of-range room humidity. Blood pressure requires
+at least three readings spanning five minutes within a ten-minute window;
+values at or above 180/120 are classified as critical and other sustained
+values at or above 140/90 as high. Fresh humidity outside 35%-70% is classified
+as medium. These are experimental warning thresholds for risk coordination,
+not medical diagnoses. Severity remains rule-attested and cannot be weakened
+or overridden by an LLM.
+
+Risk handling is now a server-side state machine:
+
+```text
+open -> acknowledged -> in_progress -> resolved | false_positive
+```
+
+Illegal transitions are rejected, legacy `handled` rows are migrated to
+`resolved`, and the API supports severity/status filtering. The domain center
+shows the rule severity policy and exposes only the legal next actions for each
+event. This closes the full acceptance path:
+
+```text
+sensor reading -> history/trend -> deterministic classification
+-> risk event -> severity filter -> disposition status query/update
+```
+
+The first targeted regression run correctly failed two stale assertions: one
+expected high blood pressure to produce no event and one expected the retired
+`handled` status. Updating those tests was intentional because the product
+contract changed; weakening the implementation to satisfy an obsolete Oracle
+would have preserved the acceptance gap. Final targeted verification produced
+21 passing backend tests. The final complete verification produced 261 backend
+tests passing with 3 skipped, 64 simulator tests passing with one existing
+deprecation warning, and 45 frontend tests passing plus a successful typecheck
+and production build.
+
+One command-level pitfall was also recorded: this frontend defines the npm
+script as `typecheck`, not `type-check`. The production `build` script invokes
+the correct typecheck automatically.
