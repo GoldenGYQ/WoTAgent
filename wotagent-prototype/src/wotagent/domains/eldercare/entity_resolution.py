@@ -34,10 +34,12 @@ class ResidentEntityResolver:
                 and explicit in {
                     resident.resident_id.lower(),
                     resident.name.lower(),
+                    _normalize_room_token(resident.room),
                 }
             )
             or resident.resident_id.lower() in haystack
             or resident.name.lower() in haystack
+            or _room_matches(haystack, resident.room)
         ]
         unique = {item.resident_id: item for item in matches}
         if not unique:
@@ -56,6 +58,18 @@ class ResidentEntityResolver:
             id=resident.resident_id,
             display_name=resident.name,
         )
+
+
+def _room_matches(text: str, room: str) -> bool:
+    normalized_text = _normalize_room_token(text)
+    normalized_room = _normalize_room_token(room)
+    if not normalized_room:
+        return False
+    return normalized_room in normalized_text
+
+
+def _normalize_room_token(value: str) -> str:
+    return "".join(char for char in value.lower() if char.isalnum())
 
 
 __all__ = ["ResidentEntityResolver"]

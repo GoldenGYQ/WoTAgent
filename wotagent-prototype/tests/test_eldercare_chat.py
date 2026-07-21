@@ -13,6 +13,8 @@ from wotagent.domains.eldercare import (
     SensorReading,
     is_eldercare_request,
 )
+from wotagent.domains.eldercare.chat import resolve_resident
+from wotagent.domains.eldercare.entity_resolution import ResidentEntityResolver
 from wotagent.domains.eldercare.models import AgentFinding, Evidence
 from wotagent.telemetry import InMemoryTraceStore
 
@@ -102,6 +104,37 @@ def test_chat_query_reads_health_summary_through_mcp_resource(tmp_path) -> None:
     assert "心率82bpm" in result["response"]
     assert any(event.type == "agent.resource.completed" for event in events)
     assert any(event.node == "eldercare_planner" for event in events)
+
+
+def test_resolve_resident_accepts_room_reference_without_name(tmp_path) -> None:
+    store = EldercareStore(tmp_path / "eldercare-room.db")
+    resident = store.upsert_resident(Resident(
+        resident_id="elderly-001",
+        name="张爷爷",
+        room="A-101",
+    ))
+
+    resolved = resolve_resident("查看A101今天的健康状态", [], [resident])
+    assert resolved is not None
+    assert resolved.resident_id == "elderly-001"
+
+
+def test_resident_entity_resolver_maps_room_reference_to_resident(tmp_path) -> None:
+    store = EldercareStore(tmp_path / "eldercare-entity-room.db")
+    store.upsert_resident(Resident(
+        resident_id="elderly-001",
+        name="张爷爷",
+        room="A-101",
+    ))
+    resolver = ResidentEntityResolver(store)
+
+    target = resolver.resolve(
+        target_type="resident",
+        mention="A-101",
+        text="查看A-101今天的健康状态，如果异常就通知护理员",
+    )
+    assert target.id == "elderly-001"
+    assert target.display_name == "张爷爷"
 
 
 def test_operator_temperature_command_runs_environment_subgraph_and_wot_gateway(tmp_path) -> None:

@@ -95,9 +95,25 @@ def resolve_resident(
     for text in [message, *reversed([str(item.get("content", "")) for item in history])]:
         lowered = text.lower()
         for resident in residents:
-            if resident.name.lower() in lowered or resident.resident_id.lower() in lowered:
+            if (
+                resident.name.lower() in lowered
+                or resident.resident_id.lower() in lowered
+                or _room_matches(lowered, resident.room)
+            ):
                 return resident
     return residents[0] if len(residents) == 1 else None
+
+
+def _room_matches(text: str, room: str) -> bool:
+    normalized_text = _normalize_room_token(text)
+    normalized_room = _normalize_room_token(room)
+    if not normalized_room:
+        return False
+    return normalized_room in normalized_text
+
+
+def _normalize_room_token(value: str) -> str:
+    return "".join(char for char in value.lower() if char.isalnum())
 
 
 class EldercareCommandPlanner:

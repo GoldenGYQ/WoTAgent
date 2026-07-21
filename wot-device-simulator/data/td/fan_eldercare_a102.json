@@ -1,0 +1,50 @@
+{
+  "@context": "https://www.w3.org/2022/wot/td/v1.1",
+  "id": "urn:dev:wot:fan-102",
+  "title": "A-102 Fan",
+  "description": "Dedicated room fan for eldercare room A-102.",
+  "location": "A-102",
+  "capabilities": [
+    "ventilation"
+  ],
+  "actions": {
+    "turnOn": {
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "turnOff": {
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "setSpeed": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "speed": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 3
+          }
+        },
+        "required": [
+          "speed"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "properties": {
+    "on": {
+      "type": "boolean"
+    },
+    "speed": {
+      "type": "number"
+    }
+  }
+}

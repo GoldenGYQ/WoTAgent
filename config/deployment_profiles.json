@@ -17,11 +17,17 @@
         "mattress-001",
         "environment-sensor-001",
         "light-101",
+        "fan-101",
+        "humidifier-101",
+        "purifier-101",
         "ac-002",
         "wristband-002",
         "mattress-002",
         "environment-sensor-002",
         "light-102",
+        "fan-102",
+        "humidifier-102",
+        "purifier-102",
         "ac-003"
       ],
       "enabled_agents": [

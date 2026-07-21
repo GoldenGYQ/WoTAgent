@@ -223,6 +223,52 @@ def test_repeated_empty_control_after_execution_is_safely_normalized() -> None:
     assert plan.summary == "条件分支已完成，没有剩余动作"
 
 
+def test_intent_is_canonicalized_from_action_steps() -> None:
+    runnable = FakeRunnable({
+        "intent": "query",
+        "summary": "先查询再执行开灯",
+        "steps": [{
+            "id": "s1",
+            "kind": "action",
+            "device_id": "light-001",
+            "action": "turnOn",
+        }],
+    })
+
+    plan = asyncio.run(LangChainTaskPlanner(runnable)({"message": "打开灯"}))
+
+    assert plan.intent == "control"
+    assert plan.steps[0].action == "turnOn"
+
+
+def test_intent_canonicalization_is_recorded_in_trace() -> None:
+    async def run():
+        store = InMemoryTraceStore()
+        await store.create(task_id="task-intent-normalize", session_id="sess", request_id="req")
+        runnable = FakeRunnable({
+            "intent": "clarify",
+            "summary": "读取当前状态",
+            "steps": [{
+                "id": "q1",
+                "kind": "query",
+                "device_id": "light-001",
+                "action": "queryState",
+            }],
+        })
+        plan = await LangChainTaskPlanner(runnable, trace_store=store)({
+            "task_id": "task-intent-normalize",
+            "message": "看看灯现在是什么状态",
+        })
+        return plan, await store.events("task-intent-normalize")
+
+    plan, events = asyncio.run(run())
+
+    normalized = next(event for event in events if event.type == "plan.normalized")
+    assert plan.intent == "query"
+    assert normalized.data["from_intent"] == "clarify"
+    assert normalized.data["to_intent"] == "query"
+
+
 def test_missing_tool_call_is_rejected() -> None:
     class NoToolRunnable:
         async def ainvoke(self, messages):
@@ -247,7 +293,7 @@ def test_capability_context_exposes_registered_devices_without_full_td_noise() -
 def test_all_simulated_lights_declare_symmetric_power_actions() -> None:
     lights = [item for item in capability_context() if "light" in item["title"].lower()]
 
-    assert len(lights) == 7
+    assert len(lights) == 9
     assert all(
         {"turnOn", "turnOff"}.issubset({action["name"] for action in light["actions"]})
         for light in lights
@@ -491,6 +537,94 @@ def test_conditional_plan_reviewer_blocks_inactive_branch_and_repairs_plan() -> 
     assert plan.steps[0].device_id == "humidifier-001"
 
 
+def test_conditional_plan_reviewer_runs_for_query_intent_with_action_steps() -> None:
+    class SequencedPlanner:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def ainvoke(self, _messages):
+            self.calls += 1
+            arguments = (
+                {
+                    "intent": "query",
+                    "summary": "先查状态，再决定是否开灯",
+                    "steps": [{
+                        "id": "q1",
+                        "kind": "query",
+                        "device_id": "light-001",
+                        "action": "queryState",
+                    }, {
+                        "id": "s1",
+                        "kind": "action",
+                        "device_id": "light-001",
+                        "action": "turnOn",
+                        "depends_on": ["q1"],
+                    }],
+                }
+                if self.calls == 1
+                else {
+                    "intent": "query",
+                    "summary": "只需读取当前状态",
+                    "steps": [{
+                        "id": "q1",
+                        "kind": "query",
+                        "device_id": "light-001",
+                        "action": "queryState",
+                    }],
+                }
+            )
+            return SimpleNamespace(
+                tool_calls=[{"name": "generate_plan", "args": arguments}],
+                usage_metadata={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+                response_metadata={"model_name": "fake-planner"},
+            )
+
+    class FakeReviewer:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def review(self, **kwargs):
+            self.calls += 1
+            plan = kwargs["plan"]
+            if any(step.kind == "action" for step in plan.steps):
+                return ConditionalPlanReview(
+                    approved=False,
+                    selected_branch="query_only",
+                    violations=["action step should not run after the observed branch"],
+                )
+            return ConditionalPlanReview(approved=True, selected_branch="query_only")
+
+    runnable = SequencedPlanner()
+    reviewer = FakeReviewer()
+
+    plan = asyncio.run(LangChainTaskPlanner(
+        runnable,
+        plan_reviewer=reviewer,
+    )({
+        "message": "看看灯是不是亮着，如果没亮就打开",
+        "execution_history": [{"status": "succeeded"}],
+        "context": {
+            "devices": [{
+                "device_id": "light-001",
+                "title": "Light",
+                "location": "living_room",
+                "device_type": "light",
+                "actions": [{"name": "turnOn", "input_schema": {"type": "object"}}],
+                "properties": ["on"],
+            }],
+            "agent_loop": {
+                "original_objective": "看看灯是不是亮着，如果没亮就打开",
+                "observations": [{"device_id": "light-001", "result": {"on": True}}],
+            },
+        },
+    }))
+
+    assert runnable.calls == 2
+    assert reviewer.calls == 1
+    assert plan.intent == "query"
+    assert [step.kind for step in plan.steps] == ["query"]
+
+
 def test_planner_records_usage_and_safe_reasoning_summary() -> None:
     async def run():
         store = InMemoryTraceStore()
@@ -732,3 +866,100 @@ def test_plan_repair_cannot_reverse_power_off_intent() -> None:
         )({"message": "全关掉"}))
 
     assert runnable.calls == 2
+
+
+def test_mixed_power_directions_do_not_trigger_false_reverse_validation() -> None:
+    class MixedRunnable:
+        async def ainvoke(self, _messages):
+            return SimpleNamespace(
+                tool_calls=[{"name": "generate_plan", "args": {
+                    "intent": "control",
+                    "steps": [{
+                        "id": "off-light",
+                        "kind": "action",
+                        "device_id": "light-007",
+                        "action": "turnOff",
+                    }, {
+                        "id": "on-exhaust",
+                        "kind": "action",
+                        "device_id": "exhaust-003",
+                        "action": "turnOn",
+                    }],
+                }}],
+                usage_metadata={},
+                response_metadata={"model_name": "fake-planner"},
+            )
+
+    async def capabilities():
+        empty = {"type": "object", "additionalProperties": False}
+        return [
+            {
+                "device_id": "light-007",
+                "title": "Bathroom 2 Light",
+                "location": "bathroom2",
+                "device_type": "light",
+                "actions": [
+                    {"name": "turnOn", "input_schema": empty},
+                    {"name": "turnOff", "input_schema": empty},
+                ],
+                "properties": ["on"],
+            },
+            {
+                "device_id": "exhaust-003",
+                "title": "Bathroom 2 Exhaust",
+                "location": "bathroom2",
+                "device_type": "exhaust",
+                "actions": [
+                    {"name": "turnOn", "input_schema": empty},
+                    {"name": "turnOff", "input_schema": empty},
+                ],
+                "properties": ["on"],
+            },
+        ]
+
+    plan = asyncio.run(LangChainTaskPlanner(
+        MixedRunnable(),
+        capability_provider=capabilities,
+    )({"message": "关闭 bathroom2 的灯，并打开 bathroom2 的排风"}))
+
+    assert [step.action for step in plan.steps] == ["turnOff", "turnOn"]
+
+
+def test_power_direction_guard_can_be_disabled_via_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    class OppositeRunnable:
+        async def ainvoke(self, _messages):
+            return SimpleNamespace(
+                tool_calls=[{"name": "generate_plan", "args": {
+                    "intent": "control",
+                    "steps": [{
+                        "id": "s1",
+                        "kind": "action",
+                        "device_id": "remote-light",
+                        "action": "turnOn",
+                    }],
+                }}],
+                usage_metadata={},
+                response_metadata={"model_name": "fake-planner"},
+            )
+
+    async def capabilities():
+        empty = {"type": "object", "additionalProperties": False}
+        return [{
+            "device_id": "remote-light",
+            "title": "RemoteLight",
+            "location": "living_room",
+            "device_type": "light",
+            "actions": [
+                {"name": "turnOn", "input_schema": empty},
+                {"name": "turnOff", "input_schema": empty},
+            ],
+            "properties": ["on"],
+        }]
+
+    monkeypatch.setenv("WOTAGENT_ENABLE_POWER_DIRECTION_GUARD", "0")
+    plan = asyncio.run(LangChainTaskPlanner(
+        OppositeRunnable(),
+        capability_provider=capabilities,
+    )({"message": "全关掉"}))
+
+    assert plan.steps[0].action == "turnOn"

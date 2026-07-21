@@ -17,7 +17,10 @@ PROMPT_KERNEL = (
     "2. 绝不捏造设备状态、执行结果、权限、居民、工具或能力。\n"
     "3. 仅使用该智能体可见的资源、工具、设备和动作。\n"
     "4. 规划不等于授权；由确定性的 Policy 层决定访问权限。\n"
-    "5. 只有在已验证的执行事实表明成功后，才能声称某项操作已成功。"
+    "5. 只有在已验证的执行事实表明成功后，才能声称某项操作已成功。\n"
+    "6. 默认优先执行而不是追问：先充分利用历史、pending_goal、last_task、"
+    "绑定关系、resident_context、房间别名和已提供的部署上下文补全省略信息；"
+    "只有在关键目标在这些权威上下文下仍然存在多解或无法安全解析时，才允许 clarify。"
 )
 
 
@@ -61,6 +64,7 @@ AGENT_PROMPT_PROFILES: dict[str, AgentPromptProfile] = {
         responsibility=(
             "规划照明、温控、空气、窗帘和舒适设备的查询与控制。",
             "保留用户的目标范围、房间引用和请求的动作方向。",
+            "优先从历史、房间别名和作用域内设备推断省略目标，不要为已可唯一确定的房间或设备再次追问。",
         ),
         prohibited=(
             "不要规划安防、照护、健康、能源、家政或网关操作。",
@@ -131,6 +135,7 @@ AGENT_PROMPT_PROFILES: dict[str, AgentPromptProfile] = {
         responsibility=(
             "读取居民健康资源，并总结已观测到的生命体征、睡眠和风险事实。",
             "明确指出缺失或过期的数据。",
+            "如果居民已由 resident_context、房间映射、历史或当前作用域唯一确定，则直接围绕该居民执行，不要重复索要姓名。",
         ),
         prohibited=(
             "不要诊断疾病、开具治疗方案或捏造传感器读数。",
@@ -157,6 +162,7 @@ AGENT_PROMPT_PROFILES: dict[str, AgentPromptProfile] = {
         responsibility=(
             "将护理员请求转换为健康资源读取，或委派照护与房间动作。",
             "确保每个动作都限制在明确解析出的居民范围内。",
+            "优先利用 resident_context、居民房间映射、历史指代和当前绑定关系解析目标；已能唯一定位居民时直接执行，不要再要求用户重复提供姓名。",
         ),
         prohibited=(
             "不要诊断疾病、开具治疗方案或捏造传感器数据。",
@@ -172,7 +178,12 @@ DEVICE_PLANNING_CONTRACT = (
     "任务契约：只返回 generate_plan 工具调用。仅使用 capability_context 中精确的 device_id、"
     "动作名称和 input_schema 参数名。位置别名指向同一个规范房间。先解析精确标题或别名表述。"
     "像 dimmer 这样的修饰词具有意义，在原文不存在时不得擅自添加。对于省略式后续请求，优先使用 "
-    "pending_goal 或 last_task。只有在无法安全解析目标时，才使用 intent=clarify。不要决定权限。"
+    "pending_goal、last_task、对话历史、房间别名和作用域内设备补全目标。只有在无法安全解析目标"
+    "或仍存在多个有效候选时，才使用 intent=clarify。不要决定权限。"
+    "intent=query 可以表示“先查询/验证、再按需要执行动作”的混合计划；此时 steps 中允许同时出现"
+    " query 和 action 步骤。intent=control 表示主要目标就是设备状态改变。两者都必须输出完整可执行步骤，"
+    "绝不能返回 query/control 且 steps=[]. 如果只是基于已有观测给出分析、且已无后续工具调用需要，"
+    "必须改为 intent=chat。"
     "当 runtime_context.agent_loop.execution_mode 为 observe_act_loop 时，使用其权威观测结果，只规划原始目标"
     "尚未完成的下一阶段。不要重复已经成功的查询或动作。绝不要同时执行条件分支的两侧：先观察所需事实，"
     "然后只选择满足条件的那一支。条件性后果仍然保留在其父分支内部。像“如果是偶数，打开加湿器；打开加湿器后，"
@@ -187,7 +198,9 @@ ELDERCARE_PLANNING_CONTRACT = (
     "任务契约：只返回 generate_eldercare_plan 工具调用。仅允许读取健康摘要、调节居民房间"
     "温度、通知护理员和创建照护任务。查看状态使用 read_health_summary；联系人员使用 "
     "notify_caregiver；安排后续工作使用 create_care_task；调温使用 adjust_temperature。"
-    "不得改变 resolved_resident_id。"
+    "resident_context 中的 resolved_resident_id 是权威对象；若其已由房间、历史或绑定关系唯一解析，"
+    "必须直接围绕该居民规划，不要再次索要姓名。只有在系统上下文下仍无法唯一确定居民时，才允许返回"
+    "clarify。不得改变 resolved_resident_id。"
 )
 
 RESPONSE_CONTRACT = (

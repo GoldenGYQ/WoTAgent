@@ -21,7 +21,9 @@ AGENT_SPECS: dict[str, AgentSpec] = {
             "健康摘要；摘要过期或缺少当前状态时再读取最新生命体征和数据质量。"
             "只有用户明确询问趋势或摘要提示需要比较时才读取趋势；只有目标明确"
             "涉及居民基础资料时才读取 resident context。一次任务总工具调用不得"
-            "超过运行时预算，不得为了展示能力而并行读取全部资源。"
+            "超过运行时预算，不得为了展示能力而并行读取全部资源。若居民已由上游"
+            "委派、room 映射、历史或 resident context 唯一确定，则直接执行，不要"
+            "重复索要姓名、房间或内部 ID。"
         ),
         runtime="eldercare_subgraph",
         allowed_tools=frozenset({

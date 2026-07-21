@@ -118,6 +118,28 @@ def test_full_control_path_plans_authorizes_executes_and_responds() -> None:
     assert "状态验证" in result["response"]
 
 
+def test_query_intent_can_execute_mixed_query_and_action_steps() -> None:
+    gateway = FakeGateway()
+    plan = TaskPlan(intent="query", steps=[
+        PlanStep(id="q1", kind="query", device_id="light-001", action="queryState"),
+        PlanStep(
+            id="s1",
+            kind="action",
+            device_id="light-001",
+            action="turnOn",
+            depends_on=["q1"],
+            postconditions=[Condition(property="on", value=True)],
+        ),
+    ])
+
+    result = invoke(make_graph(plan, gateway))
+
+    assert result["phase"] == "responded"
+    assert result["trace"].status == TaskStatus.SUCCEEDED
+    assert [item.effect for item in result["policy_decisions"]] == ["allow", "allow"]
+    assert gateway.control_calls == 1
+
+
 def test_policy_path_stops_viewer_before_executor() -> None:
     gateway = FakeGateway()
     plan = TaskPlan(intent="control", steps=[PlanStep(

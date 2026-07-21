@@ -104,6 +104,16 @@ const principalResourceLabel = computed(() => (
   ?? activeDeployment.value?.title
   ?? ''
 ))
+const workspaceSubjectName = computed(() => {
+  if (activeDeployment.value?.domain_id === 'eldercare') {
+    return (
+      currentAccount.value?.subjectName
+      || currentAccount.value?.relationships.find((item) => item.target_type === 'resident')?.target_label
+      || principalResourceLabel.value
+    )
+  }
+  return principalResourceLabel.value
+})
 const currentDomainRoleLabel = computed(() => (
   currentAccount.value?.roleLabels.join(' / ')
   || currentAccount.value?.role
@@ -482,7 +492,7 @@ watch(
           :current-account-name="currentAccount.displayName"
           :current-account-role="currentAccount.role"
           :current-account-role-label="currentDomainRoleLabel"
-          :current-subject-name="principalResourceLabel"
+          :current-subject-name="workspaceSubjectName"
           :current-domain-id="activeDeployment?.domain_id ?? null"
           :sidebar-collapsed="sidebarCollapsed"
           @select-run="chooseRun"

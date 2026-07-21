@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
@@ -351,6 +353,34 @@ class LangChainTaskPlanner:
             attempt=1,
             raw_plan=arguments,
         )
+        arguments, intent_normalized = _canonicalize_plan_arguments(arguments)
+        if intent_normalized is not None and self.trace_store is not None and task_id:
+            await self.trace_store.record(
+                task_id=task_id,
+                type="plan.normalized",
+                node="planner",
+                data={
+                    "reason": "planner intent canonicalized from executable steps",
+                    "from_intent": intent_normalized["from_intent"],
+                    "to_intent": intent_normalized["to_intent"],
+                    "raw_plan": _trace_value(arguments),
+                },
+            )
+        normalized = _normalize_empty_executable_plan(arguments, state)
+        if normalized is not None:
+            if self.trace_store is not None and task_id:
+                await self.trace_store.record(
+                    task_id=task_id,
+                    type="plan.normalized",
+                    node="planner",
+                    data={
+                        "reason": "planner declared no remaining executable steps after prior observations",
+                        "from_intent": arguments.get("intent"),
+                        "to_intent": "chat",
+                        "raw_plan": _trace_value(arguments),
+                    },
+                )
+            return normalized
         schema_repaired = False
         repair_used = False
         try:
@@ -394,7 +424,8 @@ class LangChainTaskPlanner:
                                 f"{exc}. Regenerate the complete plan. query/control intents "
                                 "require at least one executable step. If the original objective "
                                 "is already complete and no further tool call is needed, use "
-                                "intent=chat with steps=[]. clarify also has no executable steps."
+                                "intent=chat with steps=[]. Never return query/control with "
+                                "steps=[]. clarify also has no executable steps."
                             ),
                         ),
                     },
@@ -403,8 +434,8 @@ class LangChainTaskPlanner:
                 "The generated plan violates the structured TaskPlan contract: "
                 f"{exc}. Regenerate the complete plan. query/control intents require at least "
                 "one executable step. If the original objective is already complete and no "
-                "further tool call is needed, use intent=chat with steps=[]. clarify also has "
-                "no executable steps."
+                "further tool call is needed, use intent=chat with steps=[]. Never return "
+                "query/control with steps=[]. clarify also has no executable steps."
             )
             repair_messages = [
                 *messages[:-1],
@@ -420,6 +451,34 @@ class LangChainTaskPlanner:
                 attempt=2,
                 raw_plan=arguments,
             )
+            arguments, intent_normalized = _canonicalize_plan_arguments(arguments)
+            if intent_normalized is not None and self.trace_store is not None and task_id:
+                await self.trace_store.record(
+                    task_id=task_id,
+                    type="plan.normalized",
+                    node="planner",
+                    data={
+                        "reason": "repaired planner intent canonicalized from executable steps",
+                        "from_intent": intent_normalized["from_intent"],
+                        "to_intent": intent_normalized["to_intent"],
+                        "raw_plan": _trace_value(arguments),
+                    },
+                )
+            normalized = _normalize_empty_executable_plan(arguments, state)
+            if normalized is not None:
+                if self.trace_store is not None and task_id:
+                    await self.trace_store.record(
+                        task_id=task_id,
+                        type="plan.normalized",
+                        node="planner",
+                        data={
+                            "reason": "repaired plan declared no remaining executable steps after prior observations",
+                            "from_intent": arguments.get("intent"),
+                            "to_intent": "chat",
+                            "raw_plan": _trace_value(arguments),
+                        },
+                    )
+                return normalized
             try:
                 plan = TaskPlan.model_validate(arguments)
             except PydanticValidationError:
@@ -515,6 +574,19 @@ class LangChainTaskPlanner:
                 attempt=2,
                 raw_plan=arguments,
             )
+            arguments, intent_normalized = _canonicalize_plan_arguments(arguments)
+            if intent_normalized is not None and self.trace_store is not None and task_id:
+                await self.trace_store.record(
+                    task_id=task_id,
+                    type="plan.normalized",
+                    node="planner",
+                    data={
+                        "reason": "repaired planner intent canonicalized from executable steps",
+                        "from_intent": intent_normalized["from_intent"],
+                        "to_intent": intent_normalized["to_intent"],
+                        "raw_plan": _trace_value(arguments),
+                    },
+                )
             plan = TaskPlan.model_validate(arguments)
             repair_used = True
             violations = _capability_violations(plan, devices, message)
@@ -523,7 +595,7 @@ class LangChainTaskPlanner:
                     "planner returned a TD-invalid plan after one repair: "
                     + "; ".join(violations)
                 )
-        if loop_context and plan.intent == "control" and self.plan_reviewer is not None:
+        if loop_context and _plan_has_action_steps(plan) and self.plan_reviewer is not None:
             review = await self.plan_reviewer.review(
                 state=state,
                 plan=plan,
@@ -571,15 +643,35 @@ class LangChainTaskPlanner:
                 ]
                 repair_started = time.perf_counter()
                 result = await self.runnable.ainvoke(repair_messages)
-                await self._record_model_completion(state, result, repair_started, attempt=2)
-                plan = TaskPlan.model_validate(_extract_tool_arguments(result))
+                arguments = _extract_tool_arguments(result)
+                await self._record_model_completion(
+                    state,
+                    result,
+                    repair_started,
+                    attempt=2,
+                    raw_plan=arguments,
+                )
+                arguments, intent_normalized = _canonicalize_plan_arguments(arguments)
+                if intent_normalized is not None and self.trace_store is not None and task_id:
+                    await self.trace_store.record(
+                        task_id=task_id,
+                        type="plan.normalized",
+                        node="planner",
+                        data={
+                            "reason": "repaired planner intent canonicalized from executable steps",
+                            "from_intent": intent_normalized["from_intent"],
+                            "to_intent": intent_normalized["to_intent"],
+                            "raw_plan": _trace_value(arguments),
+                        },
+                    )
+                plan = TaskPlan.model_validate(arguments)
                 violations = _capability_violations(plan, devices, message)
                 if violations:
                     raise ValueError(
                         "conditional plan repair violated TD capabilities: "
                         + "; ".join(violations)
                     )
-                if plan.intent == "control":
+                if _plan_has_action_steps(plan):
                     repaired_review = await self.plan_reviewer.review(
                         state=state,
                         plan=plan,
@@ -821,10 +913,54 @@ def _terminal_noop_after_execution(
     state: dict[str, Any],
 ) -> bool:
     return (
-        bool(state.get("execution_history"))
+        _has_prior_observations(state)
         and arguments.get("intent") in {"query", "control"}
         and arguments.get("steps") == []
     )
+
+
+def _normalize_empty_executable_plan(
+    arguments: dict[str, Any],
+    state: dict[str, Any],
+) -> TaskPlan | None:
+    if not _terminal_noop_after_execution(arguments, state):
+        return None
+    return TaskPlan(
+        intent="chat",
+        summary=str(arguments.get("summary", "") or "目标已完成。"),
+        assumptions=list(arguments.get("assumptions", [])),
+    )
+
+
+def _canonicalize_plan_arguments(
+    arguments: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, str] | None]:
+    steps = arguments.get("steps")
+    if not isinstance(steps, list) or not steps:
+        return arguments, None
+    target_intent = "control" if any(
+        isinstance(step, dict) and step.get("kind") == "action" for step in steps
+    ) else "query"
+    original_intent = str(arguments.get("intent", ""))
+    if original_intent == target_intent:
+        return arguments, None
+    normalized = dict(arguments)
+    normalized["intent"] = target_intent
+    return normalized, {
+        "from_intent": original_intent,
+        "to_intent": target_intent,
+    }
+
+
+def _has_prior_observations(state: dict[str, Any]) -> bool:
+    if state.get("execution_history"):
+        return True
+    loop_context = state.get("context", {}).get("agent_loop") or {}
+    return bool(loop_context.get("observations"))
+
+
+def _plan_has_action_steps(plan: TaskPlan) -> bool:
+    return any(step.kind == "action" for step in plan.steps)
 
 def _extract_model_name(result: Any) -> str:
     metadata = getattr(result, "response_metadata", None) or {}
@@ -858,21 +994,116 @@ def _capability_violations(
             validate(instance=step.input, schema=action.get("input_schema") or {})
         except JSONSchemaValidationError as exc:
             violations.append(f"step {step.id}: invalid '{step.action}' input: {exc.message}")
-    normalized_message = message.lower()
-    requested_off = any(
-        marker in normalized_message
-        for marker in ("关掉", "关闭", "关灯", "turn off", "switch off", "shut off")
-    )
-    requested_on = any(
-        marker in normalized_message
-        for marker in ("打开", "开启", "开灯", "turn on", "switch on")
-    )
-    actions = [step.action for step in plan.steps if step.kind == "action"]
-    if requested_off and any(action == "turnOn" for action in actions):
-        violations.append("plan reverses the requested power-off intent with turnOn")
-    if requested_on and any(action == "turnOff" for action in actions):
-        violations.append("plan reverses the requested power-on intent with turnOff")
+    violations.extend(_power_direction_violations(plan, by_id, message))
     return violations
+
+
+def _power_direction_violations(
+    plan: TaskPlan,
+    by_id: dict[str, dict[str, Any]],
+    message: str,
+) -> list[str]:
+    if not _power_direction_guard_enabled():
+        return []
+    normalized_message = message.lower()
+    requested_off = _contains_any(normalized_message, _POWER_OFF_MARKERS)
+    requested_on = _contains_any(normalized_message, _POWER_ON_MARKERS)
+    if not requested_off and not requested_on:
+        return []
+
+    mixed_intent = requested_off and requested_on
+    clauses = _power_direction_clauses(normalized_message) if mixed_intent else []
+    violations: list[str] = []
+    for step in plan.steps:
+        if step.kind != "action" or step.action not in {"turnOn", "turnOff"}:
+            continue
+        if mixed_intent:
+            device = by_id.get(step.device_id, {})
+            relevant_clauses = [
+                clause for clause in clauses if _clause_matches_step(clause, step, device)
+            ]
+            if not relevant_clauses:
+                continue
+            if step.action == "turnOn" and any(clause["intent"] == "off" for clause in relevant_clauses):
+                violations.append("plan reverses the requested power-off intent with turnOn")
+            if step.action == "turnOff" and any(clause["intent"] == "on" for clause in relevant_clauses):
+                violations.append("plan reverses the requested power-on intent with turnOff")
+            continue
+        if requested_off and step.action == "turnOn":
+            violations.append("plan reverses the requested power-off intent with turnOn")
+        if requested_on and step.action == "turnOff":
+            violations.append("plan reverses the requested power-on intent with turnOff")
+    return violations
+
+
+def _power_direction_guard_enabled() -> bool:
+    value = os.getenv("WOTAGENT_ENABLE_POWER_DIRECTION_GUARD", "1").strip().lower()
+    return value not in {"0", "false", "off", "no"}
+
+
+def _power_direction_clauses(message: str) -> list[dict[str, str]]:
+    clauses: list[dict[str, str]] = []
+    for raw_clause in re.split(r"[，,。；;]|(?:然后|并且|并|且|同时)", message):
+        clause = raw_clause.strip()
+        if not clause:
+            continue
+        off = _contains_any(clause, _POWER_OFF_MARKERS)
+        on = _contains_any(clause, _POWER_ON_MARKERS)
+        if off == on:
+            continue
+        clauses.append({
+            "intent": "off" if off else "on",
+            "text": clause,
+        })
+    return clauses
+
+
+def _clause_matches_step(
+    clause: dict[str, str],
+    step: Any,
+    device: dict[str, Any],
+) -> bool:
+    text = clause["text"]
+    specific_terms, location_terms = _device_reference_terms(step.device_id, device)
+    if specific_terms:
+        return any(term and term in text for term in specific_terms)
+    return any(term and term in text for term in location_terms)
+
+
+def _device_reference_terms(device_id: str, device: dict[str, Any]) -> tuple[set[str], set[str]]:
+    specific_terms = {
+        str(device_id).lower(),
+        str(device.get("title", "")).lower(),
+        str(device.get("device_type", "")).lower(),
+    }
+    location_terms = {
+        str(device.get("location", "")).lower(),
+    }
+    location = str(device.get("location", ""))
+    location_terms.update(term.lower() for term in _LOCATION_TERMS.get(location, ()))
+    device_type = str(device.get("device_type", "")).lower()
+    specific_terms.update(term.lower() for term in _DEVICE_TERMS.get(device_type, ()))
+    normalized_specific: set[str] = set()
+    normalized_location: set[str] = set()
+    for term in specific_terms:
+        cleaned = term.strip()
+        if cleaned:
+            normalized_specific.add(cleaned)
+            normalized_specific.add(cleaned.replace("_", " "))
+    for term in location_terms:
+        cleaned = term.strip()
+        if cleaned:
+            normalized_location.add(cleaned)
+            normalized_location.add(cleaned.replace("_", " "))
+    return normalized_specific, normalized_location
+
+
+def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
+    return any(marker in text for marker in markers)
+
+
+_POWER_OFF_MARKERS = ("关掉", "关闭", "关灯", "turn off", "switch off", "shut off")
+_POWER_ON_MARKERS = ("打开", "开启", "开灯", "turn on", "switch on")
 
 
 def _capability_selection_text(

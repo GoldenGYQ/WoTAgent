@@ -6,6 +6,7 @@ from wotagent.prompting import (
     AGENT_PROMPT_PROFILES,
     CONTEXT_PACK_VERSION,
     DEVICE_PLANNING_CONTRACT,
+    ELDERCARE_PLANNING_CONTRACT,
     compact_history,
     context_message,
     profile_for,
@@ -65,3 +66,13 @@ def test_compact_history_preserves_roles_and_bounds_content() -> None:
         {"role": "user", "content": "查看 张爷爷"},
         {"role": "assistant", "content": ("状态正常" * 400)[:20]},
     ]
+
+
+def test_planning_contracts_bias_toward_execution_before_clarify() -> None:
+    device = prompt_system(profile_for("environment_agent"), DEVICE_PLANNING_CONTRACT)
+    eldercare = prompt_system(profile_for("eldercare_butler"), ELDERCARE_PLANNING_CONTRACT)
+
+    assert "默认优先执行而不是追问" in device
+    assert "房间别名" in device
+    assert "intent=query 可以表示" in device
+    assert "唯一定位居民时直接执行" in eldercare

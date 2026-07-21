@@ -1,0 +1,53 @@
+{
+  "@context": "https://www.w3.org/2022/wot/td/v1.1",
+  "id": "urn:dev:wot:humidifier-102",
+  "title": "A-102 Humidifier",
+  "description": "Dedicated room humidifier for eldercare room A-102.",
+  "location": "A-102",
+  "capabilities": [
+    "humidity"
+  ],
+  "actions": {
+    "turnOn": {
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "turnOff": {
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "setMistLevel": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "level": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 3
+          }
+        },
+        "required": [
+          "level"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "properties": {
+    "on": {
+      "type": "boolean"
+    },
+    "currentHumidity": {
+      "type": "number"
+    },
+    "mistLevel": {
+      "type": "number"
+    }
+  }
+}

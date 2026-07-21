@@ -1,0 +1,56 @@
+{
+  "@context": "https://www.w3.org/2022/wot/td/v1.1",
+  "id": "urn:dev:wot:purifier-101",
+  "title": "A-101 Air Purifier",
+  "description": "Dedicated air purifier for eldercare room A-101.",
+  "location": "A-101",
+  "capabilities": [
+    "air_quality"
+  ],
+  "actions": {
+    "turnOn": {
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "turnOff": {
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    "setSpeed": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "speed": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          }
+        },
+        "required": [
+          "speed"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "properties": {
+    "on": {
+      "type": "boolean"
+    },
+    "pm25": {
+      "type": "number"
+    },
+    "speed": {
+      "type": "string"
+    }
+  }
+}
