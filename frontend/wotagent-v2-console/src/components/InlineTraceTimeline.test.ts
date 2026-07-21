@@ -7,7 +7,7 @@ function event(sequence: number, type: string): TraceEvent {
   return {
     event_id: `run-1:${sequence}`,
     sequence,
-    timestamp: `2026-07-16T08:00:0${sequence}Z`,
+    timestamp: `2026-07-16T08:00:${String(sequence).padStart(2, '0')}Z`,
     run_id: 'run-1',
     turn_id: 'turn-1',
     task_id: sequence > 1 ? 'task-1' : null,
@@ -117,13 +117,75 @@ describe('InlineTraceTimeline', () => {
   it('reveals Run events progressively while preserving hierarchy', async () => {
     vi.useFakeTimers()
     const wrapper = mount(InlineTraceTimeline, { props: { run, selected: true } })
-    expect(wrapper.findAll('.inline-trace-event')).toHaveLength(1)
+    expect(wrapper.findAll('.inline-trace-event')).toHaveLength(0)
 
     await vi.advanceTimersByTimeAsync(60)
 
     expect(wrapper.text()).toContain('environment_agent')
     expect(wrapper.text()).toContain('读取客厅灯状态')
-    expect(wrapper.findAll('.inline-trace-event')).toHaveLength(2)
+    expect(wrapper.findAll('.inline-trace-event')).toHaveLength(1)
+    vi.useRealTimers()
+  })
+
+  it('groups Tasks by actual scheduler wave and exposes dependency flow', async () => {
+    vi.useFakeTimers()
+    const healthTask = {
+      ...run.tasks[0],
+      task_id: 'task-health',
+      local_id: 'health',
+      agent_id: 'health_agent',
+      objective: '检查健康状态',
+    }
+    const environmentTask = {
+      ...run.tasks[0],
+      task_id: 'task-environment',
+      local_id: 'environment',
+      agent_id: 'environment_agent',
+      objective: '检查房间环境',
+    }
+    const careTask = {
+      ...run.tasks[0],
+      task_id: 'task-care',
+      local_id: 'care',
+      agent_id: 'care_agent',
+      objective: '根据健康结果创建护理任务',
+      depends_on: ['task-health'],
+    }
+    const waveRun: RuntimeRun = {
+      ...run,
+      status: 'completed',
+      streamState: 'closed',
+      tasks: [healthTask, environmentTask, careTask],
+      events: [
+        { ...event(1, 'run.started'), task_id: null, data: { root_goal: '并行检查后安排护理' } },
+        { ...event(2, 'supervisor.decision.completed'), task_id: null, node: 'butler_supervisor', data: { action: 'create_tasks', reason: '健康和环境可以并行检查' } },
+        { ...event(3, 'task.created'), task_id: 'task-health', node: 'health_agent' },
+        { ...event(4, 'task.created'), task_id: 'task-environment', node: 'environment_agent' },
+        { ...event(5, 'scheduler.parallel_batch.started'), task_id: null, node: 'task_scheduler', data: { task_ids: ['task-health', 'task-environment'], parallel: true } },
+        { ...event(6, 'task.completed'), task_id: 'task-health', node: 'health_agent' },
+        { ...event(7, 'task.completed'), task_id: 'task-environment', node: 'environment_agent' },
+        { ...event(8, 'scheduler.parallel_batch.completed'), task_id: null, node: 'task_scheduler', data: { task_ids: ['task-health', 'task-environment'], parallel: true } },
+        { ...event(9, 'supervisor.decision.completed'), task_id: null, node: 'butler_supervisor', iteration: 2, data: { action: 'create_tasks', reason: '健康证据满足后安排护理' } },
+        { ...event(10, 'task.created'), task_id: 'task-care', node: 'care_agent' },
+        { ...event(11, 'scheduler.parallel_batch.started'), task_id: null, node: 'task_scheduler', data: { task_ids: ['task-care'], parallel: false } },
+        { ...event(12, 'task.completed'), task_id: 'task-care', node: 'care_agent' },
+        { ...event(13, 'scheduler.parallel_batch.completed'), task_id: null, node: 'task_scheduler', data: { task_ids: ['task-care'], parallel: false } },
+        { ...event(14, 'run.completed'), task_id: null, node: 'run_coordinator', data: { response: '检查和护理安排已完成' } },
+      ],
+    }
+    const wrapper = mount(InlineTraceTimeline, {
+      props: { run: waveRun, selected: true },
+    })
+
+    await wrapper.find('.inline-trace-header').trigger('click')
+    await vi.advanceTimersByTimeAsync(800)
+
+    expect(wrapper.findAll('.trace-supervisor-decision')).toHaveLength(2)
+    expect(wrapper.findAll('.trace-wave')).toHaveLength(2)
+    expect(wrapper.find('.trace-wave[data-parallel="true"]').text()).toContain('2 个 Task 并行')
+    expect(wrapper.findAll('.trace-agent-card')).toHaveLength(3)
+    expect(wrapper.text()).toContain('依赖已满足：Health Agent')
+    expect(wrapper.text()).toContain('检查和护理安排已完成')
     vi.useRealTimers()
   })
 

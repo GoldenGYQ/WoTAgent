@@ -128,6 +128,7 @@ def test_coordinator_executes_independent_agents_concurrently() -> None:
         "supervisor.decision.completed",
         "task.created",
         "task.created",
+        "scheduler.parallel_batch.started",
         "task.started",
         "task.started",
         "task.completed",

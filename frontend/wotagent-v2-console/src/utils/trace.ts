@@ -69,6 +69,7 @@ export function eventTitle(event: TraceEvent): string {
     'task.needs_input': '专项 Task 待补充信息',
     'task.denied': '专项 Task 权限拒绝',
     'task.unavailable': '专项 Task 资源不可用',
+    'scheduler.parallel_batch.started': '调度批次开始',
     'scheduler.parallel_batch.completed': '调度批次完成',
   }
   return runLabels[event.type] ?? labels[event.type] ?? event.type
@@ -78,7 +79,10 @@ export function eventSummary(event: TraceEvent): string {
   const data = event.data
   if (event.type === 'task.created') return `${String(data.agent_id ?? event.node)} · ${String(data.objective ?? '')}`
   if (event.type === 'task.started') return String(data.objective ?? '')
-  if (event.type === 'scheduler.parallel_batch.completed') {
+  if (
+    event.type === 'scheduler.parallel_batch.started'
+    || event.type === 'scheduler.parallel_batch.completed'
+  ) {
     const ids = Array.isArray(data.task_ids) ? data.task_ids : []
     return `${ids.length} 个 Task · ${data.parallel === true ? '并行' : '串行'}`
   }

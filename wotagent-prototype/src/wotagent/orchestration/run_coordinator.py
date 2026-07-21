@@ -512,6 +512,20 @@ class RunCoordinator:
             if not batch:
                 await self._block_unreachable_tasks(tasks)
                 return findings
+            batch_data = {
+                "task_ids": [item.task_id for item in batch],
+                "parallel": len(batch) > 1,
+                "dependencies": {
+                    item.task_id: list(item.depends_on)
+                    for item in batch
+                },
+            }
+            await self.store.record_event(
+                run_id,
+                "scheduler.parallel_batch.started",
+                node="task_scheduler",
+                data=batch_data,
+            )
             results = await asyncio.gather(*[
                 self._execute_task(task) for task in batch
             ])
@@ -519,10 +533,7 @@ class RunCoordinator:
                 run_id,
                 "scheduler.parallel_batch.completed",
                 node="task_scheduler",
-                data={
-                    "task_ids": [item.task_id for item in batch],
-                    "parallel": len(batch) > 1,
-                },
+                data=batch_data,
             )
             findings.extend(
                 result for result in results if result is not None

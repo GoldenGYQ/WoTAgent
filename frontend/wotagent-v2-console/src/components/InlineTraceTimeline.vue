@@ -6,8 +6,10 @@ import {
   ChevronDown,
   ChevronRight,
   CircleDot,
+  Clock3,
   Eye,
   GitBranch,
+  Layers3,
   LoaderCircle,
   RefreshCcw,
   Route,
@@ -40,6 +42,25 @@ interface TraceStage {
   primaryEvents: TraceEvent[]
   detailEvents: TraceEvent[]
   hiddenCount: number
+}
+
+interface ExecutionWave {
+  id: string
+  order: number
+  parallel: boolean
+  groups: TraceGroup[]
+  startedEvent: TraceEvent | null
+  completedEvent: TraceEvent | null
+  status: string
+}
+
+interface SupervisorRound {
+  id: string
+  iteration: number
+  decision: TraceEvent | null
+  events: TraceEvent[]
+  stages: TraceStage[]
+  waves: ExecutionWave[]
 }
 
 interface EventDetail {
@@ -106,23 +127,6 @@ const traceOverview = computed(() => {
 })
 const traceGroups = computed<TraceGroup[]>(() => {
   const groups: TraceGroup[] = []
-  const runEvents = visibleEvents.value.filter((event) => !event.task_id)
-  if (runEvents.length) {
-    const stages = buildStages(runEvents)
-    groups.push({
-      id: 'run',
-      label: 'Run 调度',
-      summary: props.run.message,
-      latestSummary: groupLatestSummary(runEvents),
-      status: props.run.status,
-      task: null,
-      events: runEvents,
-      stages,
-      primaryCount: stages.reduce((sum, stage) => sum + stage.primaryEvents.length, 0),
-      detailCount: stages.reduce((sum, stage) => sum + stage.detailEvents.length, 0),
-      hiddenCount: stages.reduce((sum, stage) => sum + stage.hiddenCount, 0),
-    })
-  }
   for (const task of props.run.tasks) {
     const taskEvents = visibleEvents.value.filter((event) => event.task_id === task.task_id)
     if (!taskEvents.length) continue
@@ -173,7 +177,64 @@ const traceGroups = computed<TraceGroup[]>(() => {
   }
   return groups
 })
+const runStartEvent = computed(() => (
+  visibleEvents.value.find((event) => event.type === 'run.started') ?? null
+))
+const runTerminalEvent = computed(() => (
+  [...visibleEvents.value].reverse().find((event) => (
+    !event.task_id
+    && event.type.startsWith('run.')
+    && event.type !== 'run.started'
+  )) ?? null
+))
+const supervisorRounds = computed<SupervisorRound[]>(() => {
+  const decisions = visibleEvents.value.filter(
+    (event) => event.type === 'supervisor.decision.completed',
+  )
+  const waves = buildExecutionWaves(traceGroups.value)
+  if (!decisions.length) {
+    const groups = traceGroups.value
+    if (!groups.length) return []
+    const events = visibleEvents.value.filter((event) => (
+      !event.task_id
+      && event.type !== 'run.started'
+      && !event.type.startsWith('run.')
+      && !event.type.startsWith('scheduler.')
+    ))
+    return [{
+      id: 'supervisor-compatibility',
+      iteration: 1,
+      decision: null,
+      events,
+      stages: buildStages(events),
+      waves: buildExecutionWaves(groups),
+    }]
+  }
 
+  return decisions.map((decision, index) => {
+    const previousDecisionSequence = decisions[index - 1]?.sequence ?? 0
+    const nextDecisionSequence = decisions[index + 1]?.sequence ?? Number.POSITIVE_INFINITY
+    const events = visibleEvents.value.filter((event) => (
+      !event.task_id
+      && event.sequence > previousDecisionSequence
+      && event.sequence <= decision.sequence
+      && event.type !== 'run.started'
+      && !event.type.startsWith('run.')
+      && !event.type.startsWith('scheduler.')
+    ))
+    return {
+      id: `supervisor-${decision.event_id}`,
+      iteration: decision.iteration || index + 1,
+      decision,
+      events,
+      stages: buildStages(events),
+      waves: waves.filter((wave) => {
+        const sequence = wave.startedEvent?.sequence ?? wave.completedEvent?.sequence ?? 0
+        return sequence > decision.sequence && sequence < nextDecisionSequence
+      }),
+    }
+  })
+})
 watch(
   orderedEvents,
   (events) => {
@@ -257,9 +318,131 @@ function iconFor(event: TraceEvent) {
   return CircleDot
 }
 
+function buildExecutionWaves(groups: TraceGroup[]): ExecutionWave[] {
+  const groupById = new Map(groups.map((group) => [group.id, group]))
+  const waves: ExecutionWave[] = []
+  const markers = visibleEvents.value.filter((event) => (
+    event.type === 'scheduler.parallel_batch.started'
+    || event.type === 'scheduler.parallel_batch.completed'
+  ))
+
+  for (const marker of markers) {
+    const taskIds = Array.isArray(marker.data.task_ids)
+      ? marker.data.task_ids.filter((value): value is string => typeof value === 'string')
+      : []
+    const key = taskIds.join('|')
+    let wave = marker.type.endsWith('.completed')
+      ? [...waves].reverse().find((item) => item.id.startsWith(`wave-${key}-`) && !item.completedEvent)
+      : undefined
+    if (!wave) {
+      wave = {
+        id: `wave-${key}-${marker.sequence}`,
+        order: waves.length + 1,
+        parallel: marker.data.parallel === true,
+        groups: taskIds.map((taskId) => groupById.get(taskId)).filter((group): group is TraceGroup => Boolean(group)),
+        startedEvent: marker.type.endsWith('.started') ? marker : null,
+        completedEvent: marker.type.endsWith('.completed') ? marker : null,
+        status: 'pending',
+      }
+      waves.push(wave)
+    } else {
+      wave.completedEvent = marker
+    }
+  }
+
+  const assigned = new Set(waves.flatMap((wave) => wave.groups.map((group) => group.id)))
+  for (const group of groups) {
+    if (assigned.has(group.id)) continue
+    const firstEvent = group.events[0] ?? null
+    waves.push({
+      id: `wave-pending-${group.id}`,
+      order: waves.length + 1,
+      parallel: false,
+      groups: [group],
+      startedEvent: firstEvent,
+      completedEvent: null,
+      status: group.status,
+    })
+  }
+
+  waves.sort((left, right) => (
+    (left.startedEvent?.sequence ?? left.completedEvent?.sequence ?? Number.MAX_SAFE_INTEGER)
+    - (right.startedEvent?.sequence ?? right.completedEvent?.sequence ?? Number.MAX_SAFE_INTEGER)
+  ))
+  return waves.map((wave, index) => ({
+    ...wave,
+    order: index + 1,
+    status: waveStatus(wave.groups, wave.completedEvent !== null),
+  }))
+}
+
+function waveStatus(groups: TraceGroup[], completed: boolean): string {
+  if (groups.some((group) => ['running', 'ready'].includes(group.status))) return 'running'
+  if (groups.some((group) => group.status === 'waiting_confirmation')) return 'waiting_confirmation'
+  if (groups.some((group) => ['failed', 'blocked'].includes(group.status))) return 'failed'
+  if (groups.length && groups.every((group) => group.status === 'completed')) return 'completed'
+  return completed ? 'completed' : 'pending'
+}
+
+function waveIsLive(wave: ExecutionWave): boolean {
+  return ['pending', 'running', 'waiting_confirmation'].includes(wave.status) && isLive.value
+}
+
+function taskDisplayName(group: TraceGroup): string {
+  return group.task ? nodeLabel(group.task.agent_id) : nodeLabel(group.label)
+}
+
+function dependencyLabel(group: TraceGroup, round: SupervisorRound): string {
+  const dependencies = group.task?.depends_on ?? []
+  if (!dependencies.length) {
+    return round.iteration > 1
+      ? `由第 ${round.iteration - 1} 轮结果触发`
+      : '无前置依赖'
+  }
+  const dependencyGroups = dependencies.map((taskId) => traceGroups.value.find((item) => item.id === taskId))
+  const names = dependencyGroups.map((item, index) => item ? taskDisplayName(item) : dependencies[index]).join('、')
+  const ready = dependencyGroups.every((item) => item?.status === 'completed')
+  return ready ? `依赖已满足：${names}` : `等待：${names}`
+}
+
+function groupDuration(group: TraceGroup): string {
+  const started = group.events.find((event) => event.type === 'task.started')
+  const terminal = [...group.events].reverse().find((event) => (
+    event.type.startsWith('task.')
+    && ['completed', 'failed', 'blocked', 'needs_input', 'denied', 'unavailable'].some((status) => event.type.endsWith(status))
+  ))
+  if (!started) return ''
+  const end = terminal ? new Date(terminal.timestamp).getTime() : Date.now()
+  const durationMs = Math.max(0, end - new Date(started.timestamp).getTime())
+  return durationMs >= 1000 ? `${(durationMs / 1000).toFixed(1)} s` : `${durationMs} ms`
+}
+
+function supervisorActionLabel(event: TraceEvent | null): string {
+  if (!event) return '兼容历史 Run'
+  const action = String(event.data.action ?? '')
+  if (action === 'create_tasks') return '创建执行计划'
+  if (action === 'finish') return '汇总并结束'
+  if (action === 'clarify') return '请求补充信息'
+  return '评估下一步'
+}
+
+function supervisorReason(event: TraceEvent | null): string {
+  if (!event) return '当前记录没有 Supervisor 决策事件，已按 Task 事实重建执行层级。'
+  return String(event.data.reason ?? eventSummary(event) ?? 'Supervisor 已完成本轮决策')
+}
+
+function roundIsLive(round: SupervisorRound): boolean {
+  return isLive.value && supervisorRounds.value.at(-1)?.id === round.id
+}
+
+function supervisorEventIsLive(event: TraceEvent, round: SupervisorRound): boolean {
+  return roundIsLive(round)
+    && round.events.at(-1)?.event_id === event.event_id
+    && event.type.endsWith('.started')
+}
+
 function groupIsLive(group: TraceGroup): boolean {
   return ['pending', 'ready', 'running'].includes(group.status)
-    || (group.id === 'run' && isLive.value)
 }
 
 function eventIsLive(event: TraceEvent, group: TraceGroup): boolean {
@@ -568,7 +751,7 @@ onBeforeUnmount(() => {
       <div v-if="expandedTimeline" class="inline-trace-body">
         <div class="trace-toolbar trace-toolbar-quiet">
           <span>
-            {{ traceOverview.groupCount }} 个执行单元
+            {{ traceOverview.groupCount }} 个执行单元 · {{ statusLabel(run.status) }}
             <template v-if="traceOverview.failures"> · {{ traceOverview.failures }} 个异常</template>
           </span>
           <button
@@ -581,122 +764,254 @@ onBeforeUnmount(() => {
             {{ traceDetailLevel === 'full' ? '收起技术细节' : '查看技术细节' }}
           </button>
         </div>
-        <TransitionGroup name="trace-group" tag="div" class="trace-groups">
-          <section
-            v-for="(group, groupIndex) in traceGroups"
-            :key="group.id"
-            class="trace-group"
-            :data-status="group.status"
-            :data-live="groupIsLive(group)"
-          >
-            <button
-              class="trace-group-header"
-              type="button"
-              :aria-expanded="expandedGroups.has(group.id)"
-              @click="toggleGroup(group.id)"
+        <div class="trace-run-map">
+          <header v-if="runStartEvent" class="trace-run-root">
+            <span class="trace-map-node"><Route :size="14" /></span>
+            <span>
+              <strong>Run 目标</strong>
+              <small>{{ eventSummary(runStartEvent) || run.message }}</small>
+            </span>
+            <time>{{ formatTime(runStartEvent.timestamp) }}</time>
+          </header>
+
+          <TransitionGroup name="trace-group" tag="div" class="trace-rounds">
+            <section
+              v-for="round in supervisorRounds"
+              :key="round.id"
+              class="trace-round"
+              :data-live="roundIsLive(round)"
             >
-              <span class="trace-group-order">{{ groupIndex + 1 }}</span>
-              <span class="trace-group-status">
-                <LoaderCircle v-if="groupIsLive(group)" :size="15" class="trace-running-icon" />
-                <CheckCircle2 v-else-if="group.status === 'completed'" :size="15" />
-                <TriangleAlert v-else-if="['failed', 'blocked', 'needs_more_information', 'needs_input', 'denied', 'unavailable'].includes(group.status)" :size="15" />
-                <Route v-else :size="15" />
-              </span>
-              <span class="trace-group-copy">
-                <span>
-                  <strong>{{ group.label }}</strong>
-                  <em :data-status="group.status">{{ statusLabel(group.status) }}</em>
+              <button
+                class="trace-supervisor-decision"
+                type="button"
+                :aria-expanded="expandedGroups.has(round.id)"
+                @click="toggleGroup(round.id)"
+              >
+                <span class="trace-map-node trace-map-node-supervisor">
+                  <LoaderCircle v-if="roundIsLive(round)" :size="14" class="trace-running-icon" />
+                  <Bot v-else :size="14" />
                 </span>
-                <small>{{ group.summary }}</small>
-                <small v-if="group.latestSummary" class="trace-group-latest">{{ group.latestSummary }}</small>
-              </span>
-              <span class="trace-group-count">
-                <b>{{ group.primaryCount }}</b> 关键
-                <span v-if="group.detailCount">· {{ group.detailCount }} 细节</span>
-              </span>
-              <ChevronDown v-if="expandedGroups.has(group.id)" :size="15" />
-              <ChevronRight v-else :size="15" />
-            </button>
+                <span class="trace-supervisor-copy">
+                  <span>
+                    <strong>Supervisor 决策</strong>
+                    <em>第 {{ round.iteration }} 轮</em>
+                    <b>{{ supervisorActionLabel(round.decision) }}</b>
+                  </span>
+                  <small>{{ supervisorReason(round.decision) }}</small>
+                </span>
+                <time v-if="round.decision">{{ formatTime(round.decision.timestamp) }}</time>
+                <ChevronDown v-if="expandedGroups.has(round.id)" :size="15" />
+                <ChevronRight v-else :size="15" />
+              </button>
 
-            <Transition name="trace-expand">
-              <div v-if="expandedGroups.has(group.id)" class="trace-group-events">
-                <section
-                  v-for="stage in group.stages"
-                  :key="stage.id"
-                  class="trace-stage"
-                  :data-stage="stage.key"
-                >
-                  <header class="trace-stage-header">
-                    <span class="trace-stage-branch" />
-                    <strong>{{ stage.label }}</strong>
-                    <span>{{ stageSummary(stage) }}</span>
-                  </header>
-                  <TransitionGroup name="trace-event" tag="div" class="trace-stage-events">
-                    <button
-                      v-for="event in stage.primaryEvents"
-                      :key="event.event_id"
-                      class="inline-trace-event"
-                      :class="{ active: eventIsLive(event, group) }"
-                      :data-tone="eventTone(event)"
-                      type="button"
-                      @click="toggleEvent(event)"
-                    >
-                      <span class="inline-trace-rail">
-                        <span class="inline-trace-icon">
-                          <LoaderCircle
-                            v-if="eventIsLive(event, group)"
-                            :size="13"
-                            class="trace-running-icon"
-                          />
-                          <component :is="iconFor(event)" v-else :size="13" />
-                        </span>
-                      </span>
-                      <span class="inline-trace-copy">
-                        <span class="inline-trace-title">
-                          <span class="trace-sequence">#{{ event.sequence }}</span>
-                          <strong>{{ eventTitle(event) }}</strong>
-                          <span v-if="event.node" class="trace-node-label">{{ eventNodeLabel(event) }}</span>
-                          <span v-if="event.iteration" class="iteration-label">
-                            第 {{ event.iteration }} 轮
+              <Transition name="trace-expand">
+                <div v-if="expandedGroups.has(round.id)" class="trace-supervisor-details">
+                  <section
+                    v-for="stage in round.stages"
+                    :key="stage.id"
+                    class="trace-stage"
+                    :data-stage="stage.key"
+                  >
+                    <header class="trace-stage-header">
+                      <span class="trace-stage-branch" />
+                      <strong>{{ stage.label }}</strong>
+                      <span>{{ stageSummary(stage) }}</span>
+                    </header>
+                    <TransitionGroup name="trace-event" tag="div" class="trace-stage-events">
+                      <button
+                        v-for="event in stage.primaryEvents"
+                        :key="event.event_id"
+                        class="inline-trace-event"
+                        :class="{ active: supervisorEventIsLive(event, round) }"
+                        :data-tone="eventTone(event)"
+                        type="button"
+                        @click="toggleEvent(event)"
+                      >
+                        <span class="inline-trace-rail">
+                          <span class="inline-trace-icon">
+                            <LoaderCircle v-if="supervisorEventIsLive(event, round)" :size="13" class="trace-running-icon" />
+                            <component :is="iconFor(event)" v-else :size="13" />
                           </span>
-                          <time>{{ formatTime(event.timestamp) }}</time>
                         </span>
-                        <span v-if="eventSummary(event)" class="inline-trace-summary">
-                          {{ eventSummary(event) }}
-                        </span>
-                        <Transition name="trace-detail">
-                          <span
-                            v-if="expandedEvents.has(event.sequence)"
-                            class="trace-detail-stack"
-                          >
-                            <span
-                              v-for="detail in eventDetails(event)"
-                              :key="detail.label"
-                              class="trace-detail"
-                              :data-tone="detail.tone"
-                            >
-                              <b>{{ detail.label }}</b>
-                              <code>{{ pretty(detail.value) }}</code>
+                        <span class="inline-trace-copy">
+                          <span class="inline-trace-title">
+                            <span class="trace-sequence">#{{ event.sequence }}</span>
+                            <strong>{{ eventTitle(event) }}</strong>
+                            <span v-if="event.node" class="trace-node-label">{{ eventNodeLabel(event) }}</span>
+                            <time>{{ formatTime(event.timestamp) }}</time>
+                          </span>
+                          <span v-if="eventSummary(event)" class="inline-trace-summary">{{ eventSummary(event) }}</span>
+                          <Transition name="trace-detail">
+                            <span v-if="expandedEvents.has(event.sequence)" class="trace-detail-stack">
+                              <span
+                                v-for="detail in eventDetails(event)"
+                                :key="detail.label"
+                                class="trace-detail"
+                                :data-tone="detail.tone"
+                              >
+                                <b>{{ detail.label }}</b>
+                                <code>{{ pretty(detail.value) }}</code>
+                              </span>
                             </span>
-                          </span>
-                        </Transition>
-                      </span>
-                      <ChevronDown v-if="expandedEvents.has(event.sequence)" :size="14" />
-                      <ChevronRight v-else :size="14" />
-                    </button>
-                  </TransitionGroup>
-                </section>
-
-                <div v-if="groupIsLive(group)" class="trace-waiting">
-                  <span class="runtime-spinner" />
-                  <span>等待下一项执行事件<span class="waiting-dots" aria-hidden="true">...</span></span>
+                          </Transition>
+                        </span>
+                        <ChevronDown v-if="expandedEvents.has(event.sequence)" :size="14" />
+                        <ChevronRight v-else :size="14" />
+                      </button>
+                    </TransitionGroup>
+                  </section>
                 </div>
-              </div>
-            </Transition>
-          </section>
-        </TransitionGroup>
+              </Transition>
 
-        <div v-if="traceGroups.length === 0" class="inline-trace-empty">
+              <div v-if="round.waves.length" class="trace-wave-list">
+                <section
+                  v-for="wave in round.waves"
+                  :key="wave.id"
+                  class="trace-wave"
+                  :data-live="waveIsLive(wave)"
+                  :data-parallel="wave.parallel"
+                  :data-status="wave.status"
+                >
+                  <header class="trace-wave-header">
+                    <span class="trace-wave-branch" />
+                    <span class="trace-wave-icon">
+                      <LoaderCircle v-if="waveIsLive(wave)" :size="14" class="trace-running-icon" />
+                      <Layers3 v-else :size="14" />
+                    </span>
+                    <span>
+                      <strong>执行波次 {{ wave.order }}</strong>
+                      <small>{{ wave.parallel ? `${wave.groups.length} 个 Task 并行` : '串行执行' }}</small>
+                    </span>
+                    <em :data-status="wave.status">{{ statusLabel(wave.status) }}</em>
+                  </header>
+
+                  <div class="trace-wave-agents" :data-parallel="wave.parallel">
+                    <article
+                      v-for="group in wave.groups"
+                      :key="group.id"
+                      class="trace-group trace-agent-card"
+                      :data-status="group.status"
+                      :data-live="groupIsLive(group)"
+                    >
+                      <button
+                        class="trace-group-header"
+                        type="button"
+                        :aria-expanded="expandedGroups.has(group.id)"
+                        @click="toggleGroup(group.id)"
+                      >
+                        <span class="trace-group-status">
+                          <LoaderCircle v-if="groupIsLive(group)" :size="15" class="trace-running-icon" />
+                          <CheckCircle2 v-else-if="group.status === 'completed'" :size="15" />
+                          <Clock3 v-else-if="['pending', 'ready'].includes(group.status)" :size="15" />
+                          <TriangleAlert v-else-if="['failed', 'blocked', 'needs_more_information', 'needs_input', 'denied', 'unavailable'].includes(group.status)" :size="15" />
+                          <Bot v-else :size="15" />
+                        </span>
+                        <span class="trace-group-copy">
+                          <span>
+                            <strong>{{ taskDisplayName(group) }}</strong>
+                            <code>{{ group.label }}</code>
+                            <em :data-status="group.status">{{ statusLabel(group.status) }}</em>
+                          </span>
+                          <small>{{ group.summary }}</small>
+                          <span class="trace-task-relation" :data-waiting="dependencyLabel(group, round).startsWith('等待')">
+                            <GitBranch :size="11" />
+                            {{ dependencyLabel(group, round) }}
+                          </span>
+                        </span>
+                        <span class="trace-group-count">
+                          <b v-if="groupDuration(group)">{{ groupDuration(group) }}</b>
+                          <span>{{ group.primaryCount }} 关键事件</span>
+                        </span>
+                        <ChevronDown v-if="expandedGroups.has(group.id)" :size="15" />
+                        <ChevronRight v-else :size="15" />
+                      </button>
+
+                      <Transition name="trace-expand">
+                        <div v-if="expandedGroups.has(group.id)" class="trace-group-events">
+                          <section
+                            v-for="stage in group.stages"
+                            :key="stage.id"
+                            class="trace-stage"
+                            :data-stage="stage.key"
+                          >
+                            <header class="trace-stage-header">
+                              <span class="trace-stage-branch" />
+                              <strong>{{ stage.label }}</strong>
+                              <span>{{ stageSummary(stage) }}</span>
+                            </header>
+                            <TransitionGroup name="trace-event" tag="div" class="trace-stage-events">
+                              <button
+                                v-for="event in stage.primaryEvents"
+                                :key="event.event_id"
+                                class="inline-trace-event"
+                                :class="{ active: eventIsLive(event, group) }"
+                                :data-tone="eventTone(event)"
+                                type="button"
+                                @click="toggleEvent(event)"
+                              >
+                                <span class="inline-trace-rail">
+                                  <span class="inline-trace-icon">
+                                    <LoaderCircle v-if="eventIsLive(event, group)" :size="13" class="trace-running-icon" />
+                                    <component :is="iconFor(event)" v-else :size="13" />
+                                  </span>
+                                </span>
+                                <span class="inline-trace-copy">
+                                  <span class="inline-trace-title">
+                                    <span class="trace-sequence">#{{ event.sequence }}</span>
+                                    <strong>{{ eventTitle(event) }}</strong>
+                                    <span v-if="event.node" class="trace-node-label">{{ eventNodeLabel(event) }}</span>
+                                    <span v-if="event.iteration" class="iteration-label">第 {{ event.iteration }} 轮</span>
+                                    <time>{{ formatTime(event.timestamp) }}</time>
+                                  </span>
+                                  <span v-if="eventSummary(event)" class="inline-trace-summary">{{ eventSummary(event) }}</span>
+                                  <Transition name="trace-detail">
+                                    <span v-if="expandedEvents.has(event.sequence)" class="trace-detail-stack">
+                                      <span
+                                        v-for="detail in eventDetails(event)"
+                                        :key="detail.label"
+                                        class="trace-detail"
+                                        :data-tone="detail.tone"
+                                      >
+                                        <b>{{ detail.label }}</b>
+                                        <code>{{ pretty(detail.value) }}</code>
+                                      </span>
+                                    </span>
+                                  </Transition>
+                                </span>
+                                <ChevronDown v-if="expandedEvents.has(event.sequence)" :size="14" />
+                                <ChevronRight v-else :size="14" />
+                              </button>
+                            </TransitionGroup>
+                          </section>
+
+                          <div v-if="groupIsLive(group)" class="trace-waiting">
+                            <span class="runtime-spinner" />
+                            <span>Agent 正在执行<span class="waiting-dots" aria-hidden="true">...</span></span>
+                          </div>
+                        </div>
+                      </Transition>
+                    </article>
+                  </div>
+                </section>
+              </div>
+            </section>
+          </TransitionGroup>
+
+          <footer v-if="runTerminalEvent" class="trace-run-result" :data-tone="eventTone(runTerminalEvent)">
+            <span class="trace-map-node">
+              <CheckCircle2 v-if="eventTone(runTerminalEvent) === 'success'" :size="14" />
+              <TriangleAlert v-else-if="eventTone(runTerminalEvent) === 'danger'" :size="14" />
+              <CircleDot v-else :size="14" />
+            </span>
+            <span>
+              <strong>{{ eventTitle(runTerminalEvent) }}</strong>
+              <small>{{ eventSummary(runTerminalEvent) }}</small>
+            </span>
+            <time>{{ formatTime(runTerminalEvent.timestamp) }}</time>
+          </footer>
+        </div>
+
+        <div v-if="visibleEvents.length === 0" class="inline-trace-empty">
           <span class="runtime-spinner" />
           <span>等待第一个运行事件</span>
         </div>
