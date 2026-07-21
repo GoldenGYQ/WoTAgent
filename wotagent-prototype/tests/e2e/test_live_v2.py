@@ -15,7 +15,7 @@ from wotagent.agent_graph import (
     LangChainTaskPlanner,
     build_agent_graph,
 )
-from wotagent.core import create_wot_pipeline
+from wotagent.core import create_llm_runtime
 from wotagent.gateway import MCPDeviceGateway
 from wotagent.orchestration import TaskOrchestrator
 from wotagent.policy import PolicyEngine
@@ -34,7 +34,7 @@ def test_chinese_two_step_control_reaches_verified_device_state() -> None:
         session_id = "sess_live_acceptance"
         store = InMemoryTraceStore()
         await store.create(task_id=task_id, session_id=session_id, request_id="req_live_acceptance")
-        pipeline = create_wot_pipeline(enable_thinking=False, enable_streaming=False, temperature=0)
+        pipeline = create_llm_runtime(enable_thinking=False, enable_streaming=False, temperature=0)
         policy = PolicyEngine()
         gateway = MCPDeviceGateway()
         graph = build_agent_graph(

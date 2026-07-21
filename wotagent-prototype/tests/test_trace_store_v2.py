@@ -79,3 +79,21 @@ def test_wait_for_events_unblocks_when_an_event_arrives() -> None:
 
     assert len(events) == 1
     assert events[0].type == "task.started"
+
+
+def test_raw_trace_data_is_retained_but_excluded_from_public_event_dump() -> None:
+    async def run():
+        store = InMemoryTraceStore()
+        await store.create(task_id="task-raw", session_id="sess", request_id="req")
+        await store.record(
+            task_id="task-raw",
+            type="model.request.started",
+            data={"purpose": "planning"},
+            raw_data={"messages": [{"role": "user", "content": "private prompt"}]},
+        )
+        return (await store.events("task-raw"))[0]
+
+    event = asyncio.run(run())
+
+    assert event.raw_data["messages"][0]["content"] == "private prompt"
+    assert "raw_data" not in event.model_dump(mode="json")

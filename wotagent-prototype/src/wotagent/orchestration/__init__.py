@@ -14,6 +14,7 @@ from .run_models import (
     SupervisorDecision,
     SupervisorTaskPlan,
     TaskFailure,
+    TraceArtifact,
     TaskPrincipal,
     TaskTarget,
 )
@@ -46,6 +47,7 @@ __all__ = [
     "TaskPreparationError",
     "TaskScheduler",
     "TaskFailure",
+    "TraceArtifact",
     "TaskPrincipal",
     "TaskTarget",
 ]

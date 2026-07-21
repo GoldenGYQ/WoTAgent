@@ -2258,3 +2258,141 @@ GET/POST /api/v2/domains/...（主体、资源、事件、遥测和场景操作�
 Backend: 214 passed, 3 skipped
 Frontend: 30 passed, typecheck/build passed
 ```
+
+## 30. 2026-07-21 runtime, scope and Trace cleanup
+
+### 30.1 The representative failure was not simply an LLM mistake
+
+The persisted `run_d3d95a5d8b8b` showed a four-stage failure chain:
+
+1. `JH-1 -> resident:elderly-001` was expanded by hard-coded resident fields,
+   which omitted `light-101`, `fan-101`, `humidifier-101` and `purifier-101`.
+2. Environment Agent therefore received only the AC, environment sensor,
+   wristband and mattress.
+3. Planner selected the AC for a light objective because the authoritative
+   capability context was already wrong.
+4. A chat response with no tool execution was mapped from graph phase
+   `responded` to Finding status `completed`, causing Supervisor to investigate
+   the same problem repeatedly.
+
+The lesson is that an apparently foolish Agent result can be produced by a
+broken capability boundary and a false completion adapter. Prompt tuning alone
+cannot repair either issue.
+
+### 30.2 Closed device exposure model
+
+`DeploymentResourceResolver` now computes device scope as:
+
+```text
+trusted Principal resources and relationships
+-> canonical resident/space location
+-> TD location matching
+-> intersection with active Deployment Profile devices
+-> optional narrowing by concrete Task resource claims
+```
+
+Claims such as `light-101` or `device:light-101` can only narrow the authorized
+set. A model-proposed unknown or unauthorized device is ignored and can never
+expand `effective_scope`.
+
+### 30.3 Planner semantics versus deterministic safety
+
+Hybrid mode no longer uses Python keyword maps to select a room/device or regex
+rules to reinterpret `turnOn`/`turnOff`. The LLM receives the authorized device
+catalog and creates a typed `TaskPlan`. Deterministic code still validates:
+
+- AgentSpec and MCP scope;
+- concrete device and action existence in TD;
+- action input JSON Schema;
+- RBAC/Policy and confirmation;
+- post-action state verification.
+
+Rule-mode fast paths remain available as a baseline. They are not the default
+semantic path.
+
+### 30.4 Status must describe business outcome
+
+The status vocabulary now distinguishes `partial_success`, `skipped`,
+`needs_input`, `denied`, `unavailable`, `blocked` and `failed`. A dependent Task
+whose prerequisite cannot provide usable evidence is `skipped`, not another
+generic `blocked`. A device graph that only reaches a chat/clarify response
+without execution evidence becomes `needs_more_information`, not `completed`.
+
+### 30.5 Cross-Run memory
+
+Conversation history is no longer only a flat text transcript. SQLite now also
+persists a bounded `ConversationState` containing active goal, canonical
+entities, verified facts and last outcome. The current request text is not
+rewritten by domain-specific keyword code; Supervisor receives both recent
+dialogue and the structured state.
+
+### 30.6 Raw Trace without an overloaded UI
+
+Trace persistence is split into two projections:
+
+```text
+compact RunEvent -> WebSocket replay and focused frontend timeline
+raw TraceArtifact -> full model/tool payload, fetched only on demand
+```
+
+The event and optional artifact are inserted in one SQLite transaction. The UI
+defaults to a focused timeline, hides low-value model lifecycle noise and
+offers one explicit technical-detail switch. Raw payloads are not pushed over
+the normal event stream.
+
+A local Windows benchmark of 100 writes measured a median of 11.588 ms for a
+compact event and 13.595 ms for the same event plus a 50 KB raw artifact. The
+median incremental cost was about 2.006 ms, which is small relative to model
+latency. This is an experiment-scale result, not a production throughput SLA.
+
+The benchmark also exposed that Python's `sqlite3.Connection` context manager
+commits or rolls back but does not close the connection. The Store previously
+opened a connection per operation without an explicit close. The connection
+lifecycle now uses `try/commit/rollback/finally/close`, with a Windows unlink
+regression test to prevent handle leaks.
+
+### 30.7 Care specialist migration and removed entry points
+
+Production Care Tasks now use bounded LangChain `create_agent`, scoped care MCP
+tools and runtime-attested tool messages. A model-generated success claim does
+not complete the Task unless an actual care tool result is successful and
+verified. The old `TaskRunner`, top-level Supervisor and misleading model
+`pipeline.py` entry points were removed; model construction now lives in
+`core/model_runtime.py`.
+
+### 30.8 New regression coverage
+
+The new tests cover room-wide TD resource expansion, claim-only narrowing,
+cross-resident health/care denial, verified Care execution, chat-only false
+completion, recovered Run completion, structured conversation memory, raw
+TraceArtifact persistence/retrieval, hybrid Planner behavior and focused Trace
+rendering. The complete verification result for this stage is:
+
+```text
+Backend: 253 passed, 3 skipped
+Frontend: 44 passed
+Frontend typecheck and production build: passed
+Simulator: 64 passed (one existing deprecation warning)
+```
+
+### 30.9 Real-model replay exposed a terminal-plan status bug
+
+The first replay of `打开张爷爷房间的灯并调到 45% 亮度` correctly narrowed the
+Task to `device:light-101` and produced two successful, verified tool calls.
+However, the device graph then ran one final planning iteration and returned a
+`chat` plan meaning "the objective is complete". `_result_finding` treated any
+terminal chat plan as missing evidence and marked the Task `needs_input`, so the
+Run was shown as failed even though Supervisor and the verified device state
+both said it had completed.
+
+The adapter now downgrades a chat/clarify result only when the complete graph
+state contains no execution or verification evidence. A regression test covers
+the normal sequence `control -> verified execution -> terminal chat`.
+
+After the fix, real-model Run `run_9bc2c9f758d1` completed with one
+`environment_agent` Task, scope `device:light-101`, two verified tool calls and
+two Supervisor iterations. Follow-up Run `run_b2ec6ae8ed4a` used the same
+Conversation and resolved `它现在亮度是多少` to the same resident room light,
+returning 45% with one scoped read. Planner and Responder raw artifacts were
+also retrieved through the artifact API without placing their payloads in the
+compact event stream.

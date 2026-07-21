@@ -48,7 +48,7 @@ interface EventDetail {
   tone: 'neutral' | 'input' | 'output' | 'verify' | 'danger'
 }
 
-type TraceDetailLevel = 'focus' | 'standard' | 'full'
+type TraceDetailLevel = 'focus' | 'full'
 
 const props = defineProps<{
   run: RuntimeRun
@@ -73,7 +73,6 @@ const TERMINAL_RUN_STATUSES = new Set([
 ])
 const expandedEvents = ref(new Set<number>())
 const expandedGroups = ref(new Set<string>())
-const expandedStageDetails = ref(new Set<string>())
 const expandedTimeline = ref(ACTIVE_RUN_STATUSES.has(props.run.status))
 const visibleEventIds = ref(new Set<string>())
 const traceEndRef = ref<HTMLElement | null>(null)
@@ -105,11 +104,6 @@ const traceOverview = computed(() => {
     modelEvents,
   }
 })
-const detailLevelOptions: Array<{ value: TraceDetailLevel; label: string }> = [
-  { value: 'focus', label: '精简' },
-  { value: 'standard', label: '标准' },
-  { value: 'full', label: '全量' },
-]
 const traceGroups = computed<TraceGroup[]>(() => {
   const groups: TraceGroup[] = []
   const runEvents = visibleEvents.value.filter((event) => !event.task_id)
@@ -201,11 +195,12 @@ watch(
   traceGroups,
   (groups) => {
     const next = new Set(expandedGroups.value)
+    const latestGroupId = groups.at(-1)?.id
     for (const group of groups) {
       if (
         group.id === 'run'
         || ['pending', 'ready', 'running', 'waiting_confirmation'].includes(group.status)
-        || props.selected
+        || (isLive.value && group.id === latestGroupId)
       ) {
         next.add(group.id)
       }
@@ -219,7 +214,6 @@ watch(
   traceDetailLevel,
   (level) => {
     localStorage.setItem(TRACE_DETAIL_LEVEL_KEY, level)
-    if (level !== 'standard') expandedStageDetails.value = new Set()
   },
 )
 
@@ -248,13 +242,6 @@ function toggleGroup(groupId: string): void {
   next.has(groupId) ? next.delete(groupId) : next.add(groupId)
   expandedGroups.value = next
   if (next.has(groupId)) scrollToLatestTrace(false)
-}
-
-function toggleStageDetails(stageId: string): void {
-  if (traceDetailLevel.value !== 'standard') return
-  const next = new Set(expandedStageDetails.value)
-  next.has(stageId) ? next.delete(stageId) : next.add(stageId)
-  expandedStageDetails.value = next
 }
 
 function iconFor(event: TraceEvent) {
@@ -296,6 +283,10 @@ function statusLabel(status: string): string {
     needs_more_information: '待补充信息',
     completed: '已完成',
     partial_success: '部分完成',
+    skipped: '已跳过',
+    needs_input: '待补充',
+    denied: '权限拒绝',
+    unavailable: '资源不可用',
     failed: '失败',
     blocked: '受阻',
     cancelled: '已取消',
@@ -386,11 +377,7 @@ function splitStageEvents(events: TraceEvent[]): {
       hiddenCount: Math.max(0, events.length - primaryEvents.length),
     }
   }
-  return {
-    primaryEvents: events.filter((event) => isPrimaryEvent(event)),
-    detailEvents: events.filter((event) => !isPrimaryEvent(event)),
-    hiddenCount: 0,
-  }
+  return { primaryEvents: [...events], detailEvents: [], hiddenCount: 0 }
 }
 
 function isPrimaryEvent(event: TraceEvent): boolean {
@@ -443,7 +430,7 @@ function eventNodeLabel(event: TraceEvent): string {
 
 function readTraceDetailLevel(): TraceDetailLevel {
   const value = localStorage.getItem(TRACE_DETAIL_LEVEL_KEY)
-  return value === 'focus' || value === 'full' ? value : 'standard'
+  return value === 'full' ? 'full' : 'focus'
 }
 
 function stageFor(event: TraceEvent): { key: string; label: string } {
@@ -579,38 +566,20 @@ onBeforeUnmount(() => {
 
     <Transition name="trace-expand">
       <div v-if="expandedTimeline" class="inline-trace-body">
-        <div class="trace-toolbar">
-          <span class="trace-toolbar-label">细节级别</span>
-          <div class="trace-detail-switch" role="tablist" aria-label="trace-detail-level">
-            <button
-              v-for="option in detailLevelOptions"
-              :key="option.value"
-              class="trace-detail-switch-button"
-              type="button"
-              :data-active="traceDetailLevel === option.value"
-              @click="traceDetailLevel = option.value"
-            >
-              {{ option.label }}
-            </button>
-          </div>
-        </div>
-        <div class="trace-overview">
-          <span class="trace-overview-pill">分组 {{ traceOverview.groupCount }}</span>
-          <span class="trace-overview-pill trace-overview-pill-primary">关键 {{ traceOverview.primaryEvents }}</span>
-          <span class="trace-overview-pill">细节 {{ traceOverview.detailEvents }}</span>
-          <span
-            v-if="traceOverview.hiddenEvents"
-            class="trace-overview-pill"
-          >
-            已过滤 {{ traceOverview.hiddenEvents }}
+        <div class="trace-toolbar trace-toolbar-quiet">
+          <span>
+            {{ traceOverview.groupCount }} 个执行单元
+            <template v-if="traceOverview.failures"> · {{ traceOverview.failures }} 个异常</template>
           </span>
-          <span
-            v-if="traceOverview.failures"
-            class="trace-overview-pill trace-overview-pill-danger"
+          <button
+            class="trace-technical-toggle"
+            type="button"
+            :aria-pressed="traceDetailLevel === 'full'"
+            @click="traceDetailLevel = traceDetailLevel === 'full' ? 'focus' : 'full'"
           >
-            异常 {{ traceOverview.failures }}
-          </span>
-          <span class="trace-overview-pill">模型 {{ traceOverview.modelEvents }}</span>
+            <Wrench :size="13" />
+            {{ traceDetailLevel === 'full' ? '收起技术细节' : '查看技术细节' }}
+          </button>
         </div>
         <TransitionGroup name="trace-group" tag="div" class="trace-groups">
           <section
@@ -630,7 +599,7 @@ onBeforeUnmount(() => {
               <span class="trace-group-status">
                 <LoaderCircle v-if="groupIsLive(group)" :size="15" class="trace-running-icon" />
                 <CheckCircle2 v-else-if="group.status === 'completed'" :size="15" />
-                <TriangleAlert v-else-if="['failed', 'blocked', 'needs_more_information'].includes(group.status)" :size="15" />
+                <TriangleAlert v-else-if="['failed', 'blocked', 'needs_more_information', 'needs_input', 'denied', 'unavailable'].includes(group.status)" :size="15" />
                 <Route v-else :size="15" />
               </span>
               <span class="trace-group-copy">
@@ -716,71 +685,6 @@ onBeforeUnmount(() => {
                       <ChevronRight v-else :size="14" />
                     </button>
                   </TransitionGroup>
-                  <div
-                    v-if="traceDetailLevel === 'standard' && stage.detailEvents.length"
-                    class="trace-stage-detail-panel"
-                  >
-                    <button
-                      class="trace-stage-detail-toggle"
-                      type="button"
-                      :aria-expanded="expandedStageDetails.has(stage.id)"
-                      @click="toggleStageDetails(stage.id)"
-                    >
-                      <span>技术细节 {{ stage.detailEvents.length }} 项</span>
-                      <ChevronDown v-if="expandedStageDetails.has(stage.id)" :size="14" />
-                      <ChevronRight v-else :size="14" />
-                    </button>
-                    <Transition name="trace-expand">
-                      <div
-                        v-if="expandedStageDetails.has(stage.id)"
-                        class="trace-stage-events trace-stage-events-detail"
-                      >
-                        <button
-                          v-for="event in stage.detailEvents"
-                          :key="event.event_id"
-                          class="inline-trace-event inline-trace-event-secondary"
-                          :data-tone="eventTone(event)"
-                          type="button"
-                          @click="toggleEvent(event)"
-                        >
-                          <span class="inline-trace-rail">
-                            <span class="inline-trace-icon">
-                              <component :is="iconFor(event)" :size="13" />
-                            </span>
-                          </span>
-                          <span class="inline-trace-copy">
-                            <span class="inline-trace-title">
-                              <span class="trace-sequence">#{{ event.sequence }}</span>
-                              <strong>{{ eventTitle(event) }}</strong>
-                              <span v-if="event.node" class="trace-node-label">{{ eventNodeLabel(event) }}</span>
-                              <time>{{ formatTime(event.timestamp) }}</time>
-                            </span>
-                            <span v-if="eventSummary(event)" class="inline-trace-summary">
-                              {{ eventSummary(event) }}
-                            </span>
-                            <Transition name="trace-detail">
-                              <span
-                                v-if="expandedEvents.has(event.sequence)"
-                                class="trace-detail-stack"
-                              >
-                                <span
-                                  v-for="detail in eventDetails(event)"
-                                  :key="detail.label"
-                                  class="trace-detail"
-                                  :data-tone="detail.tone"
-                                >
-                                  <b>{{ detail.label }}</b>
-                                  <code>{{ pretty(detail.value) }}</code>
-                                </span>
-                              </span>
-                            </Transition>
-                          </span>
-                          <ChevronDown v-if="expandedEvents.has(event.sequence)" :size="14" />
-                          <ChevronRight v-else :size="14" />
-                        </button>
-                      </div>
-                    </Transition>
-                  </div>
                 </section>
 
                 <div v-if="groupIsLive(group)" class="trace-waiting">

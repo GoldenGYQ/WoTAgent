@@ -28,6 +28,7 @@ class TraceEvent(BaseModel):
     iteration: int = 0
     duration_ms: float | None = None
     data: dict[str, Any] = Field(default_factory=dict)
+    raw_data: Any | None = Field(default=None, exclude=True)
 
 
 class UsageSummary(BaseModel):
@@ -118,6 +119,7 @@ class InMemoryTraceStore:
         type: str,
         node: str = "",
         data: dict[str, Any] | None = None,
+        raw_data: Any | None = None,
         iteration: int = 0,
         duration_ms: float | None = None,
     ) -> TraceEvent:
@@ -135,6 +137,7 @@ class InMemoryTraceStore:
                 iteration=iteration,
                 duration_ms=duration_ms,
                 data=data or {},
+                raw_data=raw_data,
             )
             events.append(event)
             record.updated_at = utc_now()

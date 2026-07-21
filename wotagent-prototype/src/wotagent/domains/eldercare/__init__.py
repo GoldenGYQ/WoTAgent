@@ -8,6 +8,7 @@ from .chat import (
     is_eldercare_request,
 )
 from .collector import EldercareDeviceCollector
+from .care_gateway import ScopedCareMCPClient
 from .graph import LEGACY_DELEGATION_POLICIES, build_eldercare_butler_graph
 from .goal_graph import AVAILABLE_AGENTS, build_goal_driven_butler_graph
 from .health_agent import HealthAgentLoop
@@ -16,7 +17,7 @@ from .mcp_server import build_eldercare_mcp
 from .models import HealthSummary, Resident, RiskEvent, SensorReading
 from .monitor import HealthMonitor
 from .monitor_service import EldercareMonitorService
-from .operations import EldercareOperations
+from .operations import EldercareDomainPlugin
 from .runtime import EldercareRuntime
 from .store import EldercareStore
 
@@ -30,7 +31,7 @@ __all__ = [
     "LEGACY_DELEGATION_POLICIES",
     "HealthMonitor",
     "EldercareMonitorService",
-    "EldercareOperations",
+    "EldercareDomainPlugin",
     "EldercareRuntime",
     "build_eldercare_mcp",
     "HealthSummary",
@@ -42,5 +43,6 @@ __all__ = [
     "AVAILABLE_AGENTS",
     "HealthAgentLoop",
     "ScopedHealthMCPClient",
+    "ScopedCareMCPClient",
     "is_eldercare_request",
 ]

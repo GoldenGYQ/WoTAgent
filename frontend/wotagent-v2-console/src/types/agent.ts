@@ -126,6 +126,18 @@ export interface TraceEvent {
   node: string
   iteration: number
   data: Record<string, unknown>
+  raw_artifact_id?: string | null
+}
+
+export interface TraceArtifact {
+  artifact_id: string
+  run_id: string
+  event_id: string
+  task_id: string | null
+  kind: string
+  content_type: string
+  payload: unknown
+  created_at: string
 }
 
 export interface RunRecord {

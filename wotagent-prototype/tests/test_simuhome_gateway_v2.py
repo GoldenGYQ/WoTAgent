@@ -151,7 +151,7 @@ def test_qt3_evaluator_requires_discovery_and_exact_final_state() -> None:
     assert failed["required_action_success"] is False
 
 
-def test_dynamic_simuhome_location_and_device_type_filtering() -> None:
+def test_dynamic_simuhome_capabilities_are_not_keyword_filtered() -> None:
     devices = [
         {
             "device_id": "living_room_on_off_light_1",
@@ -173,4 +173,4 @@ def test_dynamic_simuhome_location_and_device_type_filtering() -> None:
         },
     ]
     selected = select_capability_context(devices, "power on the living room light")
-    assert [device["device_id"] for device in selected] == ["living_room_on_off_light_1"]
+    assert selected == devices

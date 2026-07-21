@@ -11,6 +11,16 @@ from wotagent.agents import (
     Evidence,
     ToolExecutionResult,
 )
+from wotagent.domain import (
+    ExecutionResult,
+    PlanStep,
+    PolicyDecision,
+    StepTrace,
+    TaskPlan,
+    TaskStatus,
+    TaskTrace,
+    VerificationResult,
+)
 from wotagent.orchestration import (
     AgentTask,
     DependencyFinding,
@@ -29,9 +39,89 @@ from wotagent.runtime.run_runtime import (
     _device_resumer,
     _health_executor,
     _normalize_supervisor_user_request,
+    _result_finding,
     _supervisor_decider,
 )
 from wotagent.telemetry import InMemoryTraceStore
+
+
+def test_device_task_chat_response_is_not_attested_as_completed() -> None:
+    task = AgentTask(
+        task_id="task-device-no-evidence",
+        run_id="run-device-no-evidence",
+        local_id="control-light",
+        agent_id="environment_agent",
+        objective="Turn on the room light",
+        reason="Explicit user request",
+        requested_capability="environment.control",
+        success_criteria=["light is on"],
+    )
+
+    finding = _result_finding(task, {
+        "phase": "responded",
+        "plan": TaskPlan(intent="chat", summary="No light was found."),
+        "response": "No light was found.",
+    })
+
+    assert finding.status == "needs_more_information"
+    assert finding.unresolved_questions == ["light is on"]
+
+
+def test_terminal_chat_after_verified_device_loop_remains_completed() -> None:
+    task = AgentTask(
+        task_id="task-device-verified",
+        run_id="run-device-verified",
+        local_id="control-light",
+        agent_id="environment_agent",
+        objective="Turn on the room light",
+        reason="Explicit user request",
+        requested_capability="environment.control",
+        success_criteria=["light is on"],
+    )
+    step = PlanStep(
+        id="step-1",
+        kind="action",
+        device_id="light-101",
+        action="turnOn",
+    )
+    executed_plan = TaskPlan(
+        intent="control",
+        summary="Turn on the light",
+        steps=[step],
+    )
+    trace = TaskTrace(
+        plan=executed_plan,
+        role="operator",
+        status=TaskStatus.SUCCEEDED,
+        steps=[StepTrace(
+            step=step,
+            policy=PolicyDecision(
+                effect="allow",
+                reason_code="OK",
+                reason="allowed",
+            ),
+            execution=ExecutionResult(
+                step_id="step-1",
+                status="accepted",
+            ),
+            verification=VerificationResult(
+                step_id="step-1",
+                passed=True,
+                observed_state={"on": True},
+            ),
+        )],
+    )
+
+    finding = _result_finding(task, {
+        "phase": "responded",
+        "plan": TaskPlan(intent="chat", summary="The goal is complete."),
+        "trace": trace,
+        "response": "The room light is on.",
+    })
+
+    assert finding.status == "completed"
+    assert finding.unresolved_questions == []
+    assert finding.evidence[0].reliability == 1
 
 
 def test_device_executor_surfaces_and_resumes_native_langgraph_interrupt() -> None:
@@ -416,7 +506,7 @@ def test_supervisor_decider_defers_conditional_care_task_until_health_finishes()
     assert [task.agent_id for task in decision.tasks] == ["health_agent"]
 
 
-def test_supervisor_normalizes_room_answer_as_follow_up_to_prior_goal() -> None:
+def test_supervisor_does_not_rewrite_domain_specific_follow_up_text() -> None:
     request = _normalize_supervisor_user_request(
         "A-101 啊！",
         {
@@ -432,10 +522,7 @@ def test_supervisor_normalizes_room_answer_as_follow_up_to_prior_goal() -> None:
             ],
         },
     )
-    assert request == (
-        "把张爷爷房间温度调到 24 度，并确认是否生效\n"
-        "补充信息：目标房间是 A-101。"
-    )
+    assert request == "A-101 啊！"
 
 
 def test_supervisor_keeps_plain_room_answer_unchanged_without_room_clarification() -> None:
@@ -491,9 +578,73 @@ def test_care_executor_skips_conditional_noop_when_health_dependency_is_normal()
 
     result, calls = asyncio.run(scenario())
 
-    assert result.status == "completed"
+    assert result.status == "skipped"
     assert "安全跳过" in result.finding
     assert calls == 0
+
+
+def test_care_executor_completes_only_from_verified_tool_messages() -> None:
+    async def scenario():
+        class Gateway:
+            @contextmanager
+            def authorized_scope(self, _scope):
+                yield
+
+        tool_result = ToolExecutionResult(
+            success=True,
+            verified=True,
+            tool_name="notify_caregiver",
+            arguments={
+                "resident_id": "elderly-001",
+                "message": "Please review the alert.",
+                "urgency": "high",
+            },
+            result={"delivery": "simulated"},
+            observed_state={"delivery": "simulated"},
+        )
+
+        class CareAgent:
+            async def ainvoke(self, _value):
+                return {
+                    "structured_response": AgentFindingPayload(
+                        status="completed",
+                        finding="The assigned caregiver was notified.",
+                        confidence=0.95,
+                    ).model_dump(mode="json"),
+                    "messages": [{
+                        "role": "tool",
+                        "name": "notify_caregiver",
+                        "content": tool_result.model_dump_json(),
+                    }],
+                }
+
+        runtime = SimpleNamespace(
+            care_gateway=Gateway(),
+            care_react_agent=CareAgent(),
+            settings=SimpleNamespace(total_timeout_seconds=2),
+        )
+        task = AgentTask(
+            task_id="task-care-verified",
+            run_id="run-care-verified",
+            local_id="care",
+            agent_id="care_agent",
+            objective="Notify the assigned caregiver.",
+            source_request="Handle the low oxygen alert.",
+            reason="Health Agent found an actionable risk.",
+            success_criteria=["caregiver notification is verified"],
+            target=TaskTarget(type="resident", id="elderly-001"),
+            effective_scope=ResourceScope(
+                resource_ids=["resident:elderly-001"],
+                capabilities=["care.coordinate"],
+            ),
+        )
+        return await _care_executor(runtime, {})(task)
+
+    finding = asyncio.run(scenario())
+
+    assert finding.status == "completed"
+    assert finding.tool_calls[0].verified is True
+    assert finding.evidence[0].source == "notify_caregiver"
 
 
 def test_health_executor_downgrades_completed_answer_when_critical_data_is_stale() -> None:
@@ -605,6 +756,7 @@ def test_run_coordinator_filters_first_round_conditional_care_and_finishes_next_
                 return {
                     "structured_response": {
                         "action": "finish",
+                        "goal_completed": True,
                         "goal": "查看张爷爷健康状态，如异常通知护理员",
                         "final_response": "最近一次可用健康数据未见明确异常，无需通知护理员。",
                         "reason": "健康结果未触发通知条件",

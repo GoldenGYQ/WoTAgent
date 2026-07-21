@@ -1,4 +1,4 @@
-"""Decision-mode planner wrapper with a conservative deterministic fast path."""
+"""Decision-mode planner wrapper; semantic fast paths are rule-mode only."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ class DecisionModeTaskPlanner:
 
     async def __call__(self, state: dict[str, Any]) -> TaskPlan:
         fast = _simple_device_plan(state)
-        if fast is not None and self.mode in {"rule", "hybrid"}:
+        if fast is not None and self.mode == "rule":
             task_id = state.get("task_id", "")
             if self.trace_store is not None and task_id:
                 await self.trace_store.record(

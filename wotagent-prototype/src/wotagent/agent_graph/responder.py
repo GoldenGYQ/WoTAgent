@@ -26,6 +26,10 @@ class LangChainResponseComposer:
         system = RESPONSE_CONTRACT
         prompt = context_message("response_facts", facts)
         task_id = state.get("task_id", "")
+        messages = [
+            SystemMessage(content=system),
+            HumanMessage(content=prompt),
+        ]
         if self.trace_store is not None and task_id:
             await self.trace_store.record(
                 task_id=task_id,
@@ -36,12 +40,9 @@ class LangChainResponseComposer:
                     "prompt_version": "responder-v3",
                     "thinking": thinking,
                 },
+                raw_data={"messages": messages},
             )
         started = time.perf_counter()
-        messages = [
-            SystemMessage(content=system),
-            HumanMessage(content=prompt),
-        ]
         ttft_ms: float | None = None
         if hasattr(runnable, "astream"):
             aggregate = None
@@ -74,6 +75,7 @@ class LangChainResponseComposer:
                     "thinking": thinking,
                     **usage,
                 },
+                raw_data={"response": message},
             )
         return response
 

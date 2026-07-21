@@ -7,12 +7,14 @@ import sqlite3
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
+from uuid import uuid4
 
 from .run_models import (
     AgentRunRecord,
     AgentTask,
     RunEvent,
     RunRecord,
+    TraceArtifact,
     utc_now,
 )
 
@@ -23,6 +25,7 @@ class InMemoryRunStore:
         self._tasks: dict[str, AgentTask] = {}
         self._agent_runs: dict[str, AgentRunRecord] = {}
         self._events: dict[str, list[RunEvent]] = {}
+        self._artifacts: dict[str, TraceArtifact] = {}
         self._conditions: dict[str, asyncio.Condition] = {}
         self._lock = asyncio.Lock()
 
@@ -152,12 +155,21 @@ class InMemoryRunStore:
         tool_call_id: str | None = None,
         node: str = "",
         data: dict[str, object] | None = None,
+        raw_data: object | None = None,
     ) -> RunEvent:
         async with self._lock:
             run = self._require_run(run_id)
             events = self._events[run_id]
+            event_id = f"{run_id}:{len(events) + 1}"
+            artifact = _trace_artifact(
+                run_id=run_id,
+                event_id=event_id,
+                task_id=task_id,
+                kind=event_type,
+                payload=raw_data,
+            )
             event = RunEvent(
-                event_id=f"{run_id}:{len(events) + 1}",
+                event_id=event_id,
                 sequence=len(events) + 1,
                 run_id=run_id,
                 turn_id=run.turn_id,
@@ -169,14 +181,25 @@ class InMemoryRunStore:
                 type=event_type,
                 node=node,
                 data=data or {},
+                raw_artifact_id=(artifact.artifact_id if artifact else None),
             )
             events.append(event)
+            if artifact is not None:
+                self._artifacts[artifact.artifact_id] = artifact
             _apply_event_metrics(run, event)
             run.updated_at = event.timestamp
             condition = self._conditions[run_id]
         async with condition:
             condition.notify_all()
         return event.model_copy(deep=True)
+
+    async def get_trace_artifact(
+        self,
+        artifact_id: str,
+    ) -> TraceArtifact | None:
+        async with self._lock:
+            artifact = self._artifacts.get(artifact_id)
+            return artifact.model_copy(deep=True) if artifact else None
 
     async def events(
         self,
@@ -234,7 +257,8 @@ class SQLiteRunStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = asyncio.Lock()
         self._conditions: dict[str, asyncio.Condition] = {}
-        with self._connect() as connection:
+        connection = self._connect()
+        try:
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS runs (
@@ -265,8 +289,20 @@ class SQLiteRunStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_events_task
                     ON run_events(run_id, task_id, sequence);
+                CREATE TABLE IF NOT EXISTS trace_artifacts (
+                    artifact_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL,
+                    event_id TEXT NOT NULL,
+                    task_id TEXT,
+                    payload TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_trace_artifacts_event
+                    ON trace_artifacts(run_id, event_id);
                 """
             )
+            connection.commit()
+        finally:
+            connection.close()
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path, timeout=10)
@@ -277,8 +313,15 @@ class SQLiteRunStore:
     @asynccontextmanager
     async def _locked_connection(self):
         async with self._lock:
-            with self._connect() as connection:
+            connection = self._connect()
+            try:
                 yield connection
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+            finally:
+                connection.close()
 
     async def create_run(self, run: RunRecord) -> RunRecord:
         async with self._locked_connection() as connection:
@@ -452,6 +495,7 @@ class SQLiteRunStore:
         tool_call_id: str | None = None,
         node: str = "",
         data: dict[str, object] | None = None,
+        raw_data: object | None = None,
     ) -> RunEvent:
         async with self._locked_connection() as connection:
             run = self._load_run(connection, run_id)
@@ -461,8 +505,16 @@ class SQLiteRunStore:
                 (run_id,),
             ).fetchone()
             sequence = int(row["value"]) + 1
+            event_id = f"{run_id}:{sequence}"
+            artifact = _trace_artifact(
+                run_id=run_id,
+                event_id=event_id,
+                task_id=task_id,
+                kind=event_type,
+                payload=raw_data,
+            )
             event = RunEvent(
-                event_id=f"{run_id}:{sequence}",
+                event_id=event_id,
                 sequence=sequence,
                 run_id=run_id,
                 turn_id=run.turn_id,
@@ -474,12 +526,26 @@ class SQLiteRunStore:
                 type=event_type,
                 node=node,
                 data=data or {},
+                raw_artifact_id=(artifact.artifact_id if artifact else None),
             )
             connection.execute(
                 """INSERT INTO run_events(run_id, sequence, task_id, payload)
                    VALUES (?, ?, ?, ?)""",
                 (run_id, sequence, task_id, event.model_dump_json()),
             )
+            if artifact is not None:
+                connection.execute(
+                    """INSERT INTO trace_artifacts(
+                           artifact_id, run_id, event_id, task_id, payload
+                       ) VALUES (?, ?, ?, ?, ?)""",
+                    (
+                        artifact.artifact_id,
+                        run_id,
+                        event_id,
+                        task_id,
+                        artifact.model_dump_json(),
+                    ),
+                )
             _apply_event_metrics(run, event)
             run.updated_at = event.timestamp
             self._save_run(connection, run)
@@ -490,6 +556,20 @@ class SQLiteRunStore:
         async with condition:
             condition.notify_all()
         return event.model_copy(deep=True)
+
+    async def get_trace_artifact(
+        self,
+        artifact_id: str,
+    ) -> TraceArtifact | None:
+        async with self._locked_connection() as connection:
+            row = connection.execute(
+                "SELECT payload FROM trace_artifacts WHERE artifact_id = ?",
+                (artifact_id,),
+            ).fetchone()
+            return (
+                TraceArtifact.model_validate_json(row["payload"])
+                if row else None
+            )
 
     async def events(
         self,
@@ -569,6 +649,26 @@ class SQLiteRunStore:
 
 
 RunStore = InMemoryRunStore | SQLiteRunStore
+
+
+def _trace_artifact(
+    *,
+    run_id: str,
+    event_id: str,
+    task_id: str | None,
+    kind: str,
+    payload: object | None,
+) -> TraceArtifact | None:
+    if payload is None:
+        return None
+    return TraceArtifact(
+        artifact_id=f"trace_{uuid4().hex[:16]}",
+        run_id=run_id,
+        event_id=event_id,
+        task_id=task_id,
+        kind=kind,
+        payload=payload,
+    )
 
 
 def _apply_event_metrics(run: RunRecord, event: RunEvent) -> None:

@@ -199,6 +199,7 @@ def test_main_chat_task_routes_eldercare_request_and_persists_response(
             ),
             SupervisorDecision(
                 action="finish",
+                goal_completed=True,
                 goal="查看张爷爷今天的状态",
                 final_response="张爷爷当前心率82bpm。",
                 reason="证据充分",

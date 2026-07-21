@@ -23,7 +23,7 @@ from ...identity import DEFAULT_PRINCIPAL_DIRECTORY, PrincipalDirectory
 SITE_RESOURCE_ID = "site:villa-demo"
 
 
-class SmartHomeOperations:
+class SmartHomeDomainPlugin:
     def __init__(
         self,
         *,
@@ -571,4 +571,4 @@ class SmartHomeOperations:
             )
 
 
-__all__ = ["SmartHomeOperations"]
+__all__ = ["SmartHomeDomainPlugin"]

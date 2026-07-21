@@ -59,6 +59,7 @@ def test_monitor_outbox_creates_a_source_attested_run(tmp_path) -> None:
             ),
             SupervisorDecision(
                 action="finish",
+                goal_completed=True,
                 goal="处理跌倒事件",
                 final_response="风险事件已进入人工处置流程。",
                 reason="照护任务已经创建",

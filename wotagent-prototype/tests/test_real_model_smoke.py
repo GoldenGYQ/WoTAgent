@@ -90,7 +90,7 @@ def test_real_model_health_chain_and_resident_scope(
             ))
         usage = UsageMetadataCallbackHandler()
         runtime.run_supervisor_agent = build_run_supervisor_agent(
-            runtime.pipeline.response_model,
+            runtime.models.response_model,
             {"health_agent": AGENT_SPECS["health_agent"]},
         )
         runtime.run_supervisor_agent = MeteredAgent(

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from wotagent.core.pipeline import _build_llm
+from wotagent.core.model_runtime import _build_llm
 from wotagent.runtime.run_runtime import (
     SUPERVISOR_EVIDENCE_PER_FINDING,
     SUPERVISOR_FINDINGS,

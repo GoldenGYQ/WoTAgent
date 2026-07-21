@@ -31,6 +31,7 @@ import type {
   SensorType,
   SpeechTranscription,
   TraceEvent,
+  TraceArtifact,
 } from '../types/agent'
 
 export interface TraceSubscription {
@@ -226,6 +227,9 @@ export const agentV2Api = {
   },
   getEvents(runId: string, after = 0): Promise<{ run_id: string; events: TraceEvent[]; next_cursor: number }> {
     return request(`/api/v2/runs/${encodeURIComponent(runId)}/events?after=${after}`)
+  },
+  getTraceArtifact(runId: string, artifactId: string): Promise<{ run_id: string; artifact: TraceArtifact | null }> {
+    return request(`/api/v2/runs/${encodeURIComponent(runId)}/trace-artifacts/${encodeURIComponent(artifactId)}`)
   },
 
   listResidents: (): Promise<{ residents: Resident[] }> => request('/api/v2/eldercare/residents'),

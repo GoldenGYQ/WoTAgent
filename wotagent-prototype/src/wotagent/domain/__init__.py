@@ -23,8 +23,9 @@ from .operations import (
     DomainActorDefinition,
     DomainManifest,
     DomainNotFound,
-    DomainOperationsRegistry,
+    DomainPluginRegistry,
 )
+from .resources import DeploymentResourceResolver, ResourceLocationResolver
 
 __all__ = [
     "Condition",
@@ -35,11 +36,13 @@ __all__ = [
     "DomainActorDefinition",
     "DomainManifest",
     "DomainNotFound",
-    "DomainOperationsRegistry",
+    "DomainPluginRegistry",
+    "DeploymentResourceResolver",
     "ExecutionResult",
     "PlanStep",
     "PolicyDecision",
     "RetryPolicy",
+    "ResourceLocationResolver",
     "StepTrace",
     "TaskPlan",
     "TaskStatus",

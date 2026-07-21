@@ -16,6 +16,7 @@ from wotagent.orchestration import (
     SupervisorDecision,
     TaskScheduler,
 )
+from wotagent.orchestration.run_coordinator import _completion_status
 
 
 def _decision(
@@ -79,6 +80,7 @@ def test_coordinator_executes_independent_agents_concurrently() -> None:
             ]),
             SupervisorDecision(
                 action="finish",
+                goal_completed=True,
                 goal="综合检查",
                 final_response="综合检查完成",
                 reason="证据充分",
@@ -145,6 +147,7 @@ def test_coordinator_marks_direct_finish_without_tasks_completed() -> None:
             TaskScheduler(available_agents={"health_agent"}),
             lambda _context: SupervisorDecision(
                 action="finish",
+                goal_completed=True,
                 goal="介绍系统能力",
                 final_response="我可以协调健康、照护和设备专业 Agent。",
                 reason="一般能力问题无需创建 Task",
@@ -194,6 +197,7 @@ def test_coordinator_serializes_resource_conflicts() -> None:
             _decision([first, second]),
             SupervisorDecision(
                 action="finish",
+                goal_completed=True,
                 goal="设备控制",
                 final_response="执行完成",
                 reason="任务完成",
@@ -259,6 +263,7 @@ def test_confirmation_resumes_same_task_then_returns_to_supervisor() -> None:
             }]),
             SupervisorDecision(
                 action="finish",
+                goal_completed=True,
                 goal="打开客厅灯",
                 final_response="客厅灯已经打开。",
                 reason="设备状态已验证",
@@ -367,6 +372,7 @@ def test_coordinator_attests_payload_identity_from_runtime() -> None:
             )]),
             SupervisorDecision(
                 action="finish",
+                goal_completed=True,
                 goal="健康检查",
                 final_response="检查完成",
                 reason="证据充分",
@@ -585,6 +591,7 @@ def test_dependent_task_receives_compact_upstream_execution_finding() -> None:
             _decision([observe, decide], strategy="sequential"),
             SupervisorDecision(
                 action="finish",
+                goal_completed=True,
                 goal="条件控制",
                 final_response="条件控制完成",
                 reason="上游观察和下游动作均完成",
@@ -635,3 +642,27 @@ def test_dependent_task_receives_compact_upstream_execution_finding() -> None:
     ][0]
     assert started.data["dependency_task_ids"] == ["task-observe"]
     assert started.data["dependency_finding_count"] == 1
+def test_goal_completion_uses_latest_verified_success_not_all_task_statuses() -> None:
+    failed = AgentFinding(
+        agent="environment_agent",
+        objective="first attempt",
+        status="failed",
+        finding="temporary failure",
+        confidence=1,
+    )
+    recovered = AgentFinding(
+        agent="environment_agent",
+        objective="recovery attempt",
+        status="completed",
+        finding="verified success",
+        confidence=1,
+    )
+
+    assert _completion_status(
+        [failed, recovered],
+        goal_completed=True,
+    ) == "completed"
+    assert _completion_status(
+        [failed],
+        goal_completed=True,
+    ) == "failed"

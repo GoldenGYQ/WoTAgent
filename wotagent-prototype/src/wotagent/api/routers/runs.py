@@ -82,6 +82,14 @@ def create_run_router(
             "next_cursor": events[-1].sequence if events else max(after, 0),
         }
 
+    @router.get("/{run_id}/trace-artifacts/{artifact_id}")
+    async def get_trace_artifact(run_id: str, artifact_id: str):
+        await get_service().require_run(run_id)
+        artifact = await get_store().get_trace_artifact(artifact_id)
+        if artifact is None or artifact.run_id != run_id:
+            return {"run_id": run_id, "artifact": None}
+        return {"run_id": run_id, "artifact": artifact}
+
     return router
 
 

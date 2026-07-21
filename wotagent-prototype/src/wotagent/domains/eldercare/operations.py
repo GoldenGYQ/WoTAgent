@@ -18,7 +18,7 @@ from ...identity import DEFAULT_PRINCIPAL_DIRECTORY, PrincipalDirectory
 from .models import SensorReading
 
 
-class EldercareOperations:
+class EldercareDomainPlugin:
     def __init__(
         self,
         *,
@@ -431,4 +431,4 @@ def _reading_status(last_seen: str | None) -> str:
     return "online" if age_seconds <= 600 else "stale"
 
 
-__all__ = ["EldercareOperations"]
+__all__ = ["EldercareDomainPlugin"]

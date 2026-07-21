@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from ...domain import (
     DomainAccessDenied,
     DomainNotFound,
-    DomainOperationsRegistry,
+    DomainPluginRegistry,
 )
 from ...identity import (
     PrincipalAuthenticationError,
@@ -40,7 +40,7 @@ class EventAcknowledgeRequest(BaseModel):
 
 
 def create_domain_router(
-    get_registry: Callable[[], DomainOperationsRegistry],
+    get_registry: Callable[[], DomainPluginRegistry],
     get_principals: Callable[[], PrincipalDirectory] | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/v2/domains", tags=["domains"])

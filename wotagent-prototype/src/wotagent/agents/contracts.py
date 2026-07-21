@@ -9,7 +9,11 @@ from pydantic import BaseModel, Field
 
 AgentStatus = Literal[
     "completed",
+    "partial_success",
+    "skipped",
     "needs_more_information",
+    "denied",
+    "unavailable",
     "blocked",
     "failed",
 ]

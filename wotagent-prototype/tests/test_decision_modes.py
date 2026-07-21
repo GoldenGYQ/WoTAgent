@@ -4,6 +4,7 @@ import asyncio
 
 from wotagent.agent_graph import DecisionModeTaskPlanner
 from wotagent.agentic_config import AgenticSettings
+from wotagent.domain import TaskPlan
 from wotagent.domains.eldercare import EldercareRuntime, EldercareStore, Resident, RiskEvent
 
 
@@ -20,7 +21,7 @@ def test_simple_light_command_uses_rule_fast_path() -> None:
     primary = ShouldNotRunPlanner()
     plan = asyncio.run(DecisionModeTaskPlanner(
         primary,
-        mode="hybrid",
+        mode="rule",
     )({
         "message": "打开客厅灯",
         "context": {"devices": [{
@@ -38,6 +39,32 @@ def test_simple_light_command_uses_rule_fast_path() -> None:
     assert primary.calls == 0
     assert plan.steps[0].action == "turnOn"
     assert plan.steps[0].device_id == "light-001"
+
+
+def test_hybrid_mode_delegates_semantics_to_primary_planner() -> None:
+    class PrimaryPlanner:
+        calls = 0
+
+        async def __call__(self, _state):
+            self.calls += 1
+            return TaskPlan(intent="chat", summary="model planned")
+
+    primary = PrimaryPlanner()
+    plan = asyncio.run(DecisionModeTaskPlanner(
+        primary,
+        mode="hybrid",
+    )({
+        "message": "打开客厅灯",
+        "context": {"devices": [{
+            "device_id": "light-001",
+            "title": "客厅灯",
+            "location": "living_room",
+            "actions": [{"name": "turnOn"}],
+        }]},
+    }))
+
+    assert primary.calls == 1
+    assert plan.summary == "model planned"
 
 
 def test_shadow_mode_executes_rule_actions_only_once(tmp_path) -> None:

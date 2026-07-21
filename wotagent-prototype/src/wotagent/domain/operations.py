@@ -64,7 +64,7 @@ class DomainNotFound(LookupError):
     pass
 
 
-class DomainOperations(Protocol):
+class DomainPlugin(Protocol):
     def manifest(self) -> DomainManifest: ...
 
     def list_subjects(self, principal_id: str) -> list[dict[str, Any]]: ...
@@ -116,8 +116,8 @@ class DomainOperations(Protocol):
     ) -> dict[str, Any]: ...
 
 
-class DomainOperationsRegistry:
-    def __init__(self, adapters: list[DomainOperations]) -> None:
+class DomainPluginRegistry:
+    def __init__(self, adapters: list[DomainPlugin]) -> None:
         self._adapters = {
             adapter.manifest().domain_id: adapter
             for adapter in adapters
@@ -129,7 +129,7 @@ class DomainOperationsRegistry:
             for adapter in self._adapters.values()
         ]
 
-    def require(self, domain_id: str) -> DomainOperations:
+    def require(self, domain_id: str) -> DomainPlugin:
         try:
             return self._adapters[domain_id]
         except KeyError as exc:
@@ -143,8 +143,8 @@ __all__ = [
     "DomainActorDefinition",
     "DomainManifest",
     "DomainNotFound",
-    "DomainOperations",
-    "DomainOperationsRegistry",
+    "DomainPlugin",
+    "DomainPluginRegistry",
     "DomainScenario",
     "MonitorRuleDefinition",
     "TelemetrySignal",

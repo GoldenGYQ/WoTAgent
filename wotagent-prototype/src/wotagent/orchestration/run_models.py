@@ -28,6 +28,11 @@ TaskStatus = Literal[
     "running",
     "waiting_confirmation",
     "completed",
+    "partial_success",
+    "skipped",
+    "needs_input",
+    "denied",
+    "unavailable",
     "failed",
     "blocked",
     "cancelled",
@@ -166,6 +171,9 @@ class SupervisorDecision(BaseModel):
     constraints: list[str] = Field(default_factory=list)
     final_response: str = ""
     clarification: str = ""
+    goal_completed: bool | None = None
+    satisfied_criteria: list[str] = Field(default_factory=list)
+    unsatisfied_criteria: list[str] = Field(default_factory=list)
     reason: str = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -181,6 +189,8 @@ class SupervisorDecision(BaseModel):
             )
         elif self.action == "finish" and not self.final_response:
             raise ValueError("final_response is required when action=finish")
+        elif self.action == "finish" and self.goal_completed is None:
+            raise ValueError("goal_completed is required when action=finish")
         elif self.action == "clarify" and not self.clarification:
             raise ValueError("clarification is required when action=clarify")
         return self
@@ -287,6 +297,20 @@ class RunEvent(BaseModel):
     type: str
     node: str = ""
     data: dict[str, object] = Field(default_factory=dict)
+    raw_artifact_id: str | None = None
+
+
+class TraceArtifact(BaseModel):
+    """Raw diagnostic payload stored outside the streamed event projection."""
+
+    artifact_id: str
+    run_id: str
+    event_id: str
+    task_id: str | None = None
+    kind: str
+    content_type: str = "application/json"
+    payload: Any
+    created_at: datetime = Field(default_factory=utc_now)
 
 
 def _assert_acyclic(dependencies: dict[str, list[str]]) -> None:
@@ -328,6 +352,7 @@ __all__ = [
     "TaskFailure",
     "TaskPrincipal",
     "TaskStatus",
+    "TraceArtifact",
     "TaskTarget",
     "utc_now",
 ]

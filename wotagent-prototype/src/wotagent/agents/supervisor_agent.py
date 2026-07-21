@@ -76,6 +76,12 @@ def build_run_supervisor_agent(
             "必须适合电话播报：口语化、自然、简短，先给结论再补一句必要说明；避免"
             "书面报告腔、避免项目符号、避免 Markdown 表格，也不要输出“根据系统分析”"
             "这类生硬开场。\n\n"
+            "When action=finish, always set goal_completed and list "
+            "satisfied_criteria and unsatisfied_criteria. Judge the root goal "
+            "from the newest verified evidence. A historical failed Task that "
+            "was recovered or superseded does not make the Run fail. Never "
+            "claim an action goal is complete without execution evidence and "
+            "post-action verification.\n\n"
             f"{SUPERVISOR_TASK_DECOMPOSITION_RULES}"
             f"当前可用专业 Agent：\n{agent_catalog}"
         ),

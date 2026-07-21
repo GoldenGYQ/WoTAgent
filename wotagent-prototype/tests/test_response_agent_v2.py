@@ -69,9 +69,14 @@ def test_response_agent_receives_verified_execution_facts_and_records_usage() ->
         await store.create(task_id="task-response", session_id="sess-response", request_id="req")
         runnable = FakeResponder()
         response = await LangChainResponseComposer(runnable, trace_store=store)(success_state())
-        return response, runnable, await store.get("task-response")
+        return (
+            response,
+            runnable,
+            await store.get("task-response"),
+            await store.events("task-response"),
+        )
 
-    response, runnable, record = asyncio.run(run())
+    response, runnable, record, events = asyncio.run(run())
 
     assert response == "客厅灯已打开，并完成状态验证。"
     assert '"passed":true' in runnable.prompt
@@ -80,6 +85,11 @@ def test_response_agent_receives_verified_execution_facts_and_records_usage() ->
     assert len(runnable.context) == 2
     assert record.usage.model_calls == 1
     assert record.usage.total_tokens == 92
+    started = next(event for event in events if event.type == "model.request.started")
+    completed = next(event for event in events if event.type == "model.request.completed")
+    assert started.raw_data["messages"] == runnable.context
+    assert completed.raw_data["response"].content == response
+    assert "messages" not in started.data
 
 
 def test_empty_response_is_rejected_for_graph_fallback() -> None:

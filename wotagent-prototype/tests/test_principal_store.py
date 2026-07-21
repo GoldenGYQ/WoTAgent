@@ -6,8 +6,8 @@ from fastapi.testclient import TestClient
 
 from wotagent.api.routers.domains import create_domain_router
 from wotagent.api.routers.principals import create_principal_router
-from wotagent.domain import DeploymentProfileRegistry, DomainOperationsRegistry
-from wotagent.domains.smart_home import SmartHomeOperations
+from wotagent.domain import DeploymentProfileRegistry, DomainPluginRegistry
+from wotagent.domains.smart_home import SmartHomeDomainPlugin
 from wotagent.identity import (
     DEMO_PRINCIPALS,
     PrincipalAuthenticationError,
@@ -234,8 +234,8 @@ def test_registered_principal_must_authenticate_for_domain_api(
         target_id="villa-demo",
     )
     profiles = DeploymentProfileRegistry.load()
-    registry = DomainOperationsRegistry([
-        SmartHomeOperations(
+    registry = DomainPluginRegistry([
+        SmartHomeDomainPlugin(
             get_gateway=lambda: _VillaGateway(),
             get_profile=lambda: profiles.require("villa"),
             principals=store,

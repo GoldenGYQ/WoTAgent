@@ -199,11 +199,18 @@ class RunService:
                 message=message,
                 context=context,
             )
+            completed_tasks = await self.run_store.tasks_for_run(run_id)
             self.conversation_store.finish_turn(
                 run_id,
                 response=completed.final_response,
                 status=completed.status,
-                result=completed.model_dump(mode="json"),
+                result={
+                    **completed.model_dump(mode="json"),
+                    "tasks": [
+                        task.model_dump(mode="json")
+                        for task in completed_tasks
+                    ],
+                },
             )
         except Exception as exc:
             failed = await self.run_store.update_run(
@@ -312,7 +319,13 @@ class RunService:
             run_id,
             response=completed.final_response,
             status=completed.status,
-            result=completed.model_dump(mode="json"),
+            result={
+                **completed.model_dump(mode="json"),
+                "tasks": [
+                    task.model_dump(mode="json")
+                    for task in await self.run_store.tasks_for_run(run_id)
+                ],
+            },
         )
         return completed
 

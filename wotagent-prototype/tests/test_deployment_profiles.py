@@ -10,7 +10,6 @@ from wotagent.conversation import ConversationStore
 from wotagent.domain import DeploymentProfileRegistry
 from wotagent.gateway import MCPDeviceGateway, deployment_device_scope
 from wotagent.orchestration import InMemoryRunStore
-from wotagent.agent_graph.planner import _capability_selection_text
 
 
 class FakeMCPClient:
@@ -108,11 +107,3 @@ def test_run_persists_profile_and_rejects_cross_profile_conversation(
         assert error.value.status_code == 409
 
     asyncio.run(scenario())
-
-
-def test_broad_catalog_question_does_not_inherit_health_scope_from_history() -> None:
-    selection = _capability_selection_text(
-        "我们有几个房间",
-        [{"role": "user", "content": "查看张爷爷的健康设备"}],
-    )
-    assert selection == "我们有几个房间"

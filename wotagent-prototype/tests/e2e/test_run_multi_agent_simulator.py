@@ -176,6 +176,7 @@ def test_run_coordinator_reads_health_and_simulator_in_parallel(
             ),
             SupervisorDecision(
                 action="finish",
+                goal_completed=True,
                 goal="inspect resident health and room environment",
                 final_response="health and environment checks completed",
                 reason="both specialist findings contain verified evidence",

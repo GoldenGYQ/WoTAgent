@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from wotagent.domain import DeploymentProfile, DomainAccessDenied
-from wotagent.domains.smart_home import SmartHomeOperations
+from wotagent.domains.smart_home import SmartHomeDomainPlugin
 
 
 class FakeGateway:
@@ -76,7 +76,7 @@ class FakeGateway:
         return {"success": True}
 
 
-def make_operations() -> tuple[SmartHomeOperations, FakeGateway]:
+def make_operations() -> tuple[SmartHomeDomainPlugin, FakeGateway]:
     gateway = FakeGateway()
     profile = DeploymentProfile(
         profile_id="villa",
@@ -100,7 +100,7 @@ def make_operations() -> tuple[SmartHomeOperations, FakeGateway]:
         ],
     )
     return (
-        SmartHomeOperations(
+        SmartHomeDomainPlugin(
             get_gateway=lambda: gateway,
             get_profile=lambda: profile,
         ),

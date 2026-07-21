@@ -10,6 +10,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .conversation_state import (
+    ConversationState,
+    EntityMemory,
+    GoalMemory,
+    VerifiedFactMemory,
+)
 from .paths import data_path
 
 
@@ -44,6 +50,7 @@ class ConversationStore:
                     role TEXT NOT NULL,
                     title TEXT NOT NULL,
                     pending_goal_json TEXT NOT NULL DEFAULT '',
+                    state_json TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -70,6 +77,12 @@ class ConversationStore:
                 connection,
                 "conversations",
                 "pending_goal_json",
+                "TEXT NOT NULL DEFAULT ''",
+            )
+            self._ensure_column(
+                connection,
+                "conversations",
+                "state_json",
                 "TEXT NOT NULL DEFAULT ''",
             )
             self._ensure_column(
@@ -243,12 +256,18 @@ class ConversationStore:
             if row is None:
                 return
             conversation = connection.execute(
-                """SELECT pending_goal_json FROM conversations
+                """SELECT pending_goal_json, state_json FROM conversations
                    WHERE conversation_id = ?""",
                 (row["conversation_id"],),
             ).fetchone()
             existing_pending = self._load_json(
                 conversation["pending_goal_json"] if conversation is not None else ""
+            )
+            existing_state = ConversationState.model_validate(
+                self._load_json(
+                    conversation["state_json"]
+                    if conversation is not None else ""
+                )
             )
             connection.execute(
                 """UPDATE conversation_turns
@@ -275,6 +294,21 @@ class ConversationStore:
                        WHERE conversation_id = ?""",
                     (row["conversation_id"],),
                 )
+            state = self._project_state(
+                existing_state,
+                run_id=run_id,
+                user_message=row["user_message"],
+                status=status,
+                result=result or {},
+            )
+            connection.execute(
+                """UPDATE conversations SET state_json = ?
+                   WHERE conversation_id = ?""",
+                (
+                    state.model_dump_json(),
+                    row["conversation_id"],
+                ),
+            )
             connection.execute(
                 "UPDATE conversations SET updated_at = ? WHERE conversation_id = ?",
                 (now, row["conversation_id"]),
@@ -334,7 +368,7 @@ class ConversationStore:
         """Return structured facts that should not be inferred from chat prose."""
         with self._lock, self._connect() as connection:
             conversation = connection.execute(
-                """SELECT pending_goal_json FROM conversations
+                """SELECT pending_goal_json, state_json FROM conversations
                    WHERE conversation_id = ?""",
                 (conversation_id,),
             ).fetchone()
@@ -349,6 +383,11 @@ class ConversationStore:
         pending_goal = self._load_json(
             conversation["pending_goal_json"] if conversation is not None else ""
         )
+        state = ConversationState.model_validate(self._load_json(
+            conversation["state_json"] if conversation is not None else ""
+        ))
+        if not pending_goal and state.active_goal is not None:
+            pending_goal = state.active_goal.model_dump(mode="json")
         last_run: dict[str, Any] | None = None
         if latest is not None:
             result = self._load_json(latest["result_json"])
@@ -364,7 +403,102 @@ class ConversationStore:
             "current_role": current_role,
             "pending_goal": pending_goal or None,
             "last_run": last_run,
+            "conversation_state": state.model_dump(mode="json"),
         }
+
+    @staticmethod
+    def _project_state(
+        state: ConversationState,
+        *,
+        run_id: str,
+        user_message: str,
+        status: str,
+        result: dict[str, Any],
+    ) -> ConversationState:
+        tasks = [
+            item for item in result.get("tasks", [])
+            if isinstance(item, dict)
+        ]
+        entities = list(state.entities)
+        facts = list(state.verified_facts)
+        target_ids: list[str] = []
+        capabilities: list[str] = []
+        for task in tasks:
+            target = task.get("target")
+            if isinstance(target, dict) and target.get("type") and target.get("id"):
+                target_id = str(target["id"])
+                target_ids.append(target_id)
+                entity = EntityMemory(
+                    type=str(target["type"]),
+                    id=target_id,
+                    display_name=(
+                        str(target["display_name"])
+                        if target.get("display_name") else None
+                    ),
+                    source_run_id=run_id,
+                )
+                entities = [
+                    item for item in entities
+                    if (item.type, item.id) != (entity.type, entity.id)
+                ] + [entity]
+            capability = str(task.get("requested_capability", "")).strip()
+            if capability:
+                capabilities.append(capability)
+            finding = task.get("finding")
+            if not isinstance(finding, dict):
+                continue
+            for call in finding.get("tool_calls", []):
+                if not isinstance(call, dict) or call.get("verified") is not True:
+                    continue
+                arguments = call.get("arguments")
+                resource_id = ""
+                if isinstance(arguments, dict):
+                    resource_id = str(
+                        arguments.get("device_id")
+                        or arguments.get("resident_id")
+                        or ""
+                    )
+                fact = VerifiedFactMemory(
+                    resource_id=resource_id or str(call.get("tool_name", "")),
+                    value=call.get("observed_state", call.get("result")),
+                    source_run_id=run_id,
+                    source_task_id=str(task.get("task_id", "")),
+                )
+                facts = [
+                    item for item in facts
+                    if item.resource_id != fact.resource_id
+                ] + [fact]
+
+        unresolved_statuses = {
+            "failed",
+            "partial_success",
+            "waiting_confirmation",
+            "needs_more_information",
+        }
+        active_goal = (
+            GoalMemory(
+                source_run_id=run_id,
+                goal=str(result.get("root_goal") or user_message),
+                status=status,
+                target_ids=sorted(set(target_ids)),
+                capabilities=sorted(set(capabilities)),
+            )
+            if status in unresolved_statuses
+            else None
+        )
+        return ConversationState(
+            active_goal=active_goal,
+            entities=entities[-12:],
+            verified_facts=facts[-12:],
+            last_outcome={
+                "run_id": run_id,
+                "goal": str(result.get("root_goal") or user_message),
+                "status": status,
+                "response": str(result.get("final_response", ""))[:1200],
+                "target_ids": sorted(set(target_ids)),
+                "capabilities": sorted(set(capabilities)),
+            },
+        )
 
     @staticmethod
     def _load_json(value: str) -> dict[str, Any]:

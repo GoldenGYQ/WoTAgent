@@ -119,6 +119,83 @@ def test_task_preparer_normalizes_model_proposed_target_type(
     assert task.target.id == "elderly-001"
 
 
+def test_eldercare_resident_scope_includes_every_td_device_in_room(
+    tmp_path,
+) -> None:
+    profile = DeploymentProfileRegistry.load().require("eldercare")
+    principal = DEFAULT_PRINCIPAL_DIRECTORY.resolve("JH-1", "eldercare")
+    prepare = _task_preparer(SimpleNamespace(
+        eldercare_store=_store(tmp_path),
+    ))
+    task = AgentTask(
+        task_id="task-room-light",
+        run_id="run-room-light",
+        local_id="room-light",
+        agent_id="environment_agent",
+        objective="打开张爷爷房间的灯并调到45%",
+        reason="用户请求",
+        success_criteria=["房间灯已打开且亮度为45%"],
+        principal=principal,
+        target_type="resident",
+        target_mention="张爷爷",
+        requested_capability="environment.control",
+    )
+
+    prepared = asyncio.run(prepare(
+        task,
+        task.objective,
+        {"deployment": profile.model_dump(mode="json")},
+    ))
+
+    assert prepared.effective_scope is not None
+    assert set(prepared.effective_scope.resource_ids) == {
+        "device:wristband-001",
+        "device:mattress-001",
+        "device:environment-sensor-001",
+        "device:light-101",
+        "device:fan-101",
+        "device:humidifier-101",
+        "device:purifier-101",
+        "device:ac-002",
+    }
+
+
+def test_concrete_resource_claim_narrows_but_cannot_expand_device_scope(
+    tmp_path,
+) -> None:
+    profile = DeploymentProfileRegistry.load().require("eldercare")
+    principal = DEFAULT_PRINCIPAL_DIRECTORY.resolve("JH-1", "eldercare")
+    prepare = _task_preparer(SimpleNamespace(
+        eldercare_store=_store(tmp_path),
+    ))
+    task = AgentTask(
+        task_id="task-room-light-narrow",
+        run_id="run-room-light-narrow",
+        local_id="room-light",
+        agent_id="environment_agent",
+        objective="Turn on light-101 and set brightness to 45%",
+        reason="Explicit user request",
+        success_criteria=["light-101 is on at 45%"],
+        principal=principal,
+        target_type="resident",
+        target_mention="张爷爷",
+        requested_capability="environment.control",
+        resource_claims=[
+            {"key": "light-101", "mode": "write"},
+            {"key": "device:not-authorized", "mode": "write"},
+        ],
+    )
+
+    prepared = asyncio.run(prepare(
+        task,
+        task.objective,
+        {"deployment": profile.model_dump(mode="json")},
+    ))
+
+    assert prepared.effective_scope is not None
+    assert prepared.effective_scope.resource_ids == ["device:light-101"]
+
+
 def test_task_preparer_denies_cross_resident_access(tmp_path) -> None:
     async def scenario():
         prepare = _task_preparer(SimpleNamespace(

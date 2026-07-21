@@ -206,6 +206,11 @@ describe('useAgentRuntime refresh recovery', () => {
         events: [tailEvent],
         next_cursor: 2,
       })
+      .mockResolvedValue({
+        run_id: activeRun.run_id,
+        events: [],
+        next_cursor: 2,
+      })
     vi.spyOn(agentV2Api, 'listConversations').mockResolvedValue({
       conversations: [{
         conversation_id: activeRun.conversation_id,
@@ -234,6 +239,7 @@ describe('useAgentRuntime refresh recovery', () => {
     getRun
       .mockResolvedValueOnce(activeRun)
       .mockResolvedValueOnce(terminalRun)
+      .mockResolvedValue(terminalRun)
     vi.spyOn(agentV2Api, 'getRunTasks').mockResolvedValue({
       run_id: activeRun.run_id,
       tasks: [],

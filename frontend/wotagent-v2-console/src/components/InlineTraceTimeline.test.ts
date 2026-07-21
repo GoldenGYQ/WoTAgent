@@ -77,7 +77,7 @@ describe('InlineTraceTimeline', () => {
     localStorage.removeItem('wotagent-v2-console.trace-detail-level')
   })
 
-  it('lets users switch between focus, standard, and full trace detail levels', async () => {
+  it('keeps a focused trace by default and reveals technical details on demand', async () => {
     vi.useFakeTimers()
     const detailedRun: RuntimeRun = {
       ...run,
@@ -104,16 +104,12 @@ describe('InlineTraceTimeline', () => {
     })
 
     await vi.advanceTimersByTimeAsync(220)
-    expect(wrapper.text()).toContain('技术细节 2 项')
-
-    await wrapper.findAll('.trace-detail-switch-button')[0].trigger('click')
     expect(wrapper.text()).toContain('已过滤 2')
-    expect(wrapper.find('.trace-stage-detail-toggle').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('128 tokens')
 
-    await wrapper.findAll('.trace-detail-switch-button')[2].trigger('click')
-    expect(wrapper.text()).not.toContain('技术细节 2 项')
+    await wrapper.find('.trace-technical-toggle').trigger('click')
     expect(wrapper.text()).toContain('128 tokens')
+    expect(wrapper.text()).toContain('收起技术细节')
     expect(localStorage.getItem('wotagent-v2-console.trace-detail-level')).toBe('full')
     vi.useRealTimers()
   })
@@ -274,11 +270,11 @@ describe('InlineTraceTimeline', () => {
 
     await vi.advanceTimersByTimeAsync(220)
 
-    expect(wrapper.text()).toContain('技术细节 2 项')
+    expect(wrapper.text()).toContain('已过滤 2')
     expect(wrapper.text()).toContain('ac_003__action__turn_on')
     expect(wrapper.text()).not.toContain('128 tokens')
 
-    await wrapper.find('.trace-stage-detail-toggle').trigger('click')
+    await wrapper.find('.trace-technical-toggle').trigger('click')
     expect(wrapper.text()).toContain('128 tokens')
     vi.useRealTimers()
   })

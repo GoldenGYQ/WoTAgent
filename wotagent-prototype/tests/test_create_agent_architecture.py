@@ -460,12 +460,13 @@ def test_run_supervisor_can_be_reused_across_independent_runs() -> None:
             content="",
             tool_calls=[{
                 "name": "SupervisorDecision",
-                "args": {
-                    "action": "finish",
-                    "goal": goal,
-                    "final_response": f"{goal}已处理",
-                    "reason": "无需创建专业任务",
-                },
+                    "args": {
+                        "action": "finish",
+                        "goal": goal,
+                        "goal_completed": True,
+                        "final_response": f"{goal}已处理",
+                        "reason": "无需创建专业任务",
+                    },
                 "id": f"decision-{goal}",
                 "type": "tool_call",
             }],

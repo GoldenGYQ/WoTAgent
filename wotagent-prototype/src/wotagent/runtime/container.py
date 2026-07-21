@@ -17,11 +17,12 @@ from ..agentic_config import AgenticSettings
 from ..agents import (
     AGENT_SPECS,
     AgentFindingPayload,
+    build_care_react_agent,
     build_health_react_agent,
     build_run_supervisor_agent,
 )
 from ..conversation import ConversationStore
-from ..core import create_wot_pipeline
+from ..core import create_llm_runtime
 from ..domains.eldercare import (
     ELDERCARE_PLAN_SCHEMA,
     EldercareChatAgent,
@@ -29,6 +30,7 @@ from ..domains.eldercare import (
     EldercareRuntime,
     EldercareStore,
     ScopedHealthMCPClient,
+    ScopedCareMCPClient,
 )
 from ..domains.eldercare.strategies import (
     GOAL_EVALUATION_SCHEMA,
@@ -68,7 +70,7 @@ HEALTH_FINDING_REPAIR_SCHEMA: dict[str, Any] = {
 
 @dataclass
 class RuntimeContainer:
-    pipeline: Any
+    models: Any
     gateway: MCPDeviceGateway
     trace_store: InMemoryTraceStore
     conversation_store: ConversationStore
@@ -77,6 +79,8 @@ class RuntimeContainer:
     run_supervisor_agent: Any
     eldercare_runtime: EldercareRuntime
     eldercare_chat_agent: EldercareChatAgent
+    care_react_agent: Any
+    care_gateway: ScopedCareMCPClient
     health_react_agent: Any
     health_finding_repair_runnable: Any
     health_gateway: ScopedHealthMCPClient
@@ -94,10 +98,10 @@ class RuntimeContainer:
         dependencies = AgentGraphDependencies(
             planner=DecisionModeTaskPlanner(
                 LangChainTaskPlanner(
-                    self.pipeline.planner,
+                    self.models.planner,
                     trace_store=self.trace_store,
                     capability_provider=gateway.capabilities,
-                    thinking_runnable=self.pipeline.thinking_planner,
+                    thinking_runnable=self.models.thinking_planner,
                     agent_profile=profile_for(agent_id),
                     plan_reviewer=StructuredConditionalPlanReviewer(
                         self.conditional_plan_review_runnable,
@@ -110,9 +114,9 @@ class RuntimeContainer:
             policy=policy,
             orchestrator=TaskOrchestrator(gateway, policy),
             responder=LangChainResponseComposer(
-                self.pipeline.response_model,
+                self.models.response_model,
                 trace_store=self.trace_store,
-                thinking_runnable=self.pipeline.thinking_response_model,
+                thinking_runnable=self.models.thinking_response_model,
             ),
             max_agent_iterations=self.settings.device_max_iterations,
             max_tool_calls=self.settings.max_tool_calls,
@@ -134,7 +138,7 @@ def create_runtime_container(
     temperature: float | None = None,
 ) -> RuntimeContainer:
     configure_logging()
-    pipeline = create_wot_pipeline(
+    models = create_llm_runtime(
         enable_thinking=enable_thinking,
         reasoning_effort=os.getenv("REASONING_EFFORT", "high"),
         enable_streaming=enable_streaming,
@@ -147,28 +151,28 @@ def create_runtime_container(
     eldercare_store.seed_demo()
     settings = AgenticSettings.from_env()
 
-    goal_plan_runnable = pipeline.response_model.bind(
+    goal_plan_runnable = models.response_model.bind(
         tools=[GOAL_PLAN_SCHEMA],
         tool_choice={
             "type": "function",
             "function": {"name": "generate_goal_plan"},
         },
     )
-    goal_evaluation_runnable = pipeline.response_model.bind(
+    goal_evaluation_runnable = models.response_model.bind(
         tools=[GOAL_EVALUATION_SCHEMA],
         tool_choice={
             "type": "function",
             "function": {"name": "evaluate_goal"},
         },
     )
-    health_decision_runnable = pipeline.response_model.bind(
+    health_decision_runnable = models.response_model.bind(
         tools=[HEALTH_DECISION_SCHEMA],
         tool_choice={
             "type": "function",
             "function": {"name": "decide_health_step"},
         },
     )
-    conditional_plan_review_runnable = pipeline.response_model.bind(
+    conditional_plan_review_runnable = models.response_model.bind(
         tools=[CONDITIONAL_PLAN_REVIEW_SCHEMA],
         tool_choice={
             "type": "function",
@@ -176,7 +180,7 @@ def create_runtime_container(
         },
     )
     run_supervisor_agent = build_run_supervisor_agent(
-        pipeline.response_model,
+        models.response_model,
         AGENT_SPECS,
     )
     eldercare_runtime = EldercareRuntime(
@@ -200,7 +204,7 @@ def create_runtime_container(
             trace_store=trace_store,
         ),
     )
-    eldercare_command_runnable = pipeline.response_model.bind(
+    eldercare_command_runnable = models.response_model.bind(
         tools=[ELDERCARE_PLAN_SCHEMA],
         tool_choice={
             "type": "function",
@@ -212,7 +216,7 @@ def create_runtime_container(
         EldercareCommandPlanner(
             eldercare_command_runnable,
             trace_store=trace_store,
-            thinking_runnable=pipeline.thinking_planner,
+            thinking_runnable=models.thinking_planner,
         ),
         trace_store=trace_store,
     )
@@ -221,12 +225,22 @@ def create_runtime_container(
         require_scope=True,
     )
     health_react_agent = build_health_react_agent(
-        pipeline.response_model,
+        models.response_model,
         health_gateway,
         max_iterations=settings.health_max_iterations,
         max_tool_calls=settings.max_tool_calls,
     )
-    health_finding_repair_runnable = pipeline.response_model.bind(
+    care_gateway = ScopedCareMCPClient(
+        eldercare_store,
+        require_scope=True,
+    )
+    care_react_agent = build_care_react_agent(
+        models.response_model,
+        care_gateway,
+        max_iterations=AGENT_SPECS["care_agent"].max_iterations,
+        max_tool_calls=min(settings.max_tool_calls, 4),
+    )
+    health_finding_repair_runnable = models.response_model.bind(
         tools=[HEALTH_FINDING_REPAIR_SCHEMA],
         tool_choice={
             "type": "function",
@@ -234,7 +248,7 @@ def create_runtime_container(
         },
     )
     return RuntimeContainer(
-        pipeline=pipeline,
+        models=models,
         gateway=gateway,
         trace_store=trace_store,
         conversation_store=conversation_store,
@@ -243,6 +257,8 @@ def create_runtime_container(
         run_supervisor_agent=run_supervisor_agent,
         eldercare_runtime=eldercare_runtime,
         eldercare_chat_agent=eldercare_chat_agent,
+        care_react_agent=care_react_agent,
+        care_gateway=care_gateway,
         health_react_agent=health_react_agent,
         health_finding_repair_runnable=health_finding_repair_runnable,
         health_gateway=health_gateway,

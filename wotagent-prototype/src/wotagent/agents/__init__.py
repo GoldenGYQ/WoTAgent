@@ -35,6 +35,16 @@ def build_health_tools(*args, **kwargs):
     return factory(*args, **kwargs)
 
 
+def build_care_react_agent(*args, **kwargs):
+    from .care import build_care_react_agent as factory
+    return factory(*args, **kwargs)
+
+
+def build_care_tools(*args, **kwargs):
+    from .care import build_care_tools as factory
+    return factory(*args, **kwargs)
+
+
 def build_run_supervisor_agent(*args, **kwargs):
     from .supervisor_agent import build_run_supervisor_agent as factory
     return factory(*args, **kwargs)
@@ -49,6 +59,8 @@ __all__ = [
     "Evidence",
     "ToolExecutionResult",
     "build_delegation_tool",
+    "build_care_react_agent",
+    "build_care_tools",
     "build_health_react_agent",
     "build_health_tools",
     "build_run_supervisor_agent",

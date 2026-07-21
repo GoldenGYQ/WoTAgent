@@ -96,6 +96,21 @@ def test_thinking_request_uses_dedicated_planner_and_marks_trace() -> None:
     assert completed[0].data["model_thinking"] is True
     assert completed[1].data["model_thinking"] is False
     assert all("reasoning_content" not in event.data for event in events)
+    started = next(
+        event
+        for event in events
+        if event.type == "model.request.started"
+        and event.data["purpose"] == "task_planning"
+    )
+    planning_completed = next(
+        event
+        for event in events
+        if event.type == "model.request.completed"
+        and event.data["purpose"] == "task_planning"
+    )
+    assert started.raw_data["messages"] == direct.messages
+    assert planning_completed.raw_data["structured_plan"]["intent"] == "chat"
+    assert "messages" not in started.data
 
 
 def test_thinking_request_fails_when_server_capability_is_disabled() -> None:
@@ -300,10 +315,12 @@ def test_all_simulated_lights_declare_symmetric_power_actions() -> None:
     )
 
 
-def test_capability_context_selects_only_relevant_room_and_device_type() -> None:
+def test_capability_context_does_not_guess_semantics_with_keywords() -> None:
     devices = capability_context("把客厅灯打开")
 
-    assert [item["device_id"] for item in devices] == ["light-001"]
+    assert len(devices) == len(capability_context())
+    assert "light-001" in {item["device_id"] for item in devices}
+    assert "ac-001" in {item["device_id"] for item in devices}
 
 
 def test_capability_context_falls_back_to_all_devices_for_generic_request() -> None:
@@ -655,10 +672,15 @@ def test_planner_records_usage_and_safe_reasoning_summary() -> None:
     assert started.data["agent_id"] == "environment_agent"
     assert started.data["system_characters"] > 0
     assert started.data["capability_context_characters"] > 0
-    assert started.data["selected_device_ids"] == ["light-001"]
+    assert started.data["selected_device_ids"] == started.data["all_device_ids"]
     assert "light-001" in started.data["all_device_ids"]
     assert started.data["prompt_snapshot"]["user_prompt"] == "打开客厅灯"
-    assert started.data["prompt_snapshot"]["capabilities"][0]["device_id"] == "light-001"
+    prompt_device_ids = {
+        item["device_id"]
+        for item in started.data["prompt_snapshot"]["capabilities"]
+        if isinstance(item, dict)
+    }
+    assert len(prompt_device_ids) > 1
     assert completed.data["raw_plan"]["intent"] == "control"
     assert completed.data["raw_plan"]["steps"][0]["device_id"] == "light-001"
     summary = next(event for event in events if event.type == "model.reasoning.summary")
@@ -807,7 +829,7 @@ def test_runtime_role_is_exposed_as_fact_but_not_decided_by_planner() -> None:
     assert "规划不等于授权" in runnable.messages[0][1]
 
 
-def test_elliptical_followup_inherits_recent_device_scope_for_capability_selection() -> None:
+def test_elliptical_followup_uses_history_without_python_keyword_filtering() -> None:
     runnable = FakeRunnable({"intent": "chat", "summary": "ok", "steps": []})
 
     asyncio.run(LangChainTaskPlanner(runnable)({
@@ -821,10 +843,11 @@ def test_elliptical_followup_inherits_recent_device_scope_for_capability_selecti
     capability_prompt = runnable.messages[2][1]
     assert "light-001" in capability_prompt
     assert "light-007" in capability_prompt
-    assert "ac-001" not in capability_prompt
+    assert "ac-001" in capability_prompt
+    assert any("7" in str(message[1]) for message in runnable.messages)
 
 
-def test_plan_repair_cannot_reverse_power_off_intent() -> None:
+def test_planner_does_not_reinterpret_power_direction_with_string_rules() -> None:
     class OppositeRunnable:
         def __init__(self) -> None:
             self.calls = 0
@@ -859,13 +882,13 @@ def test_plan_repair_cannot_reverse_power_off_intent() -> None:
         }]
 
     runnable = OppositeRunnable()
-    with pytest.raises(ValueError, match="reverses the requested power-off intent"):
-        asyncio.run(LangChainTaskPlanner(
-            runnable,
-            capability_provider=capabilities,
-        )({"message": "全关掉"}))
+    plan = asyncio.run(LangChainTaskPlanner(
+        runnable,
+        capability_provider=capabilities,
+    )({"message": "全关掉"}))
 
-    assert runnable.calls == 2
+    assert plan.steps[0].action == "turnOn"
+    assert runnable.calls == 1
 
 
 def test_mixed_power_directions_do_not_trigger_false_reverse_validation() -> None:

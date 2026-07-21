@@ -87,13 +87,16 @@ class TaskScheduler:
                     f"task '{task.task_id}' references a missing dependency"
                 )
             if any(
-                item.status in {"failed", "blocked", "cancelled"}
+                item.status in {
+                    "failed", "blocked", "cancelled", "partial_success",
+                    "needs_input", "denied", "unavailable",
+                }
                 for item in dependencies
                 if item is not None
             ):
                 continue
             if all(
-                item.status == "completed"
+                item.status in {"completed", "skipped"}
                 for item in dependencies
                 if item is not None
             ):

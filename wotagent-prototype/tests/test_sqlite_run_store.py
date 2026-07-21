@@ -63,6 +63,43 @@ def test_sqlite_run_store_survives_new_store_instance(tmp_path) -> None:
     assert [event.type for event in events] == ["run.started"]
 
 
+def test_raw_trace_artifact_is_persisted_outside_event_projection(
+    tmp_path,
+) -> None:
+    async def scenario():
+        path = tmp_path / "runs.db"
+        first = SQLiteRunStore(path)
+        await first.create_run(RunRecord(
+            run_id="run-raw-trace",
+            conversation_id="conv-1",
+            turn_id="turn-1",
+            root_goal="inspect model trace",
+        ))
+        event = await first.record_event(
+            "run-raw-trace",
+            "model.request.completed",
+            node="supervisor",
+            data={"purpose": "supervisor", "total_tokens": 12},
+            raw_data={
+                "messages": [{"role": "assistant", "content": "full"}],
+                "structured_response": {"action": "finish"},
+            },
+        )
+        second = SQLiteRunStore(path)
+        artifact = await second.get_trace_artifact(
+            str(event.raw_artifact_id)
+        )
+        return event, artifact
+
+    event, artifact = asyncio.run(scenario())
+
+    assert event.data == {"purpose": "supervisor", "total_tokens": 12}
+    assert event.raw_artifact_id is not None
+    assert artifact is not None
+    assert artifact.event_id == event.event_id
+    assert artifact.payload["structured_response"] == {"action": "finish"}
+
+
 def test_confirmation_resumes_after_store_and_coordinator_restart(
     tmp_path,
 ) -> None:
@@ -111,6 +148,7 @@ def test_confirmation_resumes_after_store_and_coordinator_restart(
             TaskScheduler(available_agents={"environment_agent"}),
             lambda _state: SupervisorDecision(
                 action="finish",
+                goal_completed=True,
                 goal="打开客厅灯",
                 final_response="客厅灯已经打开。",
                 reason="设备状态已验证",
@@ -141,3 +179,27 @@ def test_confirmation_resumes_after_store_and_coordinator_restart(
     assert task is not None
     assert task.status == "completed"
     assert task.confirmation is None
+
+
+def test_sqlite_store_releases_connection_after_each_operation(tmp_path) -> None:
+    path = tmp_path / "close-check.db"
+
+    async def scenario() -> None:
+        store = SQLiteRunStore(path)
+        await store.create_run(RunRecord(
+            run_id="run-close-check",
+            conversation_id="conv-close-check",
+            turn_id="turn-close-check",
+            root_goal="verify database handle lifecycle",
+        ))
+        await store.record_event(
+            "run-close-check",
+            "run.started",
+            raw_data={"payload": "x" * 1024},
+        )
+
+    asyncio.run(scenario())
+
+    # Windows refuses this unlink while any sqlite handle is still open.
+    path.unlink()
+    assert not path.exists()

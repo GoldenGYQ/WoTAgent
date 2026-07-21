@@ -1,11 +1,25 @@
 # WoTAgent 2.0 Project Handoff
 
-Last updated: 2026-07-20
-Current branch: `codex/run-task-dag`
+Last updated: 2026-07-21
+Current branch: `trae/run-task-dag`
 Current release baseline: `v2.8.0`
 Current implementation target: `v3.0.0` scene-scoped P1
 Current implementation baseline: Domain Operations and Monitor Run refactor,
 successor to `99afb3d feat: harden agent context and real model health flow`
+
+> 2026-07-21 runtime cleanup: resident/space resources now expand through TD
+> locations and the active Deployment Profile, so an assigned resident room
+> exposes every authorized device rather than four hard-coded eldercare device
+> fields. Concrete Supervisor resource claims may narrow this authorized set
+> but cannot expand it. Hybrid Planner keyword filtering and power-direction
+> regex guards were removed; LLM planning now receives the authorized catalog
+> while TD/schema/Policy remain deterministic. Device chat-only termination no
+> longer counts as Task completion. Care Tasks now use bounded `create_agent`
+> plus a scoped MCP gateway instead of the legacy `EldercareChatAgent` path.
+> Conversation state persists active goals, canonical entities, verified facts
+> and last outcomes across Runs. Compact RunEvents and separately persisted raw
+> TraceArtifacts now serve UI and forensic needs without streaming large model
+> payloads on every event.
 
 > 2026-07-19 identity update: P1 now separates human Principals from
 > capability-based software Agents. `PrincipalDirectory` resolves domain

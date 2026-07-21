@@ -165,6 +165,25 @@ def _match_location(td_loc: str, query: str) -> bool:
     return False
 
 
+def locations_match(left: str, right: str) -> bool:
+    """Return whether two external location labels describe one TD space."""
+    left_value = left.strip().casefold()
+    right_value = right.strip().casefold()
+    if not left_value or not right_value:
+        return False
+    return _match_location(left_value, right_value)
+
+
+def location_aliases(location: str) -> list[str]:
+    """Return TD vocabulary that helps the model understand a location label."""
+    value = location.strip().casefold()
+    for canonical, aliases in _LOCATION_SYNONYMS.items():
+        group = {canonical, *aliases}
+        if value in group:
+            return sorted(group - {value})
+    return []
+
+
 def find_devices(
     capability: str | None = None,
     location: str | None = None,
@@ -221,4 +240,6 @@ __all__ = [
     "load_tds",
     "find_devices",
     "get_device_by_id",
+    "locations_match",
+    "location_aliases",
 ]

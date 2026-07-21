@@ -25,6 +25,7 @@ from ..domains.eldercare.health_freshness import (
     apply_completed_health_freshness_guard,
     has_actionable_health_alert_language,
 )
+from ..domain import DeploymentResourceResolver
 from ..orchestration import (
     AgentTask,
     PendingConfirmation,
@@ -41,6 +42,7 @@ from ..domain.entity_resolution import EntityResolutionError
 from ..gateway import deployment_device_scope
 from ..prompting import compact_history
 from ..telemetry import TraceEvent, extract_usage_with_cost
+from ..wot import load_tds
 
 
 SUPERVISOR_HISTORY_MESSAGES = 6
@@ -60,13 +62,6 @@ CONDITIONAL_TASK_MARKERS = (
     "unless",
     "otherwise",
     "do nothing",
-)
-ROOM_ANSWER_MARKERS = ("A-101", "A-102", "A101", "A102")
-ROOM_CLARIFICATION_MARKERS = (
-    "住在哪个房间",
-    "住在 A-101 还是 A-102",
-    "是 A-101 还是 A-102",
-    "哪个房间",
 )
 
 
@@ -131,12 +126,12 @@ def _supervisor_decider(
             iteration=iteration,
             data={
                 "purpose": "supervisor_decision",
-                "input": payload,
                 "raw_user_request": state["message"],
                 "context_compacted": context_compacted,
                 "context_characters": context_characters,
                 "context_soft_limit": SUPERVISOR_CONTEXT_SOFT_CHARACTERS,
             },
+            raw_data={"input": _json_safe_value(payload)},
         )
         started = time.perf_counter()
         try:
@@ -195,6 +190,12 @@ def _supervisor_decider(
                 ),
                 **usage,
             },
+            raw_data={
+                "structured_response": _json_safe_value(
+                    result.get("structured_response")
+                ),
+                "messages": _json_safe_value(messages),
+            },
         )
         decision = SupervisorDecision.model_validate(
             result.get("structured_response")
@@ -208,39 +209,11 @@ def _normalize_supervisor_user_request(
     message: str,
     base_context: dict[str, Any],
 ) -> str:
-    room = _extract_room_answer(message)
-    if room is None:
-        return message
-    history = base_context.get("history", [])
-    if len(history) < 2:
-        return message
-    previous_assistant = history[-1]
-    previous_user = history[-2]
-    if (
-        previous_assistant.get("role") != "assistant"
-        or previous_user.get("role") != "user"
-    ):
-        return message
-    assistant_text = str(previous_assistant.get("content", ""))
-    if not any(marker in assistant_text for marker in ROOM_CLARIFICATION_MARKERS):
-        return message
-    original_goal = str(previous_user.get("content", "")).strip()
-    if not original_goal:
-        return message
-    return f"{original_goal}\n补充信息：目标房间是 {room}。"
-
-
-def _extract_room_answer(message: str) -> str | None:
-    compact = "".join(str(message).upper().split())
-    for marker in ROOM_ANSWER_MARKERS:
-        candidate = marker.upper().replace("-", "")
-        if compact in {candidate, f"{candidate}啊！", f"{candidate}啊", f"{candidate}呀"}:
-            return marker if "-" in marker else marker[0] + "-" + marker[1:]
-    if "A-101" in message or "A101" in compact:
-        return "A-101"
-    if "A-102" in message or "A102" in compact:
-        return "A-102"
-    return None
+    # Continuity now comes from structured ConversationState plus recent
+    # dialogue. Domain-specific text rewriting here would create a second,
+    # untrusted entity-resolution path.
+    del base_context
+    return message
 
 
 def _compact_supervisor_context(context: dict[str, Any]) -> dict[str, Any]:
@@ -395,12 +368,25 @@ def _bounded_text(value: Any, limit: int) -> str:
 
 
 def _json_safe_value(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {
+            str(key): _json_safe_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe_value(item) for item in value]
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        try:
+            return _json_safe_value(model_dump(mode="json"))
+        except (TypeError, ValueError):
+            return _json_safe_value(model_dump())
     try:
-        return json.loads(
-            json.dumps(value, ensure_ascii=False, default=str)
-        )
+        return json.loads(json.dumps(value, ensure_ascii=False))
     except (TypeError, ValueError):
-        return _bounded_value(value)
+        return str(value)
 
 
 def _approx_serialized_characters(value: Any) -> int:
@@ -490,6 +476,14 @@ def _health_executor(
     async def execute(task: AgentTask) -> AgentFindingPayload:
         dependency_context = _dependency_context(task)
         if store is not None:
+            health_input = {
+                "objective": task.objective,
+                "source_request": task.source_request,
+                "target": (
+                    task.target.model_dump(mode="json")
+                    if task.target else None
+                ),
+            }
             await store.record_event(
                 task.run_id,
                 "model.request.started",
@@ -497,14 +491,9 @@ def _health_executor(
                 node=task.agent_id,
                 data={
                     "purpose": "health_specialist",
-                    "input": {
-                        "objective": task.objective,
-                        "target": (
-                            task.target.model_dump(mode="json")
-                            if task.target else None
-                        ),
-                    },
+                    "target_id": task.target.id if task.target else None,
                 },
+                raw_data={"input": health_input},
             )
         started = time.perf_counter()
         with runtime.health_gateway.authorized_scope(task.effective_scope):
@@ -529,10 +518,11 @@ def _health_executor(
                 timeout=runtime.settings.total_timeout_seconds,
             )
         if store is not None:
-            await _project_health_messages(
+            await _project_specialist_messages(
                 store,
                 task,
                 result.get("messages", []),
+                purpose="health_specialist",
                 duration_ms=(time.perf_counter() - started) * 1000,
             )
         structured = result.get("structured_response")
@@ -719,6 +709,7 @@ def _compact_agent_messages(messages: list[Any]) -> list[dict[str, Any]]:
 
 def _task_preparer(runtime: Any) -> Callable[[AgentTask, str, dict[str, Any]], Any]:
     resolver = ResidentEntityResolver(runtime.eldercare_store)
+    resource_resolver = DeploymentResourceResolver(load_tds())
     authorization = RelationshipAuthorizationService(
         DEMO_RESIDENT_ASSIGNMENTS
     )
@@ -788,6 +779,11 @@ def _task_preparer(runtime: Any) -> Callable[[AgentTask, str, dict[str, Any]], A
                 runtime,
                 task.principal,
                 deployment,
+                resource_resolver=resource_resolver,
+            )
+            scoped_devices = _narrow_device_scope_from_claims(
+                scoped_devices,
+                task.resource_claims,
             )
             if not scoped_devices:
                 raise TaskPreparationError(_task_failure(
@@ -894,37 +890,45 @@ def _canonical_task_capability(
     ))
 
 
+def _narrow_device_scope_from_claims(
+    authorized_device_ids: list[str],
+    resource_claims: list[Any],
+) -> list[str]:
+    """Use concrete Task claims only to narrow an already authorized scope."""
+    authorized = set(authorized_device_ids)
+    claimed = {
+        str(claim.key).removeprefix("device:")
+        for claim in resource_claims
+        if str(claim.key).removeprefix("device:") in authorized
+    }
+    return sorted(claimed) if claimed else sorted(authorized)
+
+
 def _principal_device_scope(
     runtime: Any,
     principal: Any,
     deployment: dict[str, Any],
+    *,
+    resource_resolver: DeploymentResourceResolver | None = None,
 ) -> list[str]:
-    profile_devices = set(deployment.get("device_ids", []))
-    if "*" in principal.resource_ids:
-        return sorted(profile_devices)
-    site_resource = f"site:{deployment.get('site_id', '')}"
-    if site_resource in principal.resource_ids:
-        return sorted(profile_devices)
-    device_ids = {
-        item.removeprefix("device:")
-        for item in principal.resource_ids
-        if item.startswith("device:")
-    }
-    for resource_id in principal.resource_ids:
+    resolver = resource_resolver or DeploymentResourceResolver(load_tds())
+
+    def resource_location(resource_id: str) -> str | None:
+        if resource_id.startswith("space:"):
+            return resource_id.removeprefix("space:")
         if not resource_id.startswith("resident:"):
-            continue
+            return None
         resident = runtime.eldercare_store.get_resident(
             resource_id.removeprefix("resident:")
         )
-        if resident is None:
-            continue
-        device_ids.update(filter(None, (
-            resident.environment_device_id,
-            resident.wristband_device_id,
-            resident.mattress_device_id,
-            resident.environment_sensor_device_id,
-        )))
-    return sorted(device_ids.intersection(profile_devices))
+        return resident.room if resident is not None else None
+
+    return resolver.resolve_device_ids(
+        principal=principal,
+        profile_device_ids=deployment.get("device_ids", []),
+        site_id=str(deployment.get("site_id", "")),
+        resource_location=resource_location,
+    )
 
 
 def _task_failure(
@@ -959,30 +963,121 @@ def _care_executor(
         conditional_noop = _conditional_care_noop(task)
         if conditional_noop is not None:
             return conditional_noop
-        await _ensure_legacy_trace(runtime, task)
-        unsubscribe = _subscribe_trace_projection(
-            runtime,
-            store,
-            task,
-        )
-        try:
+        if store is not None:
+            await store.record_event(
+                task.run_id,
+                "model.request.started",
+                task_id=task.task_id,
+                node=task.agent_id,
+                data={
+                    "purpose": "care_specialist",
+                    "target_id": task.target.id if task.target else None,
+                },
+                raw_data={
+                    "objective": task.objective,
+                    "source_request": task.source_request,
+                    "dependency_findings": [
+                        item.model_dump(mode="json")
+                        for item in task.dependency_findings
+                    ],
+                },
+            )
+        started = time.perf_counter()
+        with runtime.care_gateway.authorized_scope(task.effective_scope):
             result = await asyncio.wait_for(
-                runtime.eldercare_chat_agent.run(
-                    task_id=task.task_id,
-                    message=f"{task.objective}{_dependency_context(task)}",
-                    history=context.get("history", []),
-                    role=context.get("role", "operator"),
-                    thinking=context.get("thinking", False),
-                    routed_agent="care_agent",
-                    resident_id=task.target.id if task.target else None,
-                ),
+                runtime.care_react_agent.ainvoke({
+                    "messages": [{
+                        "role": "user",
+                        "content": (
+                            f"Original request: {task.source_request or task.objective}\n"
+                            f"Delegated care objective: {task.objective}\n"
+                            f"Canonical resident ID: "
+                            f"{task.target.id if task.target else ''}"
+                            f"{_dependency_context(task)}"
+                        ),
+                    }],
+                }),
                 timeout=runtime.settings.total_timeout_seconds,
             )
-        finally:
-            unsubscribe()
-        return _result_finding(task, result)
+        if store is not None:
+            await _project_specialist_messages(
+                store,
+                task,
+                result.get("messages", []),
+                purpose="care_specialist",
+                duration_ms=(time.perf_counter() - started) * 1000,
+            )
+        return _attest_care_finding(task, result)
 
     return execute
+
+
+def _attest_care_finding(
+    task: AgentTask,
+    result: dict[str, Any],
+) -> AgentFinding:
+    payload = result.get("structured_response")
+    proposed = (
+        AgentFindingPayload.model_validate(payload)
+        if payload is not None
+        else AgentFindingPayload(
+            status="needs_more_information",
+            finding="Care Agent did not return a structured result.",
+            confidence=0,
+        )
+    )
+    actual_calls = _tool_results_from_messages(result.get("messages", []))
+    verified = bool(actual_calls) and all(
+        call.success and call.verified for call in actual_calls
+    )
+    status = "completed" if verified else (
+        "failed" if actual_calls else "needs_more_information"
+    )
+    evidence = [
+        Evidence(
+            source=call.tool_name,
+            value=call.observed_state or call.result,
+            reliability=1 if call.verified else 0,
+            description="Runtime-attested care tool result.",
+        )
+        for call in actual_calls
+    ]
+    return AgentFinding(
+        agent=task.agent_id,
+        objective=task.objective,
+        task_id=task.task_id,
+        status=status,
+        finding=proposed.finding,
+        confidence=proposed.confidence if verified else min(proposed.confidence, 0.5),
+        evidence=evidence,
+        recommended_actions=proposed.recommended_actions,
+        unresolved_questions=([] if verified else task.success_criteria),
+        tool_calls=actual_calls,
+    )
+
+
+def _tool_results_from_messages(messages: list[Any]) -> list[ToolExecutionResult]:
+    results: list[ToolExecutionResult] = []
+    for message in messages:
+        message_type = str(
+            getattr(message, "type", None)
+            or (message.get("role", "") if isinstance(message, dict) else "")
+        )
+        if message_type not in {"tool", "ToolMessage"}:
+            continue
+        content = (
+            message.get("content")
+            if isinstance(message, dict)
+            else getattr(message, "content", None)
+        )
+        payload = _strict_json_object(content)
+        if payload is None:
+            continue
+        try:
+            results.append(ToolExecutionResult.model_validate(payload))
+        except ValueError:
+            continue
+    return results
 
 
 def _conditional_care_noop(task: AgentTask) -> AgentFinding | None:
@@ -1011,7 +1106,7 @@ def _conditional_care_noop(task: AgentTask) -> AgentFinding | None:
     return AgentFinding(
         agent=task.agent_id,
         objective=task.objective,
-        status="completed",
+        status="skipped",
         finding="上游健康调查未发现需要通知的异常，本次 Care Task 已安全跳过。",
         confidence=1,
         unresolved_questions=[],
@@ -1200,17 +1295,32 @@ def _subscribe_trace_projection(
                 else None
             ),
             node=event.node,
-            data=data,
+            data=_bounded_value(data),
+            raw_data=(
+                _json_safe_value(
+                    event.raw_data
+                    if event.raw_data is not None
+                    else data
+                )
+                if event.type.startswith((
+                    "model.",
+                    "agent.tool",
+                    "agent.resource",
+                    "verification.",
+                ))
+                else None
+            ),
         )
 
     return subscribe(task.task_id, project)
 
 
-async def _project_health_messages(
+async def _project_specialist_messages(
     store: RunStore,
     task: AgentTask,
     messages: list[Any],
     *,
+    purpose: str,
     duration_ms: float,
 ) -> None:
     for message in messages:
@@ -1275,10 +1385,11 @@ async def _project_health_messages(
         task_id=task.task_id,
         node=task.agent_id,
         data={
-            "purpose": "health_specialist",
+            "purpose": purpose,
             "duration_ms": duration_ms,
             **usage,
         },
+        raw_data={"messages": _json_safe_value(messages)},
     )
 
 
@@ -1319,14 +1430,29 @@ def _result_finding(task: AgentTask, result: dict[str, Any]) -> AgentFinding:
     )
     status = {
         "succeeded": "completed",
-        "partial_success": "completed",
+        "partial_success": "partial_success",
         "responded": "completed",
         "clarify": "needs_more_information",
-        "denied": "blocked",
+        "denied": "denied",
         "waiting_confirmation": "blocked",
         "failed": "failed",
         "planning_failed": "failed",
     }.get(raw_status, "failed")
+    plan = result.get("plan")
+    plan_intent = (
+        plan.get("intent")
+        if isinstance(plan, dict)
+        else getattr(plan, "intent", None)
+    )
+    # A terminal chat plan after a successful Observe-Act loop is normal: the
+    # planner is saying that no further action is required. Only downgrade a
+    # chat-only result when the whole graph state contains no executed step.
+    if (
+        status == "completed"
+        and plan_intent in {"chat", "clarify"}
+        and not _has_device_execution_evidence(result, trace)
+    ):
+        status = "needs_more_information"
     response = str(
         result.get("response")
         or result.get("error")
@@ -1356,6 +1482,33 @@ def _result_finding(task: AgentTask, result: dict[str, Any]) -> AgentFinding:
             task.success_criteria if status != "completed" else []
         ),
     )
+
+
+def _has_device_execution_evidence(
+    result: dict[str, Any],
+    trace: Any,
+) -> bool:
+    candidates = [trace, *list(result.get("execution_history", []) or [])]
+    for candidate in candidates:
+        steps = (
+            candidate.get("steps", [])
+            if isinstance(candidate, dict)
+            else getattr(candidate, "steps", [])
+        )
+        for step in steps or []:
+            execution = (
+                step.get("execution")
+                if isinstance(step, dict)
+                else getattr(step, "execution", None)
+            )
+            verification = (
+                step.get("verification")
+                if isinstance(step, dict)
+                else getattr(step, "verification", None)
+            )
+            if execution is not None or verification is not None:
+                return True
+    return False
 
 
 __all__ = ["build_run_coordinator"]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 
 import pytest
@@ -63,6 +64,7 @@ def run_client(monkeypatch, tmp_path):
             ),
             SupervisorDecision(
                 action="finish",
+                goal_completed=True,
                 goal="查询客厅灯",
                 final_response="客厅灯当前为开启状态。",
                 reason="成功条件已满足",
@@ -150,6 +152,36 @@ def test_run_websocket_replays_events_by_run_id(run_client) -> None:
     assert messages[0]["run_id"] == run_id
     assert messages[-1]["status"] == "completed"
     assert messages[-1]["cursor"] == len(messages) - 1
+
+
+def test_trace_artifact_api_keeps_raw_payload_out_of_event_stream(run_client) -> None:
+    client, store, _conversations = run_client
+    run_id = client.post(
+        "/api/v2/runs",
+        json={"message": "Inspect the living room light"},
+    ).json()["run_id"]
+
+    event = asyncio.run(store.record_event(
+        run_id,
+        "model.request.completed",
+        node="planner",
+        data={"purpose": "task_planning", "total_tokens": 42},
+        raw_data={
+            "messages": [{"role": "user", "content": "raw prompt"}],
+            "response": {"intent": "query"},
+        },
+    ))
+
+    streamed = client.get(f"/api/v2/runs/{run_id}/events").json()["events"][-1]
+    assert streamed["data"] == {"purpose": "task_planning", "total_tokens": 42}
+    assert "messages" not in streamed["data"]
+    assert streamed["raw_artifact_id"] == event.raw_artifact_id
+
+    payload = client.get(
+        f"/api/v2/runs/{run_id}/trace-artifacts/{event.raw_artifact_id}"
+    ).json()["artifact"]
+    assert payload["payload"]["messages"][0]["content"] == "raw prompt"
+    assert payload["payload"]["response"] == {"intent": "query"}
 
 
 def test_old_task_api_is_removed(run_client) -> None:

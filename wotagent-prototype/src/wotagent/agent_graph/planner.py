@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
-import re
 import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
@@ -22,43 +20,7 @@ from ..prompting import (
     prompt_system,
 )
 from ..telemetry import InMemoryTraceStore, extract_usage_with_cost
-from ..wot import load_tds
-
-
-_LOCATION_TERMS: dict[str, tuple[str, ...]] = {
-    "living_room": ("客厅", "起居室", "living room", "parlor"),
-    "bedroom1": ("主卧", "卧室1", "bedroom1", "master bedroom", "A-101", "A101"),
-    "bedroom2": ("次卧", "卧室2", "bedroom2", "guest bedroom", "A-102", "A102"),
-    "kitchen": ("厨房", "kitchen"),
-    "study": ("书房", "study"),
-    "bathroom1": ("主卫", "卫生间1", "bathroom1"),
-    "bathroom2": ("客卫", "卫生间2", "bathroom2"),
-}
-
-_DEVICE_TERMS: dict[str, tuple[str, ...]] = {
-    "light": ("灯", "照明", "light"),
-    "ac": ("空调", "ac", "air conditioner"),
-    "fan": ("风扇", "fan"),
-    "exhaust": ("排风", "换气", "exhaust"),
-    "humidifier": ("加湿器", "humidifier"),
-    "purifier": ("净化器", "purifier"),
-    "tv": ("电视", "tv"),
-    "gas_sensor": ("燃气", "gas"),
-    "health": ("手环", "床垫", "健康", "心率", "血氧", "wristband", "mattress"),
-    "environment": ("环境传感器", "温湿度", "environment sensor"),
-    "window_covering_controller": ("百叶窗", "窗帘", "blind", "blinds", "shade", "curtain"),
-    "dimmable_light": ("调光灯", "dimmer", "dimmable light"),
-    "laundry_dryer": ("烘干机", "dryer"),
-    "laundry_washer": ("洗衣机", "washer"),
-    "dishwasher": ("洗碗机", "dishwasher"),
-    "refrigerator": ("冰箱", "refrigerator", "fridge"),
-    "freezer": ("冷冻柜", "freezer"),
-    "heat_pump": ("热泵", "heat pump"),
-    "security": ("门锁", "门禁", "摄像头", "烟雾", "安防", "security"),
-    "energy": ("电表", "能耗", "充电桩", "用电", "energy"),
-    "housekeeping": ("扫地机器人", "清洁", "家务", "vacuum"),
-    "device_ops": ("网关", "设备运维", "设备离线", "gateway"),
-}
+from ..wot import load_tds, location_aliases
 
 
 class ConditionalPlanReview(BaseModel):
@@ -158,7 +120,7 @@ def capability_context(message: str = "", max_devices: int = 8) -> list[dict[str
             "device_id": td.device_id,
             "title": td.title,
             "location": td.location,
-            "location_aliases": list(_LOCATION_TERMS.get(td.location, ())),
+            "location_aliases": location_aliases(td.location),
             "actions": [
                 {"name": action.name, "input_schema": action.input_schema}
                 for action in td.actions
@@ -177,61 +139,8 @@ def select_capability_context(
     max_devices: int = 8,
 ) -> list[dict[str, Any]]:
     """Select relevant capabilities regardless of whether TDs came from disk or MCP."""
-    all_devices = [
-        {
-            **device,
-            "location_aliases": sorted(
-                set(device.get("location_aliases", []))
-                | set(_LOCATION_TERMS.get(str(device.get("location", "")), ()))
-            ),
-        }
-        for device in all_devices
-    ]
-    text = message.lower().strip()
-    if not text:
-        return all_devices
-    locations = {
-        location for location, terms in _LOCATION_TERMS.items()
-        if any(term in text for term in terms)
-    }
-    device_types = {
-        device_type for device_type, terms in _DEVICE_TERMS.items()
-        if any(term in text for term in terms)
-    }
-    for device in all_devices:
-        location = str(device.get("location", ""))
-        location_text = location.replace("_", " ").lower()
-        if location_text and location_text in text:
-            locations.add(location)
-        device_type = str(device.get("device_type", "")).lower()
-        type_text = device_type.replace("_", " ")
-        distinctive = type_text.rsplit(" ", 1)[-1]
-        if type_text and (type_text in text or distinctive in text):
-            device_types.add(device_type)
-    if not locations and not device_types:
-        return all_devices
-
-    def matches(device: dict[str, Any]) -> bool:
-        title = device["title"].lower()
-        location_match = not locations or device["location"] in locations
-        actual_type = str(device.get("device_type", "")).lower()
-        type_match = not device_types or any(
-            device_type in title
-            or device_type == actual_type
-            or (device_type == "ac" and actual_type == "air_conditioner")
-            for device_type in device_types
-        )
-        return location_match and type_match
-
-    selected = [device for device in all_devices if matches(device)]
-    selected.sort(
-        key=lambda device: max(
-            (len(alias) for alias in device.get("aliases", []) if alias.lower() in text),
-            default=0,
-        ),
-        reverse=True,
-    )
-    return selected[:max_devices] if selected else all_devices
+    del message, max_devices
+    return list(all_devices)
 
 
 @dataclass
@@ -257,20 +166,8 @@ class LangChainTaskPlanner:
             all_devices = await self.capability_provider()
         else:
             all_devices = capability_context("")
-        selection_text = _capability_selection_text(
-            message,
-            state.get("conversation_history", []),
-        )
         loop_context = state.get("context", {}).get("agent_loop")
-        devices = (
-            list(all_devices)
-            if provided and loop_context
-            else select_capability_context(
-                all_devices,
-                selection_text,
-                max_devices=24 if loop_context else 8,
-            )
-        )
+        devices = list(all_devices)
         runtime_context = dict(state.get("context", {}).get("runtime", {}))
         if loop_context:
             runtime_context["agent_loop"] = loop_context
@@ -342,6 +239,7 @@ class LangChainTaskPlanner:
                         user_prompt=user_prompt,
                     ),
                 },
+                raw_data={"messages": messages},
             )
         started = time.perf_counter()
         result = await self.runnable.ainvoke(messages)
@@ -790,6 +688,10 @@ class LangChainTaskPlanner:
                 "raw_plan": planner_result,
                 **extract_usage_with_cost(result),
             },
+            raw_data={
+                "response": result,
+                "structured_plan": raw_plan,
+            },
         )
 
 
@@ -994,156 +896,5 @@ def _capability_violations(
             validate(instance=step.input, schema=action.get("input_schema") or {})
         except JSONSchemaValidationError as exc:
             violations.append(f"step {step.id}: invalid '{step.action}' input: {exc.message}")
-    violations.extend(_power_direction_violations(plan, by_id, message))
+    del message
     return violations
-
-
-def _power_direction_violations(
-    plan: TaskPlan,
-    by_id: dict[str, dict[str, Any]],
-    message: str,
-) -> list[str]:
-    if not _power_direction_guard_enabled():
-        return []
-    normalized_message = message.lower()
-    requested_off = _contains_any(normalized_message, _POWER_OFF_MARKERS)
-    requested_on = _contains_any(normalized_message, _POWER_ON_MARKERS)
-    if not requested_off and not requested_on:
-        return []
-
-    mixed_intent = requested_off and requested_on
-    clauses = _power_direction_clauses(normalized_message) if mixed_intent else []
-    violations: list[str] = []
-    for step in plan.steps:
-        if step.kind != "action" or step.action not in {"turnOn", "turnOff"}:
-            continue
-        if mixed_intent:
-            device = by_id.get(step.device_id, {})
-            relevant_clauses = [
-                clause for clause in clauses if _clause_matches_step(clause, step, device)
-            ]
-            if not relevant_clauses:
-                continue
-            if step.action == "turnOn" and any(clause["intent"] == "off" for clause in relevant_clauses):
-                violations.append("plan reverses the requested power-off intent with turnOn")
-            if step.action == "turnOff" and any(clause["intent"] == "on" for clause in relevant_clauses):
-                violations.append("plan reverses the requested power-on intent with turnOff")
-            continue
-        if requested_off and step.action == "turnOn":
-            violations.append("plan reverses the requested power-off intent with turnOn")
-        if requested_on and step.action == "turnOff":
-            violations.append("plan reverses the requested power-on intent with turnOff")
-    return violations
-
-
-def _power_direction_guard_enabled() -> bool:
-    value = os.getenv("WOTAGENT_ENABLE_POWER_DIRECTION_GUARD", "1").strip().lower()
-    return value not in {"0", "false", "off", "no"}
-
-
-def _power_direction_clauses(message: str) -> list[dict[str, str]]:
-    clauses: list[dict[str, str]] = []
-    for raw_clause in re.split(r"[，,。；;]|(?:然后|并且|并|且|同时)", message):
-        clause = raw_clause.strip()
-        if not clause:
-            continue
-        off = _contains_any(clause, _POWER_OFF_MARKERS)
-        on = _contains_any(clause, _POWER_ON_MARKERS)
-        if off == on:
-            continue
-        clauses.append({
-            "intent": "off" if off else "on",
-            "text": clause,
-        })
-    return clauses
-
-
-def _clause_matches_step(
-    clause: dict[str, str],
-    step: Any,
-    device: dict[str, Any],
-) -> bool:
-    text = clause["text"]
-    specific_terms, location_terms = _device_reference_terms(step.device_id, device)
-    if specific_terms:
-        return any(term and term in text for term in specific_terms)
-    return any(term and term in text for term in location_terms)
-
-
-def _device_reference_terms(device_id: str, device: dict[str, Any]) -> tuple[set[str], set[str]]:
-    specific_terms = {
-        str(device_id).lower(),
-        str(device.get("title", "")).lower(),
-        str(device.get("device_type", "")).lower(),
-    }
-    location_terms = {
-        str(device.get("location", "")).lower(),
-    }
-    location = str(device.get("location", ""))
-    location_terms.update(term.lower() for term in _LOCATION_TERMS.get(location, ()))
-    device_type = str(device.get("device_type", "")).lower()
-    specific_terms.update(term.lower() for term in _DEVICE_TERMS.get(device_type, ()))
-    normalized_specific: set[str] = set()
-    normalized_location: set[str] = set()
-    for term in specific_terms:
-        cleaned = term.strip()
-        if cleaned:
-            normalized_specific.add(cleaned)
-            normalized_specific.add(cleaned.replace("_", " "))
-    for term in location_terms:
-        cleaned = term.strip()
-        if cleaned:
-            normalized_location.add(cleaned)
-            normalized_location.add(cleaned.replace("_", " "))
-    return normalized_specific, normalized_location
-
-
-def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
-    return any(marker in text for marker in markers)
-
-
-_POWER_OFF_MARKERS = ("关掉", "关闭", "关灯", "turn off", "switch off", "shut off")
-_POWER_ON_MARKERS = ("打开", "开启", "开灯", "turn on", "switch on")
-
-
-def _capability_selection_text(
-    message: str,
-    history: list[dict[str, str]],
-) -> str:
-    if _mentions_broad_catalog(message):
-        return message
-    if _mentions_device_scope(message):
-        return message
-    for item in reversed(history):
-        if item.get("role") == "user" and _mentions_device_scope(item.get("content", "")):
-            return f"{message} {item['content']}"
-    return message
-
-
-def _mentions_broad_catalog(message: str) -> bool:
-    text = message.lower()
-    return any(
-        term in text
-        for term in (
-            "房间",
-            "空间",
-            "区域",
-            "所有设备",
-            "全部设备",
-            "多少设备",
-            "几个设备",
-            "有哪些设备",
-            "how many rooms",
-            "all rooms",
-            "all devices",
-        )
-    )
-
-
-def _mentions_device_scope(message: str) -> bool:
-    text = message.lower()
-    return any(
-        term in text
-        for terms in (*_LOCATION_TERMS.values(), *_DEVICE_TERMS.values())
-        for term in terms
-    )

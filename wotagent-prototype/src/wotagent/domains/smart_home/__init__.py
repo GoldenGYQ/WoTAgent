@@ -1,5 +1,5 @@
 """Smart-home domain adapter for the generic operations center."""
 
-from .operations import SmartHomeOperations
+from .operations import SmartHomeDomainPlugin
 
-__all__ = ["SmartHomeOperations"]
+__all__ = ["SmartHomeDomainPlugin"]

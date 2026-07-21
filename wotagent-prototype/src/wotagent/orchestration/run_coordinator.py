@@ -161,10 +161,9 @@ class RunCoordinator:
                     response=decision.clarification,
                 )
             if decision.action == "finish":
-                completion_status = (
-                    _completion_status(findings)
-                    if findings
-                    else "completed"
+                completion_status = _completion_status(
+                    findings,
+                    goal_completed=decision.goal_completed,
                 )
                 return await self._finish_run(
                     run.run_id,
@@ -281,9 +280,13 @@ class RunCoordinator:
                     await _resolve(self.task_preparer(task, message, context))
                 )
             except TaskPreparationError as exc:
-                task.status = "failed"
+                task.status = _failure_task_status(exc.failure)
                 task.failure = exc.failure
-                task.finding = _failure_finding(task, exc.failure)
+                task.finding = _failure_finding(
+                    task,
+                    exc.failure,
+                    finding_status=_failure_finding_status(exc.failure),
+                )
                 prepared.append(task)
         return prepared
 
@@ -644,19 +647,22 @@ class RunCoordinator:
             ]
             if any(
                 item is None
-                or item.status in {"failed", "blocked", "cancelled"}
+                or item.status in {
+                    "failed", "blocked", "cancelled", "partial_success",
+                    "needs_input", "denied", "unavailable",
+                }
                 for item in dependencies
             ):
                 await self.store.update_task(
                     task.task_id,
-                    lambda item: setattr(item, "status", "blocked"),
+                    lambda item: setattr(item, "status", "skipped"),
                 )
                 await self.store.record_event(
                     task.run_id,
-                    "task.blocked",
+                    "task.skipped",
                     task_id=task.task_id,
                     node="task_scheduler",
-                    data={"reason": "dependency failed or missing"},
+                    data={"reason": "dependency did not produce usable evidence"},
                 )
 
     async def _finish_run(
@@ -690,10 +696,29 @@ def _apply_plan(run: RunRecord, plan: Any) -> None:
         run.success_criteria = list(plan.success_criteria)
 
 
-def _completion_status(findings: list[AgentFinding]) -> str:
-    if findings and all(item.status == "completed" for item in findings):
+def _completion_status(
+    findings: list[AgentFinding],
+    *,
+    goal_completed: bool | None = None,
+) -> str:
+    if goal_completed is True:
+        # A chat-only Run may finish without specialist evidence. Once Tasks
+        # exist, at least one completed Finding is required before trusting the
+        # Supervisor's completion declaration.
+        if not findings or any(
+            item.status in {"completed", "skipped"} for item in findings
+        ):
+            return "completed"
+        return "failed"
+    if goal_completed is False:
+        if any(item.status in {"completed", "partial_success"} for item in findings):
+            return "partial_success"
+        return "failed"
+    if findings and all(
+        item.status in {"completed", "skipped"} for item in findings
+    ):
         return "completed"
-    if any(item.status == "completed" for item in findings):
+    if any(item.status in {"completed", "partial_success"} for item in findings):
         return "partial_success"
     return "failed"
 
@@ -797,13 +822,15 @@ def _failure_finding(
     task: AgentTask,
     failure: TaskFailure,
     agent_run_id: str | None = None,
+    *,
+    finding_status: str = "failed",
 ) -> AgentFinding:
     return AgentFinding(
         agent=task.agent_id,
         objective=task.objective,
         task_id=task.task_id,
         agent_run_id=agent_run_id,
-        status="failed",
+        status=finding_status,
         finding=failure.message,
         confidence=1,
         unresolved_questions=[task.objective],
@@ -812,7 +839,7 @@ def _failure_finding(
 
 def _finish_agent_run(record: AgentRunRecord, status: str) -> None:
     record.status = (  # type: ignore[assignment]
-        "completed" if status == "completed" else "failed"
+        "completed" if status in {"completed", "skipped"} else "failed"
     )
     record.finished_at = utc_now()
     record.iteration_count = 1
@@ -821,10 +848,32 @@ def _finish_agent_run(record: AgentRunRecord, status: str) -> None:
 def _task_status(finding: AgentFinding) -> str:
     return {
         "completed": "completed",
-        "needs_more_information": "blocked",
+        "partial_success": "partial_success",
+        "skipped": "skipped",
+        "needs_more_information": "needs_input",
+        "denied": "denied",
+        "unavailable": "unavailable",
         "blocked": "blocked",
         "failed": "failed",
     }[finding.status]
+
+
+def _failure_task_status(failure: TaskFailure) -> str:
+    if failure.category == "authorization":
+        return "denied"
+    if failure.category == "resource_scope":
+        return "unavailable"
+    if failure.category == "entity_resolution" and failure.retryable:
+        return "needs_input"
+    return "failed"
+
+
+def _failure_finding_status(failure: TaskFailure) -> str:
+    return {
+        "denied": "denied",
+        "unavailable": "unavailable",
+        "needs_input": "needs_more_information",
+    }.get(_failure_task_status(failure), "failed")
 
 
 def _complete_task(

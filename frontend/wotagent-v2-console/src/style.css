@@ -351,6 +351,27 @@ button:focus-visible, textarea:focus-visible {
   color: var(--text-muted);
   font-size: 9px;
 }
+.trace-toolbar-quiet {
+  color: var(--text-muted);
+  font-size: 9px;
+}
+.trace-technical-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid #dbe4e8;
+  border-radius: 4px;
+  color: #536773;
+  background: #f8fafb;
+  font-size: 9px;
+}
+.trace-technical-toggle[aria-pressed="true"] {
+  color: var(--teal);
+  border-color: #b9d8d3;
+  background: #edf8f6;
+}
 .trace-detail-switch {
   display: inline-flex;
   align-items: center;

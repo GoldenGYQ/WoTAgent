@@ -65,6 +65,10 @@ export function eventTitle(event: TraceEvent): string {
     'task.started': '专业 Agent 开始',
     'task.completed': '专项 Task 完成',
     'task.blocked': '专项 Task 受阻',
+    'task.skipped': '专项 Task 已跳过',
+    'task.needs_input': '专项 Task 待补充信息',
+    'task.denied': '专项 Task 权限拒绝',
+    'task.unavailable': '专项 Task 资源不可用',
     'scheduler.parallel_batch.completed': '调度批次完成',
   }
   return runLabels[event.type] ?? labels[event.type] ?? event.type

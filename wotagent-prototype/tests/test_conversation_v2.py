@@ -166,6 +166,60 @@ def test_needs_more_information_turn_is_retained_for_follow_up_context(tmp_path)
     assert runtime["pending_goal"]["user_message"] == "把张爷爷房间温度调到 24 度"
 
 
+def test_conversation_state_projects_targets_and_verified_facts_from_run_tasks(
+    tmp_path,
+) -> None:
+    store = ConversationStore(tmp_path / "structured-state.db")
+    conversation_id = store.create()["conversation_id"]
+    store.start_turn(
+        conversation_id=conversation_id,
+        run_id="run-structured",
+        user_message="打开张爷爷房间的灯",
+    )
+    store.finish_turn(
+        "run-structured",
+        response="灯已经打开。",
+        status="completed",
+        result={
+            "root_goal": "打开张爷爷房间的灯",
+            "final_response": "灯已经打开。",
+            "tasks": [{
+                "task_id": "task-light",
+                "target": {
+                    "type": "resident",
+                    "id": "elderly-001",
+                    "display_name": "张爷爷",
+                },
+                "requested_capability": "environment.control",
+                "finding": {
+                    "tool_calls": [{
+                        "tool_name": "light_101__action__turnOn",
+                        "arguments": {"device_id": "light-101"},
+                        "verified": True,
+                        "observed_state": {"on": True},
+                    }],
+                },
+            }],
+        },
+    )
+
+    runtime = store.runtime_context(
+        conversation_id,
+        current_role="operator",
+    )
+    state = runtime["conversation_state"]
+
+    assert state["active_goal"] is None
+    assert state["entities"][-1]["id"] == "elderly-001"
+    assert state["verified_facts"][-1] == {
+        "resource_id": "light-101",
+        "value": {"on": True},
+        "source_run_id": "run-structured",
+        "source_task_id": "task-light",
+    }
+    assert state["last_outcome"]["status"] == "completed"
+
+
 def test_v2_reuses_conversation_context_but_isolates_runs(monkeypatch, tmp_path) -> None:
     conversation_store = ConversationStore(tmp_path / "api-conversations.db")
     run_store = InMemoryRunStore()

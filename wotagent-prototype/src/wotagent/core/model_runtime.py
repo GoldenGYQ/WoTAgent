@@ -1,4 +1,4 @@
-"""LLM model assembly for the WoTAgent 2.0 LangGraph runtime."""
+"""LLM provider and runnable assembly for WoTAgent agents."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from langchain_core.runnables import Runnable
 from langchain_openai import ChatOpenAI
 
 from ..domain import TaskPlan
+
 
 PLAN_SCHEMA: dict[str, Any] = {
     "type": "function",
@@ -28,7 +29,6 @@ def _build_llm(
     enable_thinking: bool = True,
     enable_streaming: bool = False,
 ) -> ChatOpenAI:
-    """Build an OpenAI-compatible chat model."""
     max_output_tokens = max(
         256,
         min(int(os.getenv("WOTAGENT_MAX_OUTPUT_TOKENS", "2048")), 8192),
@@ -52,8 +52,8 @@ def _build_llm(
 
 
 @dataclass
-class AgentPipeline:
-    """Models used by the typed Planner and Response Agent nodes."""
+class LLMRuntime:
+    """Named model runnables; this object does not orchestrate Agents."""
 
     planner: Runnable
     response_model: Runnable
@@ -61,20 +61,14 @@ class AgentPipeline:
     thinking_response_model: Runnable | None = None
 
 
-def create_wot_pipeline(
+def create_llm_runtime(
     *,
     model_name: str | None = None,
     temperature: float = 0.7,
     reasoning_effort: str = "high",
     enable_thinking: bool = True,
     enable_streaming: bool = False,
-) -> AgentPipeline:
-    """Create only the models consumed by the WoTAgent 2.0 graph.
-
-    Device execution is deliberately absent here. The graph delegates plans to
-    the deterministic orchestrator and MCP gateway instead of a second ReAct
-    agent.
-    """
+) -> LLMRuntime:
     direct_planner_model = _build_llm(
         model_name=model_name,
         temperature=0,
@@ -90,12 +84,9 @@ def create_wot_pipeline(
         enable_thinking=False,
         enable_streaming=enable_streaming,
     )
-
     thinking_planner = None
     thinking_response_model = None
     if enable_thinking:
-        # Providers such as DeepSeek reject forced tool_choice in thinking mode.
-        # The thinking model analyzes; the direct planner still emits the schema.
         thinking_planner = _build_llm(
             model_name=model_name,
             temperature=0,
@@ -109,10 +100,12 @@ def create_wot_pipeline(
             enable_thinking=True,
             enable_streaming=enable_streaming,
         )
-
-    return AgentPipeline(
+    return LLMRuntime(
         planner=planner,
         response_model=response_model,
         thinking_planner=thinking_planner,
         thinking_response_model=thinking_response_model,
     )
+
+
+__all__ = ["LLMRuntime", "PLAN_SCHEMA", "_build_llm", "create_llm_runtime"]

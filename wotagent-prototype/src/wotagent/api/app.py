@@ -11,9 +11,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from langgraph.checkpoint.memory import InMemorySaver
 
 from ..application import DomainEventConsumer, RunService
-from ..domain import DeploymentProfileRegistry, DomainOperationsRegistry
-from ..domains.eldercare import EldercareOperations
-from ..domains.smart_home import SmartHomeOperations
+from ..domain import DeploymentProfileRegistry, DomainPluginRegistry
+from ..domains.eldercare import EldercareDomainPlugin
+from ..domains.smart_home import SmartHomeDomainPlugin
 from ..identity import DEMO_PRINCIPALS, PrincipalStore
 from ..orchestration import SQLiteRunStore
 from ..paths import data_path, project_root
@@ -65,7 +65,7 @@ _run_service = RunService(
         context,
         _domain_graphs,
     ),
-    thinking_supported=lambda: _runtime.pipeline.thinking_planner is not None,
+    thinking_supported=lambda: _runtime.models.thinking_planner is not None,
     deployment_profiles=_deployment_profiles,
     principal_directory=_principal_store,
 )
@@ -74,14 +74,14 @@ _domain_event_consumer = DomainEventConsumer(
     _run_service,
 )
 _speech_transcriber = SpeechTranscriber()
-_domain_registry = DomainOperationsRegistry([
-    EldercareOperations(
+_domain_registry = DomainPluginRegistry([
+    EldercareDomainPlugin(
         get_store=lambda: _runtime.eldercare_store,
         get_runtime=lambda: _runtime.eldercare_runtime,
         get_gateway=lambda: _runtime.gateway,
         principals=_principal_store,
     ),
-    SmartHomeOperations(
+    SmartHomeDomainPlugin(
         get_gateway=lambda: _runtime.gateway,
         get_profile=lambda: _deployment_profiles.require("villa"),
         principals=_principal_store,
@@ -134,7 +134,7 @@ app.add_middleware(
 )
 
 app.include_router(create_system_router(
-    get_pipeline=lambda: _runtime.pipeline,
+    get_pipeline=lambda: _runtime.models,
     get_settings=lambda: _runtime.settings,
     bool_env=lambda key, default: _bool_env(key, default=default),
 ))
