@@ -191,6 +191,14 @@ class SupervisorDecision(BaseModel):
             raise ValueError("final_response is required when action=finish")
         elif self.action == "finish" and self.goal_completed is None:
             raise ValueError("goal_completed is required when action=finish")
+        elif (
+            self.action == "finish"
+            and self.goal_completed is True
+            and self.unsatisfied_criteria
+        ):
+            # Preserve a usable model response while preventing a logically
+            # inconsistent completion declaration from reaching orchestration.
+            self.goal_completed = False
         elif self.action == "clarify" and not self.clarification:
             raise ValueError("clarification is required when action=clarify")
         return self

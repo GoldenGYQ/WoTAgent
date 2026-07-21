@@ -666,3 +666,103 @@ def test_goal_completion_uses_latest_verified_success_not_all_task_statuses() ->
         [failed],
         goal_completed=True,
     ) == "failed"
+
+
+def test_needs_more_information_is_not_reported_as_run_failure() -> None:
+    pending = AgentFinding(
+        agent="health_agent",
+        objective="read current vitals",
+        status="needs_more_information",
+        finding="critical readings are stale",
+        confidence=0.45,
+        continuation="external_input_required",
+        outcome_code="STALE_HEALTH_DATA",
+    )
+
+    assert _completion_status(
+        [pending],
+        goal_completed=True,
+    ) == "needs_more_information"
+    assert _completion_status(
+        [pending],
+        goal_completed=False,
+    ) == "needs_more_information"
+
+
+def test_finish_decision_cannot_complete_with_unsatisfied_criteria() -> None:
+    decision = SupervisorDecision(
+        action="finish",
+        goal="check current health",
+        goal_completed=True,
+        final_response="Latest records are available but real-time status is unknown.",
+        satisfied_criteria=["latest stored records were read"],
+        unsatisfied_criteria=["real-time vitals are unavailable"],
+        reason="critical sensor readings are stale",
+    )
+
+    assert decision.goal_completed is False
+
+
+def test_external_input_finding_stops_equivalent_task_redispatch() -> None:
+    async def scenario():
+        calls = 0
+
+        async def execute(_task):
+            nonlocal calls
+            calls += 1
+            return AgentFindingPayload(
+                status="needs_more_information",
+                finding="Critical health readings are stale.",
+                confidence=0.45,
+                recommended_actions=["Collect new vitals or review in person"],
+                unresolved_questions=["current health status"],
+                continuation="external_input_required",
+                outcome_code="STALE_HEALTH_DATA",
+            )
+
+        first = _task("health", "health_agent", "resident:001")
+        first["requested_capability"] = "read health status"
+        second = _task("refresh", "health_agent", "resident:001")
+        second["requested_capability"] = "read health status"
+        decisions = iter([
+            _decision([first], strategy="sequential"),
+            _decision([second], strategy="sequential"),
+        ])
+        ids = iter(["task-health", "task-refresh"])
+        store = InMemoryRunStore()
+        coordinator = RunCoordinator(
+            store,
+            TaskScheduler(
+                available_agents={"health_agent"},
+                task_id_factory=lambda: next(ids),
+            ),
+            lambda _state: next(decisions),
+            {"health_agent": execute},
+            max_supervisor_iterations=3,
+            run_id_factory=lambda: "run-external-input",
+        )
+        run = await coordinator.execute(
+            conversation_id="conv-1",
+            turn_id="turn-1",
+            message="check current health",
+        )
+        return (
+            run,
+            calls,
+            await store.tasks_for_run(run.run_id),
+            await store.events(run.run_id),
+        )
+
+    run, calls, tasks, events = asyncio.run(scenario())
+
+    assert run.status == "needs_more_information"
+    assert calls == 1
+    assert len(tasks) == 1
+    assert "Critical health readings are stale" in run.final_response
+    assert "Collect new vitals" in run.final_response
+    rejected = next(
+        event for event in events
+        if event.type == "supervisor.task.rejected"
+    )
+    assert rejected.data["reason_code"] == "EXTERNAL_INPUT_REQUIRED"
+    assert rejected.data["previous_task_id"] == "task-health"

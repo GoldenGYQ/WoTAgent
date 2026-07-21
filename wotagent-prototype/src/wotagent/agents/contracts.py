@@ -17,6 +17,11 @@ AgentStatus = Literal[
     "blocked",
     "failed",
 ]
+FindingContinuation = Literal[
+    "none",
+    "retry_allowed",
+    "external_input_required",
+]
 
 
 class AgentSpec(BaseModel):
@@ -77,6 +82,8 @@ class AgentFindingPayload(BaseModel):
     recommended_actions: list[str] = Field(default_factory=list)
     unresolved_questions: list[str] = Field(default_factory=list)
     tool_calls: list[ToolExecutionResult] = Field(default_factory=list)
+    continuation: FindingContinuation = "none"
+    outcome_code: str | None = None
 
 
 class AgentFinding(AgentFindingPayload):
@@ -93,6 +100,7 @@ __all__ = [
     "AgentFindingPayload",
     "AgentSpec",
     "AgentStatus",
+    "FindingContinuation",
     "Delegation",
     "DelegationRequest",
     "Evidence",

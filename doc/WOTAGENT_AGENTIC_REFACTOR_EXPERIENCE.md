@@ -2369,7 +2369,7 @@ TraceArtifact persistence/retrieval, hybrid Planner behavior and focused Trace
 rendering. The complete verification result for this stage is:
 
 ```text
-Backend: 253 passed, 3 skipped
+Backend: 256 passed, 3 skipped
 Frontend: 44 passed
 Frontend typecheck and production build: passed
 Simulator: 64 passed (one existing deprecation warning)
@@ -2396,3 +2396,26 @@ Conversation and resolved `它现在亮度是多少` to the same resident room l
 returning 45% with one scoped read. Planner and Responder raw artifacts were
 also retrieved through the artifact API without placing their payloads in the
 compact event stream.
+
+### 30.10 Insufficient evidence is not an infrastructure failure
+
+`run_19b5e20b279a` returned a useful best-effort health summary but was marked
+failed. Both Health Tasks had successfully read data and returned
+`needs_more_information` because critical wristband readings were stale. The
+Supervisor then inconsistently emitted `goal_completed=true` together with a
+non-empty `unsatisfied_criteria`, and a second "collect latest vitals" Task
+re-read the same resources even though no refresh capability existed.
+
+The contracts now distinguish whether a Finding can continue:
+
+```text
+none | retry_allowed | external_input_required
+```
+
+The deterministic health freshness guard attests stale critical readings as
+`external_input_required` with outcome code `STALE_HEALTH_DATA`. A proposed
+Task with the same Agent, target and capability is rejected until new external
+input exists. The Run ends as `needs_more_information`, preserving the useful
+evidence and recommended human action without presenting it as either success
+or system failure. Finish decisions with non-empty `unsatisfied_criteria` are
+also normalized to `goal_completed=false` before orchestration.

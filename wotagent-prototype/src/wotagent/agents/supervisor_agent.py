@@ -81,7 +81,11 @@ def build_run_supervisor_agent(
             "from the newest verified evidence. A historical failed Task that "
             "was recovered or superseded does not make the Run fail. Never "
             "claim an action goal is complete without execution evidence and "
-            "post-action verification.\n\n"
+            "post-action verification. If any unsatisfied_criteria remain, "
+            "goal_completed must be false. A Finding with continuation="
+            "external_input_required cannot be resolved by creating another "
+            "Task with the same agent, target, and capability; finish with the "
+            "available evidence and clearly state what external input is needed.\n\n"
             f"{SUPERVISOR_TASK_DECOMPOSITION_RULES}"
             f"当前可用专业 Agent：\n{agent_catalog}"
         ),

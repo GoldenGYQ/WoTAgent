@@ -191,6 +191,30 @@ class RunCoordinator:
                 message=message,
                 context=context,
             )
+            external_blocker = await self._external_input_blocker(
+                run.run_id,
+                tasks,
+            )
+            if external_blocker is not None:
+                previous_task, proposed_task = external_blocker
+                await self.store.record_event(
+                    run.run_id,
+                    "supervisor.task.rejected",
+                    node="run_coordinator",
+                    iteration=supervisor_iteration,
+                    data={
+                        "reason_code": "EXTERNAL_INPUT_REQUIRED",
+                        "previous_task_id": previous_task.task_id,
+                        "proposed_task": proposed_task.objective,
+                        "task_subject": _task_subject(proposed_task),
+                        "outcome_code": previous_task.finding.outcome_code,
+                    },
+                )
+                return await self._finish_run(
+                    run.run_id,
+                    status="needs_more_information",
+                    response=_external_input_response(previous_task.finding),
+                )
             tasks, repeated_failure = await self._reject_repeated_failures(
                 run.run_id,
                 tasks,
@@ -326,6 +350,24 @@ class RunCoordinator:
             task.failure = failure
             task.finding = _failure_finding(task, failure)
         return tasks, repeated
+
+    async def _external_input_blocker(
+        self,
+        run_id: str,
+        tasks: list[AgentTask],
+    ) -> tuple[AgentTask, AgentTask] | None:
+        previous = await self.store.tasks_for_run(run_id)
+        for proposed in tasks:
+            for completed in reversed(previous):
+                finding = completed.finding
+                if (
+                    finding is not None
+                    and finding.status == "needs_more_information"
+                    and finding.continuation == "external_input_required"
+                    and _task_subject(completed) == _task_subject(proposed)
+                ):
+                    return completed, proposed
+        return None
 
     async def confirm(
         self,
@@ -701,6 +743,9 @@ def _completion_status(
     *,
     goal_completed: bool | None = None,
 ) -> str:
+    statuses = {item.status for item in findings}
+    has_success = bool(statuses.intersection({"completed", "partial_success"}))
+    needs_external_input = "needs_more_information" in statuses
     if goal_completed is True:
         # A chat-only Run may finish without specialist evidence. Once Tasks
         # exist, at least one completed Finding is required before trusting the
@@ -709,18 +754,32 @@ def _completion_status(
             item.status in {"completed", "skipped"} for item in findings
         ):
             return "completed"
+        if needs_external_input:
+            return "needs_more_information"
         return "failed"
     if goal_completed is False:
-        if any(item.status in {"completed", "partial_success"} for item in findings):
+        if has_success:
             return "partial_success"
+        if needs_external_input:
+            return "needs_more_information"
         return "failed"
     if findings and all(
         item.status in {"completed", "skipped"} for item in findings
     ):
         return "completed"
-    if any(item.status in {"completed", "partial_success"} for item in findings):
+    if has_success:
         return "partial_success"
+    if needs_external_input:
+        return "needs_more_information"
     return "failed"
+
+
+def _external_input_response(finding: AgentFinding) -> str:
+    response = finding.finding.strip()
+    actions = [item.strip() for item in finding.recommended_actions if item.strip()]
+    if actions:
+        response = f"{response}\n\n建议：{'；'.join(actions)}"
+    return response
 
 
 def _attest_finding(

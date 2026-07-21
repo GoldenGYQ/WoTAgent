@@ -715,6 +715,8 @@ def test_health_executor_downgrades_completed_answer_when_critical_data_is_stale
     assert result.status == "needs_more_information"
     assert "关键健康数据已过期" in result.finding
     assert result.confidence <= 0.45
+    assert result.continuation == "external_input_required"
+    assert result.outcome_code == "STALE_HEALTH_DATA"
 
 
 def test_run_coordinator_filters_first_round_conditional_care_and_finishes_next_round() -> None:

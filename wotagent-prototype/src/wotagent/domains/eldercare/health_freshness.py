@@ -103,6 +103,8 @@ def apply_completed_health_freshness_guard(
         "finding": finding,
         "recommended_actions": recommended,
         "unresolved_questions": unresolved,
+        "continuation": "external_input_required",
+        "outcome_code": "STALE_HEALTH_DATA",
     })
 
 
