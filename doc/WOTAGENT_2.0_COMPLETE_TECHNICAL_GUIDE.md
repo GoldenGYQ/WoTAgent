@@ -1,6 +1,15 @@
 # WoTAgent 2.0 完整技术文档
 
-> 本文只描述当前 2.0 分支已经存在并经过测试的能力。1.0 已由 Git tag `v1.0.0` 和 Git 历史保留，不再与 2.0 运行时混装。
+> **历史架构快照，不是当前运行手册。**
+>
+> 本文记录单 Task、Planner-Orchestrator 技术阶段，其中
+> `/api/v2/tasks`、顶层 `task_id`、单一 TaskTrace 和当时的 Agent 分工已被
+> Run/Task DAG 架构取代。当前事实请优先阅读
+> [`README.md`](README.md)、[`TECHNICAL_GUIDE.md`](TECHNICAL_GUIDE.md)、
+> [`API_GUIDE.md`](API_GUIDE.md) 和根目录
+> [`handoff.md`](../handoff.md)。正文保留原貌用于解释技术演进。
+>
+> 历史状态标记：2026-07-23
 
 ## 1. 项目定位
 

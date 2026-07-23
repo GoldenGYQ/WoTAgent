@@ -536,12 +536,13 @@ create_care_task
 建议按以下顺序，不要从 9 万字的经验文档硬啃：
 
 1. **本文件**：建立面试主线和说法边界；
-2. [当前真实技术地图](TECHNICAL_GUIDE.md)：核对当前真实源码入口；
-3. [Run / Task DAG 设计](WOTAGENT_RUN_TASK_DAG_DESIGN.md)：理解 Run、Task、AgentRun、Loop 和并行；
-4. [TD / MCP 契约](WOTAGENT_2.0_TD_MCP_CONTRACT.md)：准备 TD 到 MCP 的底层追问；
-5. [上下文与评测报告](WOTAGENT_2.0_CONTEXT_AND_EVALUATION_REPORT.md)：准备上下文和评测问题；
-6. [智能体化重构经验](WOTAGENT_AGENTIC_REFACTOR_EXPERIENCE.md)：挑选两三个真实问题作为复盘案例；
-7. [项目交接文档](../handoff.md)：只作为当前实现状态索引，不适合直接背诵。
+2. [文档索引](README.md)：先确认哪些是现状、计划和历史；
+3. [当前真实技术地图](TECHNICAL_GUIDE.md)：核对当前真实源码入口；
+4. [Run / Task DAG 设计](WOTAGENT_RUN_TASK_DAG_DESIGN.md)：理解 Run、Task、AgentRun、Loop 和并行；
+5. [TD / MCP 契约](WOTAGENT_2.0_TD_MCP_CONTRACT.md)：准备 TD 到 MCP 的底层追问；
+6. [上下文与评测报告](WOTAGENT_2.0_CONTEXT_AND_EVALUATION_REPORT.md)：准备上下文和评测问题；
+7. [智能体化重构经验](WOTAGENT_AGENTIC_REFACTOR_EXPERIENCE.md)：挑选两三个真实问题作为复盘案例；
+8. [项目交接文档](../handoff.md)：只作为当前实现状态索引，不适合直接背诵。
 
 旧的 `WOTAGENT_2.0_COMPLETE_TECHNICAL_GUIDE.md` 可以查历史设计，但当前架构事实以 `TECHNICAL_GUIDE.md` 和代码为准。
 

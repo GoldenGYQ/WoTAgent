@@ -1,5 +1,12 @@
 # WoTAgent 2.0 测试与评价计划
 
+状态：持续维护的评价方法；第 9 节保留历史阶段快照
+
+最后核对：2026-07-23
+
+> 最新运行模型是 Run/Task DAG，不再使用 `/api/v2/tasks`。第 9 节中的
+> `4/4`、`88/88` 等数字是当时阶段证据，不是当前回归总数。
+
 ## 1. 评价原则
 
 每完成一个功能单元，不只报告测试数量，还要回答：功能是否正确、安全边界是否成立、失败是否可解释、轨迹是否可观测、成本是否可接受。
@@ -84,7 +91,7 @@ LLM 指标必须固定数据集、模型、temperature、Prompt 版本并至少�
 结论：通过 / 有条件通过 / 不通过
 ```
 
-## 9. 当前阶段评价
+## 9. 历史阶段评价
 
 功能单元：确定性 Orchestrator
 
@@ -170,3 +177,67 @@ LLM 指标必须固定数据集、模型、temperature、Prompt 版本并至少�
 - 复验：相关单元测试 20/20，真实 live E2E 1/1 通过。
 
 上下文工程与外部基准阶段结果见 `doc/WOTAGENT_2.0_CONTEXT_AND_EVALUATION_REPORT.md`。核心结果：HomeBench-adapted Planner 严格 100 条 Exact Match 99%，相关设备召回相较全量上下文减少约 65.7% Token；真实 5 条完整链路 Goal-State Success 100%，平均 Response TTFT 795ms。
+
+## 10. 2026-07-23 当前基线
+
+最新完整回归：
+
+```text
+Backend: 262 passed, 3 skipped
+Device Simulator: 64 passed
+Frontend: 45 passed
+Frontend typecheck/build: passed
+```
+
+当前回归覆盖：
+
+- Run、Task、AgentRun、DAG 依赖、资源冲突和有限并行；
+- 同一 Agent 执行多个独立只读 Task，以及同资源写冲突串行；
+- Supervisor 结构化决策、二次决策和重复失败终止；
+- Principal、Role Template、Relationship、Capability、Effective Scope；
+- Resident 实体解析和 Health MCP 居民范围二次检查；
+- Health/Care bounded `create_agent` 与设备 LangGraph；
+- TD 参数约束、Policy、确认 interrupt/resume、执行后状态验证；
+- Monitor 事件创建 Run、事件幂等和风险处置状态机；
+- 健康/环境指标、风险分级、历史趋势、事件记录和处置状态查询；
+- RunEvent 持久化回放、TraceArtifact 按需读取和前端分层时间线；
+- 场景/Profile 切换、跨场景设备阻断、Principal 注册和语音转写接口。
+
+当前不可由测试数量替代的验证：
+
+1. 真实模型中文请求和结构化输出稳定性；
+2. 真实模型是否选择最短、必要的 Task 路径；
+3. 多 Agent 条件委派是否等待上一轮证据；
+4. 历史上下文是否只保留目标、实体、验证事实和结果，而不重复注入大段 Trace；
+5. 模型 Token、总响应耗时和真实模型失败成本；
+6. Simulator/ESP32 的实际设备末态，而不是仅检查工具 HTTP 成功。
+
+## 11. 当前发布前最小验收集
+
+每次候选版本至少执行：
+
+| 场景 | 核心判定 |
+|---|---|
+| 简单设备查询 | 一个必要专业 Task；不创建无关 Agent |
+| 打开并设置灯光 | Policy 允许、动作后状态 verified |
+| 相同 Agent 两个只读目标 | 允许生成两个独立 AgentRun 并安全并行 |
+| 同设备两个写目标 | Scheduler 串行，不并发写 |
+| 查看张爷爷健康状态 | 姓名解析为 `elderly-001`，只访问授权 Resource |
+| JH-2 读取张爷爷数据 | 后端和 MCP scope 均拒绝 |
+| 血氧/血压/环境异常 | Monitor 确定性分级、落库、创建 Run、人工处置可追踪 |
+| 健康正常则不通知 | 先调查后条件委派，不预创建必然执行的 Care Task |
+| 模型结构错误或不可恢复失败 | 有界终止，不重复创建等价 Task |
+| 页面刷新 | RunEvent、指标和分层 Trace 可重放 |
+
+真实模型测试应固定模型、temperature、Prompt 版本、最大 Supervisor 轮次和最大
+专业 Agent 工具调用数，并记录成功与失败的 Token。先运行零 Token 的 schema、
+scope、TD 和 Simulator 预检查，再执行小预算 live smoke。
+
+## 12. 当前已知测试缺口
+
+- 养老配置中的 `purifier-102` 暂无 TD；场景设备完整性测试应补充“Profile 中的
+  每个设备必须存在 TD”。
+- 多实例部署、跨进程事件通知和普通 running Task 的崩溃恢复未覆盖。
+- `rule/hybrid/agentic` 尚不是三个等价的端到端 Run 策略，不能做完整 A/B。
+- SimuHome 仍未完成 qt1/qt2/qt4 和 600 集动态执行。
+- 真实模型测试仍是 opt-in，小样本结果不能替代统计性评测。

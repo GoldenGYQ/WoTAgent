@@ -1,5 +1,9 @@
 # WoTAgent Deployment Profiles
 
+Status: current scene and authorization contract
+
+Last verified: 2026-07-23
+
 ## Purpose
 
 WoTAgent separates three independent boundaries:
@@ -36,11 +40,15 @@ profiles are:
 
 | Profile | Domain | Site | Spaces | Devices |
 |---|---|---|---:|---:|
-| `eldercare` | `eldercare` | `nursing-home-demo` | 2 | 8 |
+| `eldercare` | `eldercare` | `nursing-home-demo` | 2 | 16 configured / 15 TD-backed |
 | `villa` | `smart_home` | `villa-demo` | 12 | 23 |
 
 Device membership is exclusive. The catalog validator rejects a device
 assigned to multiple profiles.
+
+Current known catalog gap: `purifier-102` is present in the eldercare Profile
+but has no TD file. It must not be presented as an executable device capability
+until its TD is added. All 23 villa device IDs currently have TD files.
 
 Every selectable Profile must register one `DomainOperations` adapter with the
 same `domain_id`. The current projections are:
@@ -126,8 +134,10 @@ AND Health MCP scope validation
 ```
 
 `JH-1` is assigned to `elderly-001`; `JH-2` is assigned to `elderly-002`.
-These are still demo identities supplied by the client, so this is an
-experiment-grade authorization model rather than production authentication.
+Seeded demo identities use one-click sessions; user-created identities are
+persisted with PIN login and bearer sessions. The backend resolves the
+Principal context and issues the effective scope. This is still an
+experiment-grade identity system rather than production authentication.
 
 For the villa Profile, the first relationship scope is site-level:
 

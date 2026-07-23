@@ -1,42 +1,52 @@
-# WoTAgent 2.0
+# WoTAgent
 
-WoTAgent 2.0 是一个面向实验验证的 LLM + WoT 智能家居控制系统。LLM 负责理解自然语言并生成结构化 `TaskPlan`；RBAC、确认、步骤执行、状态验证与有限恢复由确定性代码负责；设备能力由 WoT Thing Description（TD）描述，并动态编译为 MCP Tool。
+当前发布基线：`v2.8.0`；当前实现目标：`v3.0.0`。
+
+WoTAgent 是一个面向实验验证的 LLM + WoT 多领域物联网智能体平台。LLM
+负责理解目标、生成结构化 Task、选择专业 Agent，并根据新证据二次决策；
+Principal 授权、DAG 调度、确认、TD 校验、MCP 执行、状态验证与有限恢复由
+确定性代码负责。
 
 ## 核心链路
 
 ```text
-Vue 2.0 Console
-  -> FastAPI /api/v2
-  -> Structured LLM Butler Supervisor
-  -> Professional Agent / bounded re-route
-  -> LangGraph Agent Loop
-  -> Planner -> Policy -> Orchestrator -> Verifier/Recovery -> Response Agent
-  -> MCPDeviceGateway -> TD-generated MCP tools
+Vue 3 Console
+  -> FastAPI Run API
+  -> RunService
+  -> Python RunCoordinator
+  -> Butler create_agent SupervisorDecision
+  -> deterministic TaskScheduler
+  -> Health/Care create_agent | Device specialist LangGraph
+  -> Principal scope -> AgentSpec/MCP scope -> TD/Policy
+  -> MCP execution -> post-action verification
   -> wot-device-simulator / SimuHome gateway / ESP32 adapter
 ```
 
 关键原则：
 
 - LLM 是语义决策核心，但不直接驱动硬件。
-- 普通聊天和 Monitor 事件都由 Butler 负责目标解析与专业 Agent 委派。
-- 专业 Agent 返回结构化 `clarify` 时可退回 Butler，最多有限次数重新路由。
-- Health Agent 对普通健康查询也使用受限 Observe-Reason-Act 调查循环。
-- Planner 输出受 Pydantic Schema 约束的计划。
+- 普通聊天和 Monitor 事件都进入 Run，并由 Butler 负责目标解析与专业 Agent
+  委派。
+- 一个 Run 可包含多个有依赖关系的 Task；同一 Agent 可执行多个独立 AgentRun。
+- Health/Care 使用受限 ReAct，设备专业 Agent 使用 LangGraph 子图。
+- Supervisor、Finding 和设备 Planner 输出均受 Pydantic Schema 约束。
 - Executor 是确定性编排器，只执行计划中且 TD 已声明的动作。
 - PolicyEngine 在模型之外执行 RBAC 和高风险确认。
-- 每次任务生成可重放 Trace，记录节点、工具输入输出、循环次数、TTFT、Token 与估算费用。
+- 每个 Run 生成可重放事件和按需 TraceArtifact，记录节点、工具输入输出、循环、
+  Token、总耗时与可配置费用；非流式 `ainvoke` 没有真实 TTFT 时标记为不可用。
 - SQLite 分别保存会话、Run/Task 运行记录和 LangGraph checkpoint，支持上下文延续与服务重启后的确认恢复。
 
 ## 仓库结构
 
 ```text
 WoTAgent/
-├── wotagent-prototype/              # 2.0 Agent 后端与评测
-│   ├── src/wotagent/agent_graph/    # LangGraph 节点与循环
-│   ├── src/wotagent/orchestration/  # 确定性执行、验证、恢复
+├── wotagent-prototype/              # Agent 后端与评测
+│   ├── src/wotagent/agents/         # AgentSpec、Supervisor、Health/Care
+│   ├── src/wotagent/agent_graph/    # 设备专业 Agent LangGraph
+│   ├── src/wotagent/orchestration/  # Run/Task 模型、Coordinator、Scheduler
+│   ├── src/wotagent/domains/        # eldercare / smart_home 领域适配
 │   ├── src/wotagent/policy/         # RBAC 与确认策略
 │   ├── src/wotagent/gateway/        # MCP 与 SimuHome 网关
-│   ├── src/wotagent/telemetry/      # Trace、Token、费用、TTFT
 │   └── src/wotagent/evaluation/     # HomeBench/SimuHome 对齐评测
 ├── frontend/wotagent-v2-console/    # 独立 Vue 3 运行监控台
 └── wot-device-simulator/            # TD、MCP、REST 与设备状态仿真
@@ -102,7 +112,7 @@ cd D:\Users\gyq16\Desktop\PRJ\WoTAgent\wotagent-prototype
 
 API 文档：`http://127.0.0.1:8000/docs`。
 
-### 3. 2.0 前端
+### 3. Vue 前端
 
 ```powershell
 cd D:\Users\gyq16\Desktop\PRJ\WoTAgent\frontend\wotagent-v2-console
@@ -128,6 +138,7 @@ cd ..\..\wot-device-simulator
 
 推荐阅读：
 
+- [文档索引与版本状态](doc/README.md)
 - [面试表达与多主体抽象](doc/WOTAGENT_INTERVIEW_AND_AGENT_ABSTRACTION_GUIDE.md)
 - [当前真实技术地图](doc/TECHNICAL_GUIDE.md)
 - [Run / Task DAG 设计](doc/WOTAGENT_RUN_TASK_DAG_DESIGN.md)

@@ -1,8 +1,16 @@
 # WoTAgent 运行、任务与并行智能体设计方案
 
+状态：核心模型已落地，后续能力仍在演进
+
+最后核对：2026-07-23
+
+> 本文最初以“目标方案”编写。当前
+> `Conversation -> Turn -> Run -> Task DAG -> AgentRun -> Loop -> ToolCall`
+> 已成为真实运行模型；第 2 节描述的是重构前问题，不是当前缺陷。
+
 ## 1. 文档目标
 
-本文定义 WoTAgent 下一阶段的运行编排模型，解决当前“一轮用户消息等于一个
+本文定义 WoTAgent 的运行编排模型，解决旧版本“一轮用户消息等于一个
 Task”的概念混乱，并为 Supervisor 动态拆解任务、多专业 Agent 协作、串并行调度、
 独立重试、人工确认和分层 Trace 提供统一依据。
 
@@ -12,7 +20,7 @@ Task”的概念混乱，并为 Supervisor 动态拆解任务、多专业 Agent 
 > Task 由一个专业 Agent 执行有限 Observe-Reason-Act 循环；Loop 和 Tool Call
 > 是 Task 内部过程，不应被提升为顶层 Task。
 
-## 2. 当前问题
+## 2. 重构前问题（历史）
 
 当前后端把同一个 `task_id` 同时用于：
 
@@ -411,7 +419,7 @@ Scheduler 可以使用 `asyncio.gather` 执行同一就绪批次，但不能把�
 
 ## 12. 当前实现状态
 
-已完成：
+截至 2026-07-23，已完成：
 
 1. Run、Task、AgentRun、ResourceClaim 和结构化 SupervisorDecision。
 2. Conversation Turn 从 `task_id` 迁移为 `run_id`。
@@ -424,13 +432,19 @@ Scheduler 可以使用 `asyncio.gather` 执行同一就绪批次，但不能把�
 9. 删除旧 StructuredSupervisorRouter、TaskRunner、Task API 和侧栏 Trace。
 10. SQLite RunStore 持久化 Run、Task、AgentRun、事件和待确认负载。
 11. 服务重启后重建 Coordinator，并按 AgentSpec 恢复同一个 Task checkpoint。
+12. 每个 Task 创建独立 AgentRun；同一 Agent 的无依赖只读 Task 可安全并行。
+13. Supervisor 的资源声明只能收窄后端签发的有效范围，不能扩权。
+14. Compact RunEvent 与按需 TraceArtifact 分离，前端按调度轮次、Task、
+    Agent 和工具细节分层显示。
 
 待后续：
 
-1. 把子图内部 Loop、Tool Call 与 Token 用量投影到 RunEvent。
+1. 通用条件 Task 的 guard/skip 语义；当前跨 Agent 条件动作应分轮委派。
 2. 为 Task 取消、独立重试和补偿增加接口。
-3. 把 Monitor 风险事件统一提交为 Run，而不是保留领域内部任务结果。
+3. 进程在普通 running Task 中途崩溃后的自动续跑。
 4. 多后端实例部署时，将事件通知从进程内 Condition 替换为 Redis/PostgreSQL。
+5. 外层 `RunCoordinator` 是否迁移为统一 LangGraph 主图仍是候选方向，不是
+   当前已实现能力。
 
 ## 13. 验收标准
 

@@ -1,5 +1,9 @@
 # WoTAgent 2.0 TD-MCP 链路契约
 
+状态：当前设备能力与执行契约
+
+最后核对：2026-07-23
+
 ## 1. 架构目标
 
 WoTAgent 2.0 将 Thing Description 作为设备能力的唯一语义来源。Matter、ESP32 私有协议和 SimuHome 都是设备数据模型或执行协议；它们需要先被翻译或绑定为 TD，再进入统一 Agent 链路。
@@ -20,7 +24,7 @@ FastMCP generated tools
 MCP Client catalog -> Planner context
           |
           v
-TaskPlan -> Policy -> deterministic Executor
+Supervisor Task -> Device LangGraph -> TaskPlan -> Policy -> Executor
           |
           v
 generated action tool -> generated read tool -> Verifier
@@ -41,7 +45,10 @@ generated action tool -> generated read tool -> Verifier
 - 动作工具：`<device_id>__action__<action>`。
 - MCP input schema 直接复制 TD action input schema。
 - MCP metadata 保存 `device_id`、动作名、位置、标题和属性列表。
-- 当前 18 份 TD 共生成 56 个设备工具；管理及实验工具仍独立保留。
+- 当前 TD 目录包含 38 份设备 TD。工具数量由每份 TD 的 property/action
+  动态编译，不再在文档中维护容易失真的固定数字。
+- active Deployment Profile 会再次裁剪可发现设备：别墅配置的 23 台设备均有
+  TD；养老配置 16 台，其中 `purifier-102` 暂缺 TD，当前实际 TD 覆盖 15 台。
 
 ### 2.3 Agent Client 与规划
 
@@ -71,11 +78,15 @@ TaskPlan(light-001, setBrightness, 53)
 -> task succeeded
 ```
 
-测试基线：
+最新项目回归基线：
 
-- WoTAgent 后端：156 passed，1 个需真实模型的测试默认跳过。
-- Device Simulator：59 passed。
+- WoTAgent 后端：`262 passed, 3 skipped`。
+- Device Simulator：`64 passed`。
+- Vue 前端：`45 passed`，typecheck/build 通过。
 - 新增单点测试覆盖 TD 编译、schema 一致性、FastMCP 注册执行、Client 元数据发现、Planner 单一事实源和 SimuHome 语义映射。
+
+上述最新全量数字覆盖的范围大于本契约本身；它们不表示
+`purifier-102` 已具备 TD，也不表示 SimuHome 600 集已完成动态执行。
 
 ## 4. SimuHome 适配状态
 

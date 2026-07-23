@@ -4,8 +4,14 @@ Last updated: 2026-07-23
 Current branch: `trae/run-task-dag`
 Current release baseline: `v2.8.0`
 Current implementation target: `v3.0.0` scene-scoped P1
-Current implementation baseline: Domain Operations and Monitor Run refactor,
-successor to `99afb3d feat: harden agent context and real model health flow`
+Current source baseline before this documentation sync:
+`4b8f954 docs: add agent abstraction interview guide`
+
+> **Current snapshot rule:** the 2026-07-23 summary and the current source code
+> override older dated progress notes later in this file. Older test totals and
+> failure descriptions are retained as evolution evidence, not current status.
+> Latest verified regression: backend `262 passed, 3 skipped`, simulator
+> `64 passed`, frontend `45 passed` with typecheck/build passing.
 
 > 2026-07-21 runtime cleanup: resident/space resources now expand through TD
 > locations and the active Deployment Profile, so an assigned resident room
@@ -159,7 +165,8 @@ Conversation → Turn → Run → 多个 Task → AgentRun → Loop → ToolCall
 4. LangGraph 原生 `interrupt()` 与 `Command(resume=...)`；
 5. SQLite 持久化 Run、Task、AgentRun、事件和确认负载；
 6. 服务重启后恢复同一个 Task checkpoint；
-7. 后端 `181 passed, 2 skipped`，前端 `15 passed`，生产构建通过；
+7. 最新回归为后端 `262 passed, 3 skipped`、Simulator `64 passed`、前端
+   `45 passed`，typecheck/build 通过；
 8. 模型 Finding Payload 与运行时 Finding Envelope 已拆分；
 9. Task 已增加 Principal、Target、Capability、Effective Scope 和 Failure；
 10. 张爷爷等居民名称在 Task 执行前解析为 canonical resident ID；
@@ -187,20 +194,21 @@ Conversation → Turn → Run → 多个 Task → AgentRun → Loop → ToolCall
 2. 历史真实运行曾把“张爷爷”直接作为 MCP `resident_id`；现在已增加平台
    EntityResolver 接口和养老 ResidentEntityResolver，真实模型已验证
    `张爷爷 → elderly-001`、`李奶奶 → elderly-002`。
-3. 后端已增加最小的 JH-1/JH-2 居民关系授权和 MCP Scope 校验，但登录身份仍由
-   客户端提交，因此还不是生产级认证授权。
+3. 后端已增加持久化 Principal、角色模板、关系授权、PIN 登录、Bearer Session
+   和 MCP Scope 校验；种子演示账号仍支持一键进入，因此整体仍是实验级身份系统，
+   不是生产级统一认证。
 4. 失败分类、fingerprint 和重复终止已接入；更复杂的可重试、补偿和跨 Agent
    替代策略仍需继续完善。
 5. 自动化测试仍主要使用 Fake/Scripted LLM，但 opt-in 真实模型 Health/Scope
    三案例已执行并记录；完整多 Agent + simulator 链路仍待单独测试。
-6. 自动化测试未证明真实中文请求、真实模型、居民
-   实体解析和 MCP 的完整链路。
-7. 新 RunEvent 尚未完整投影模型 Token、TTFT、专业 Agent Loop 和 ToolCall，
-   因此前端部分指标会显示为零。
+6. 自动化测试不能替代更大样本的真实中文请求、真实模型和真实设备验证。
+7. Run 已持久化 Token、总耗时、Supervisor 轮次、专业循环和工具调用摘要；
+   `ainvoke` 不产生真实 TTFT 时前端应显示“不可用”而不是零。大载荷详细信息通过
+   TraceArtifact 按需读取。
 
 安全状态：
 
-- 项目没有真实登录鉴权，`user_id` 和 `role` 由客户端提交；
+- 项目已有实验级 Principal/PIN/Session，但尚无生产级认证网关、密钥治理和限流；
 - 曾临时使用 Cloudflare Quick Tunnel 暴露 Vite，而 Vite 同时代理后端 API；
 - 2026-07-18 按用户明确要求重新开启 Quick Tunnel，用于短时手机验收；
 - 当前公网地址会同时暴露 Vite 代理的 API 与 WebSocket，完成测试后必须执行
@@ -214,14 +222,15 @@ P0 真实链路正确性
 → 已完成 Health + Resident Scope 三案例真实模型冒烟测试
 → 已修复上下文预算、目标扩张和结构化 Finding 兼容问题
 
-P1 居民级授权
-→ Principal / Resident / CareAssignment / Permission
-→ RBAC + Resource Scope + Relationship/Context Policy
+P1 资源级授权
+→ Principal / Role Template / Relationship / Capability 已落地
+→ 后端签发 Effective Scope 并由 MCP 二次校验已落地
+→ 下一步补充岗位、班次、紧急上下文和更细空间关系
 
 P2 统一智能体架构
 → 评估把 RunCoordinator 改为 LangGraph 主图
-→ Care Agent 迁移到统一 AgentSpec + create_agent/subgraph
-→ Monitor 事件进入 Run 已完成，下一步统一专业 Agent 内部事件投影
+→ Health/Care 已使用统一 AgentSpec + bounded create_agent
+→ Monitor 事件进入 Run 已完成，下一步完善条件 Task 与专业 Agent 事件投影
 ```
 
 ## 1. Purpose Of This Document
@@ -896,12 +905,13 @@ events from accumulating shared LLM history. The event stores its linked
 
 ## 14. Tests And Their Actual Meaning
 
-Last verified automated results before this handoff:
+Latest verified automated results:
 
 ```text
-Backend: 178 passed, 2 skipped
-Frontend: 15 passed
-Frontend production build: passed
+Backend: 262 passed, 3 skipped
+Simulator: 64 passed
+Frontend: 45 passed
+Frontend typecheck and production build: passed
 ```
 
 These tests cover:
@@ -915,15 +925,17 @@ These tests cover:
 - SQLite RunStore persistence;
 - rebuilding Store and Coordinator before confirmation resume;
 - scripted create_agent multi-step behavior;
-- frontend Run/Task rendering and API calls.
+- real-model opt-in Health/Scope smoke cases;
+- Domain/Profile isolation and Principal registration/session paths;
+- deterministic risk classification and event disposition;
+- frontend Run/Task rendering, execution waves, trace details and API calls.
 
 What these results do not prove:
 
 - correctness with the real DeepSeek model;
-- Chinese name to canonical resident ID resolution;
-- real Health Agent structured output stability;
-- end-to-end resident authorization;
-- a full real LLM → Supervisor → specialist → MCP → Finding smoke path;
+- statistical stability across a large real-model Chinese request set;
+- all combinations of Agent, Profile, Principal and device;
+- production-grade identity, authorization and adversarial security;
 - arbitrary crash recovery;
 - production security.
 
@@ -933,7 +945,10 @@ The create_agent tests use a `ScriptedChatModel` that already emits:
 {"agent": "health_agent", "resident_id": "elderly-001"}
 ```
 
-This hid the production contract and entity-resolution failures.
+This originally hid the production contract and entity-resolution failures.
+The runtime now injects Agent identity, resolves canonical targets before
+execution and enforces effective scope at MCP boundaries; scripted tests still
+cannot prove broad real-model quality.
 
 Required future test layers:
 
@@ -977,7 +992,9 @@ implementations.
 
 ## 16. Security Status
 
-The system is experimental and currently has no real authentication.
+The system has experiment-grade persistent Principal, PIN and bearer-session
+support. It still lacks production-grade authentication, deployment controls,
+rate limiting and secret governance.
 
 On 2026-07-18 a temporary Cloudflare Quick Tunnel was opened to the Vite
 frontend. Because Vite proxied `/api` and `/ws/v2`, this also exposed the
@@ -991,7 +1008,7 @@ After the user reported suspected account compromise:
   closed;
 - the temporary public URL returned Cloudflare `530`.
 
-Current service status at handoff:
+Service status recorded during the earlier mobile-test session:
 
 ```text
 Frontend: managed and healthy on 127.0.0.1:5174
@@ -1002,8 +1019,9 @@ Independent Monitor: managed and heartbeat online/running
 Cloudflare Quick Tunnel: enabled for temporary mobile testing
 ```
 
-The tunnel was reopened at the user's explicit request despite the missing
-authentication controls. Run `stop-wotagent.bat` immediately after testing.
+This is a historical runtime snapshot and must be checked again before use.
+The tunnel was reopened at the user's explicit request despite incomplete
+production controls. Run `stop-wotagent.bat` immediately after testing.
 Do not treat it as a production deployment until at least one of the following
 exists:
 
@@ -1021,13 +1039,12 @@ Never expose the current Vite proxy directly to the public Internet.
 Recent commits:
 
 ```text
+4b8f954 docs: add agent abstraction interview guide
+1c05023 feat: complete health risk classification workflow
+cf28c5d feat: visualize agent execution waves
+8ea4ef5 fix: preserve insufficient-evidence run outcomes
+1944d9d refactor: close agent scopes and persist focused traces
 f5cc0aa feat: persist run state across restarts
-03ea444 fix: resume device graph native interrupts
-63cd539 feat: resume run tasks after confirmation
-7892383 refactor: replace task runner with run task dag
-137426a feat: add run scoped task event stream
-df01d9e feat: add run task DAG scheduler
-40c5e18 refactor: establish agent platform and domain boundaries
 ```
 
 At handoff, the repository also contains runtime-generated changes:
@@ -1058,13 +1075,19 @@ without checking with the user.
 
 ### P1: Complete Authorization
 
-1. Add backend-authenticated Principals instead of trusting client role values.
-2. Add `CareAssignment` or equivalent principal-resident relationships.
-3. Define eldercare permissions such as health summary, detailed vitals,
-   notifications and environment control.
-4. Add contextual checks for shift, purpose and emergency access.
-5. Propagate authorization context through Run → Task → Agent → MCP.
-6. Add negative tests for cross-resident access.
+Completed foundation:
+
+- persistent Principals, backend-owned role templates and relationships;
+- PIN login and bearer sessions for registered users;
+- capability/resource context propagated through Run → Task → Agent → MCP;
+- resident and site relationship scope with negative cross-scope tests.
+
+Next:
+
+1. Add contextual checks for shift, purpose and emergency access.
+2. Refine villa site scope into room/post/device relationships where needed.
+3. Add production authentication gateway, session lifecycle hardening and rate
+   limits.
 
 ### P2: Finish The Agent Architecture
 
@@ -1074,8 +1097,8 @@ without checking with the user.
    updates and bounded escalation tools.
 3. Normalize all specialist output and error contracts.
 4. Project specialist loops, tool calls, model usage and TTFT into RunEvents.
-5. Convert remaining legacy Care execution to the uniform AgentSpec/create_agent
-   specialist contract.
+5. Add explicit conditional Task guard/skip semantics or keep conditional
+   delegation across Supervisor waves.
 6. Restore a real rule baseline and shadow-mode comparison for the Run runtime.
 
 ### P3: Operational Hardening

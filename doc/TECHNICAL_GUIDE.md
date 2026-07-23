@@ -1,7 +1,15 @@
 # WoTAgent Current Technical Map
 
-This map describes the active runtime after the 2026-07-21 cleanup. It is a
-source guide, not a historical design proposal.
+Status: current implementation map
+
+Last verified: 2026-07-23
+
+Release baseline: `v2.8.0`; implementation target: `v3.0.0`
+
+This map describes the active runtime after the 2026-07-21 cleanup and the
+2026-07-23 risk/scheduling updates. It is a source guide, not a historical
+design proposal. See [`README.md`](README.md) for document status and reading
+order.
 
 ## Runtime hierarchy
 
@@ -69,6 +77,27 @@ flowchart TD
 - RunEvents remain compact for WebSocket/UI use. Raw prompts, responses and
   tool payloads are stored separately as TraceArtifacts and fetched only on
   demand.
+- The same AgentSpec may execute more than one Task in a Run. Each Task gets an
+  independent AgentRun; safe read Tasks may run concurrently, while dependency
+  and resource-write conflicts are serialized by the Scheduler.
+- Risk classification and state transitions are deterministic domain behavior.
+  The current eldercare flow supports health/environment readings, risk levels,
+  event persistence and `open -> acknowledged -> in_progress -> resolved |
+  false_positive`.
+
+## Current verification
+
+Latest full regression recorded on 2026-07-23:
+
+```text
+Backend: 262 passed, 3 skipped
+Simulator: 64 passed
+Frontend: 45 passed, typecheck/build passed
+```
+
+Known catalog mismatch: the eldercare Profile configures 16 device IDs, but 15
+currently have TD files. `purifier-102` is configured but has no TD. The villa
+Profile has TD coverage for all 23 configured devices.
 
 ## Removed legacy entry points
 

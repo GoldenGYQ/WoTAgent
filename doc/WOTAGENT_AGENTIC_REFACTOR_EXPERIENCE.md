@@ -2468,3 +2468,27 @@ and production build.
 One command-level pitfall was also recorded: this frontend defines the npm
 script as `typecheck`, not `type-check`. The production `build` script invokes
 the correct typecheck automatically.
+
+## 31. 2026-07-23 文档基线与场景目录复核
+
+随着 Run/Task、Principal、Deployment Profile、Care ReAct 和风险处置逐步落地，
+早期技术文档开始同时混用“当前实现”“目标设计”和“历史快照”。本轮没有修改
+运行代码，而是建立文档版本治理：
+
+- 新增 `doc/README.md`，按当前事实、设计计划、历史经验分类；
+- 当前事实以代码、最新测试、`handoff.md` 当前快照和
+  `TECHNICAL_GUIDE.md` 为准；
+- 早期“完整技术文档”明确标记为历史，不再把 `/api/v2/tasks` 当成现行 API；
+- Agent Loop 文档修正为 Python `RunCoordinator` 外循环、
+  `create_agent` Supervisor/Health/Care 和设备 LangGraph 子图；
+- 评价计划保留旧阶段数字，但新增当前基线和发布前最小验收集。
+
+目录复核还发现一个真实契约缺口：`eldercare` Profile 配置了 16 个设备 ID，
+TD 目录只有 15 个对应设备，缺少 `purifier-102`；`villa` 的 23 个设备均有
+TD。这个问题被写入部署、TD 和评测文档，后续应增加
+“Profile 中的每个设备必须存在 TD”的自动化校验。
+
+在同一轮之前新增的 Scheduler 回归证明：同一个 Agent 可以执行多个独立 Task，
+无依赖只读 Task 可并行，同资源写冲突仍会被串行。因此最新后端总回归为
+`262 passed, 3 skipped`；Simulator 为 `64 passed`；前端为 `45 passed`，
+typecheck/build 通过。
