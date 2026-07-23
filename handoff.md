@@ -1,6 +1,6 @@
 # WoTAgent 2.0 Project Handoff
 
-Last updated: 2026-07-21
+Last updated: 2026-07-23
 Current branch: `trae/run-task-dag`
 Current release baseline: `v2.8.0`
 Current implementation target: `v3.0.0` scene-scoped P1
@@ -20,6 +20,14 @@ successor to `99afb3d feat: harden agent context and real model health flow`
 > and last outcomes across Runs. Compact RunEvents and separately persisted raw
 > TraceArtifacts now serve UI and forensic needs without streaming large model
 > payloads on every event.
+
+> 2026-07-23 documentation and scheduling verification: the interview guide
+> now records the current Principal / AgentSpec / Domain / Task abstraction
+> and separate private-company and state-owned-enterprise narratives. A new
+> Scheduler regression proves that two independent read Tasks may invoke the
+> same Agent concurrently, while existing write-conflict tests still serialize
+> access to the same resource. Latest backend regression: `262 passed,
+> 3 skipped`.
 
 > 2026-07-19 identity update: P1 now separates human Principals from
 > capability-based software Agents. `PrincipalDirectory` resolves domain
@@ -138,9 +146,9 @@ Conversation → Turn → Run → 多个 Task → AgentRun → Loop → ToolCall
 - 外层 Run、Task DAG、并行调度和二次决策由 Python `RunCoordinator`
   驱动；
 - Health Agent 使用 `create_agent` ReAct；
+- Care Agent 已迁移为带 Scoped Care MCP 的受限 `create_agent` ReAct；
 - Environment、Security、Energy、Housekeeping、DeviceOps 使用设备
   LangGraph 子图；
-- Care Agent 仍然通过旧 `EldercareChatAgent` 适配；
 - Monitor 是独立的确定性监测服务，不由 LLM 驱动。
 
 近期已完成：
@@ -344,10 +352,10 @@ flowchart TD
     BS --> SD["Structured SupervisorDecision"]
     SD --> TS["Deterministic TaskScheduler"]
     TS --> HE["Health create_agent ReAct"]
-    TS --> CE["Care legacy EldercareChatAgent adapter"]
+    TS --> CE["Care create_agent ReAct"]
     TS --> DG["Device specialist LangGraph"]
     HE --> HMCP["Scoped Health MCP Resources"]
-    CE --> EMCP["Eldercare actions/resources"]
+    CE --> EMCP["Scoped Care MCP tools"]
     DG --> PM["Planner → Policy → Execute → Verify/Recover"]
     PM --> DMCP["TD-derived device MCP tools"]
     HMCP --> EDB["Eldercare SQLite store"]
@@ -363,10 +371,10 @@ Important qualification:
 - Device specialists are compiled LangGraph graphs.
 - The outer Run/Supervisor/Scheduler lifecycle is currently an imperative
   Python `RunCoordinator`, not one unified LangGraph `StateGraph`.
-- `health_agent` uses `create_agent`.
-- `care_agent` still adapts the older `EldercareChatAgent`.
-- Therefore the target architecture of "Supervisor main graph with all
-  specialists as uniform ReAct subgraphs" is not yet fully realized.
+- `health_agent` and `care_agent` use bounded `create_agent` ReAct runtimes.
+- Device specialists share a constrained LangGraph execution topology.
+- Therefore the runtime has a unified Task/Finding contract, but not one
+  unified LangGraph topology for the outer coordinator and every specialist.
 
 ## 5. Supervisor, Tasks And Parallelism
 
@@ -417,8 +425,8 @@ LLM timeout: 12 seconds
 | Agent | Current implementation | LLM-driven | Current status |
 |---|---|---:|---|
 | Butler Supervisor | LangChain `create_agent`, structured `SupervisorDecision` | Yes | Active, but outer loop is Python |
-| `health_agent` | `create_agent` with scoped health resource tools | Yes | Active, but stale-data handling and confidence gating still need correction |
-| `care_agent` | Adapter to legacy `EldercareChatAgent` | Partly | Legacy adapter; cannot safely execute natural-language conditional Tasks |
+| `health_agent` | `create_agent` with scoped health resource tools | Yes | Active; freshness guard distinguishes stale evidence from infrastructure failure |
+| `care_agent` | `create_agent` with scoped care tools | Yes | Active; supports caregiver notification, duty fallback and care-task creation |
 | `environment_agent` | Device LangGraph with domain prompt/profile | Yes + deterministic execution | Active |
 | `security_agent` | Device LangGraph with scoped AgentSpec | Yes + deterministic execution | Active |
 | `energy_agent` | Device LangGraph with scoped AgentSpec | Yes + deterministic execution | Active |
@@ -781,9 +789,12 @@ What actually happened:
 3. the Care Task had `depends_on`, but that only means "wait for upstream
    completion", not "execute only if the condition is true";
 4. the Scheduler therefore launched Care anyway after Health finished;
-5. the current Care path still uses the legacy `EldercareChatAgent` adapter and
-   could not safely interpret the conditional objective "notify only if
-   abnormal, otherwise do nothing", so it returned `needs_more_information`;
+5. the Care path at the time still used the legacy `EldercareChatAgent`
+   adapter and could not safely interpret the conditional objective "notify
+   only if abnormal, otherwise do nothing", so it returned
+   `needs_more_information`; the production path has since migrated to bounded
+   `create_agent`, while cross-Agent conditional work still follows
+   investigate-then-decide semantics;
 6. because Health succeeded and Care was blocked, the fixed Task-status
    aggregation marked the Run `partial_success`;
 7. in the next Supervisor round, the model correctly read the Health Finding and
@@ -1059,7 +1070,8 @@ without checking with the user.
 
 1. Decide whether the outer Coordinator should become a LangGraph Supervisor
    graph.
-2. Convert Care into the same AgentSpec + create_agent/subgraph contract.
+2. Extend the migrated Care `create_agent` with acknowledgement, task-status
+   updates and bounded escalation tools.
 3. Normalize all specialist output and error contracts.
 4. Project specialist loops, tool calls, model usage and TTFT into RunEvents.
 5. Convert remaining legacy Care execution to the uniform AgentSpec/create_agent

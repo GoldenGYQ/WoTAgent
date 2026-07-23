@@ -126,4 +126,13 @@ cd ..\..\wot-device-simulator
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-详细接口见 [API_GUIDE.md](doc/API_GUIDE.md)，实际架构见 [WOTAGENT_2.0_COMPLETE_TECHNICAL_GUIDE.md](doc/WOTAGENT_2.0_COMPLETE_TECHNICAL_GUIDE.md)。
+推荐阅读：
+
+- [面试表达与多主体抽象](doc/WOTAGENT_INTERVIEW_AND_AGENT_ABSTRACTION_GUIDE.md)
+- [当前真实技术地图](doc/TECHNICAL_GUIDE.md)
+- [Run / Task DAG 设计](doc/WOTAGENT_RUN_TASK_DAG_DESIGN.md)
+- [TD / MCP 契约](doc/WOTAGENT_2.0_TD_MCP_CONTRACT.md)
+- [API 指南](doc/API_GUIDE.md)
+
+旧的完整技术指南保留为历史设计材料；当前架构事实以
+[TECHNICAL_GUIDE.md](doc/TECHNICAL_GUIDE.md) 和实际代码为准。

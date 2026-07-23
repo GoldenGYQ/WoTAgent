@@ -83,6 +83,30 @@ def test_independent_reads_can_run_in_one_parallel_batch() -> None:
     assert [item.local_id for item in batch] == ["health", "environment"]
 
 
+def test_same_agent_can_run_independent_read_tasks_in_parallel() -> None:
+    scheduler = _scheduler()
+    tasks = scheduler.materialize("run-1", _plan([
+        _task(
+            "first-floor",
+            "environment_agent",
+            claims=[ResourceClaim(key="room:first-floor", mode="read")],
+        ),
+        _task(
+            "second-floor",
+            "environment_agent",
+            claims=[ResourceClaim(key="room:second-floor", mode="read")],
+        ),
+    ]))
+
+    batch = scheduler.next_batch(tasks)
+
+    assert [item.local_id for item in batch] == [
+        "first-floor",
+        "second-floor",
+    ]
+    assert {item.agent_id for item in batch} == {"environment_agent"}
+
+
 def test_scheduler_rejects_conflicting_writes_from_parallel_batch() -> None:
     scheduler = _scheduler()
     tasks = scheduler.materialize("run-1", _plan([
