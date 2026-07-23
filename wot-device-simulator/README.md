@@ -2,18 +2,18 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-A standalone IoT device simulator for agent development. All services run on a **single FastMCP server** on port `:18080` — MCP tools, REST endpoints, and dashboard in one process.
+面向 Agent 开发的独立 IoT 设备模拟器。所有服务运行在 **单个 FastMCP 服务** 的 `:18080` 端口上 —— MCP 工具、REST 端点和控制面板都在一个进程内。
 
 ---
 
-## Architecture
+## 架构
 
 ```
 ┌───────────────────────────────────────────────────────┐
-│  wot-device-simulator  (port 18080)                   │
+│  wot-device-simulator  (端口 18080)                    │
 │                                                       │
 │  ┌───────────────────────────────────────────────┐    │
-│  │  SimulatorEngine (drift, rules, events)        │    │
+│  │  SimulatorEngine (漂移、规则、事件)              │    │
 │  │  DeviceStateStore (SQLite)                     │    │
 │  └──────────────────┬────────────────────────────┘    │
 │                     │                                 │
@@ -21,160 +21,160 @@ A standalone IoT device simulator for agent development. All services run on a *
 │     │                                       │          │
 │     ▼                                       ▼          │
 │  ┌─────────────────┐  ┌─────────────────────────┐     │
-│  │  FastMCP Server  │  │  REST Endpoints          │     │
-│  │  /mcp (MCP HTTP) │  │  /api/state, /api/events │     │
-│  │  Agent controls  │  │  /api/control, /api/poll │     │
-│  │  Agent queries   │  │  /api/weather/...        │     │
+│  │  FastMCP 服务    │  │  REST 端点              │     │
+│  │  /mcp (MCP HTTP)|   │  /api/state, /api/events│     │
+│  │  Agent 控制/查询 │  │  /api/control, /api/poll│     │
+│  │                 │  │  /api/weather/...       │     │
 │  └─────────────────┘  ├─────────────────────────┤     │
-│                        │  Dashboard               │     │
-│                        │  /dashboard (HTML UI)    │     │
+│                        │  控制面板                 │     │
+│                        │  /dashboard (HTML UI)  │     │
 │                        └─────────────────────────┘     │
 └───────────────────────────────────────────────────────┘
 ```
 
-### How agent connects
+### Agent 连接方式
 
-| Transport | Agent config | Connection |
-|-----------|-------------|------------|
-| **stdio** (default) | `MCP_TRANSPORT_MODE=stdio` | Agent auto-spawns `mcp_server.py` as subprocess |
-| **HTTP** (production) | `MCP_TRANSPORT_MODE=http` + `MCP_SERVER_URL=http://<ip>:18080/mcp` | POST to this server's `/mcp` endpoint |
+| 传输 | Agent 配置 | 连接方式 |
+|------|-----------|---------|
+| **stdio** (默认) | `MCP_TRANSPORT_MODE=stdio` | Agent 自动拉起 `mcp_server.py` 为子进程 |
+| **HTTP** (生产) | `MCP_TRANSPORT_MODE=http` + `MCP_SERVER_URL=http://<ip>:18080/mcp` | POST 到此服务器的 `/mcp` 端点 |
 
 ---
 
-## Quick Start
+## 快速开始
 
 ```bash
-# Install
+# 安装
 cd wot-device-simulator
 uv venv && uv sync
 
-# Start (one command does it all)
+# 启动（一行命令搞定一切）
 wot-sim-api
-# Or: uv run --project . wot-sim-api
+# 或: uv run --project . wot-sim-api
 ```
 
-Then open:
-- **Dashboard:** `http://127.0.0.1:18080/dashboard`
-- **MCP endpoint:** `http://127.0.0.1:18080/mcp` (for agents)
+启动后访问：
+- **控制面板：** `http://127.0.0.1:18080/dashboard`
+- **MCP 端点：** `http://127.0.0.1:18080/mcp`（供 Agent 连接）
 
 ---
 
-## Services on Port 18080
+## 端口 18080 提供的服务
 
-### MCP Tools (for Agent, at `/mcp`)
+### MCP 工具（Agent 使用，路径 `/mcp`）
 
-| Tool | Description |
-|------|-------------|
-| `<device>__read_state` | TD-generated state reader with properties declared by that TD |
-| `<device>__action__<action>` | TD-generated action tool whose input schema is copied from the TD |
-| `list_devices` | List all devices with metadata (ID, title, location, capabilities) |
-| `query_all_states` | Get runtime state for ALL devices in one call |
-| `query_state(device_id)` | Get runtime state for one device |
-| `control_device(device_id, action, params)` | Low-level compatibility and simulator-debug action bus; v2 Agent execution uses generated tools |
-| `drift()` | Trigger one environmental drift cycle |
-| `poll_once()` | Evaluate rules and return triggered ones |
-| `patch_state(device_id, property, value)` | Directly set a device property |
-| `set_environment(temperature, humidity, ...)` | Set environmental conditions |
-| `inject_event(type, data)` | Inject a custom event |
-| `get_td(device_id)` | Get Thing Description for a device |
-| `download_all_td()` | Get all Thing Descriptions |
+| 工具 | 说明 |
+|------|------|
+| `<device>__read_state` | 根据 TD 自动生成的状态读取工具，属性列表来自 TD |
+| `<device>__action__<action>` | 根据 TD 自动生成的动作工具，输入 schema 直接来自 TD |
+| `list_devices` | 列出所有设备（ID、标题、位置、能力） |
+| `query_all_states` | 获取所有设备运行时状态（一次调用） |
+| `query_state(device_id)` | 获取单个设备运行时状态 |
+| `control_device(device_id, action, params)` | 兼容及模拟器调试用底层总线；v2 Agent 使用 TD 生成工具 |
+| `drift()` | 触发一次环境漂移周期 |
+| `poll_once()` | 评估规则并返回命中规则 |
+| `patch_state(device_id, property, value)` | 直接设置设备属性 |
+| `set_environment(temperature, humidity, ...)` | 设置环境参数 |
+| `inject_event(type, data)` | 注入自定义事件 |
+| `get_td(device_id)` | 获取设备的 Thing Description |
+| `download_all_td()` | 获取所有 Thing Description |
 
-### REST Endpoints (for Dashboard & Manual Use)
+### REST 端点（供面板和手动使用）
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/health` | Server health + engine status |
-| `GET` | `/api/devices` | List all devices (TD metadata) |
-| `GET` | `/api/state` | Full simulator state + all device runtime states |
-| `GET` | `/api/state/{device_id}` | Single device runtime state |
-| `POST` | `/api/control` | Control a device (`{"device_id", "action", "parameters"}`) |
-| `POST` | `/api/poll` | Trigger one poll cycle |
-| `GET` | `/api/events?limit=50` | Recent event history |
-| `POST` | `/api/events/inject` | Inject a custom event |
-| `POST` | `/api/state/patch` | Set a single device property |
-| `POST` | `/api/environment/set` | Batch-set temperature/humidity/pm25/gasLevel |
-| `GET` | `/api/weather/fetch?city=beijing` | Fetch live weather |
-| `POST` | `/api/weather/apply` | Fetch weather and apply to simulation |
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/api/health` | 服务健康 + 引擎状态 |
+| `GET` | `/api/devices` | 列出所有设备（TD 元数据） |
+| `GET` | `/api/state` | 完整仿真状态 + 所有设备运行时状态 |
+| `GET` | `/api/state/{device_id}` | 单个设备运行时状态 |
+| `POST` | `/api/control` | 控制设备（`{"device_id", "action", "parameters"}`） |
+| `POST` | `/api/poll` | 触发一次轮询周期 |
+| `GET` | `/api/events?limit=50` | 近期事件历史 |
+| `POST` | `/api/events/inject` | 注入自定义事件 |
+| `POST` | `/api/state/patch` | 设置单个设备属性 |
+| `POST` | `/api/environment/set` | 批量设置温度/湿度/PM2.5/气体浓度 |
+| `GET` | `/api/weather/fetch?city=beijing` | 获取实时天气 |
+| `POST` | `/api/weather/apply` | 获取天气并应用到仿真 |
 
-### Dashboard
+### 控制面板
 
-- **URL:** `http://127.0.0.1:18080/dashboard`
-- Real-time device cards with sliders, toggles, and quick actions
-- Environment controls (temperature, humidity, pm2.5, gas)
-- Weather fetch & apply
-- Event injection
-- Event feed (auto-polls every 3s)
+- **地址：** `http://127.0.0.1:18080/dashboard`
+- 实时设备卡片，带滑块、开关和快捷操作
+- 环境控制（温度、湿度、PM2.5、气体）
+- 天气获取与应用
+- 事件注入
+- 事件流（每 3 秒自动轮询）
 
 ---
 
-## Internal Architecture
+## 内部架构
 
 ```
 src/wot_device_simulator/
-├── service.py           # FastMCP HTTP server — entry point for wot-sim-api
-├── mcp_server.py        # MCP tool definitions (shared with agent stdio mode)
-├── simulator.py         # DeviceStateStore (SQLite) + SimulatorEngine (drift, rules, events)
-├── state_cli.py         # CLI for direct SQLite inspection
-├── dashboard.html       # Simulator control panel UI
-└── td.py                # Thing Description loader & discovery
+├── service.py           # FastMCP HTTP 服务 — wot-sim-api 入口
+├── mcp_server.py        # MCP 工具定义（与 Agent stdio 模式共享）
+├── simulator.py         # DeviceStateStore (SQLite) + SimulatorEngine (漂移、规则、事件)
+├── state_cli.py         # 直接 SQLite 查询 CLI
+├── dashboard.html       # 仿真平台控制面板 UI
+└── td.py                # Thing Description 加载器 & 发现
 ```
 
-### File Responsibilities
+### 文件职责
 
-| File | Role | Key exports |
-|------|------|-------------|
-| `service.py` | HTTP server entry point | `main()` — starts FastMCP with HTTP transport, registers REST endpoints via `@mcp.custom_route()` |
-| `mcp_server.py` | MCP tool definitions | `_build_server(sim)` — creates FastMCP instance with all IoT tools |
-| `simulator.py` | Core simulation logic | `DeviceStateStore` (SQLite CRUD), `SimulatorEngine` (drift, rules, event pub/sub), `control_device()` |
-| `state_cli.py` | Direct SQLite inspection | CLI to query/reset device state |
-| `dashboard.html` | Control panel | Single-file HTML/JS dashboard (auto-polls REST APIs, no WebSocket) |
-| `td.py` | Device metadata | `find_devices()`, `get_device_by_id()`, `load_tds()` from JSON files |
+| 文件 | 角色 | 关键导出 |
+|------|------|---------|
+| `service.py` | HTTP 服务入口 | `main()` — 启动 FastMCP HTTP，通过 `@mcp.custom_route()` 注册 REST |
+| `mcp_server.py` | MCP 工具定义 | `_build_server(sim)` — 创建带全部 IoT 工具的 FastMCP 实例 |
+| `simulator.py` | 核心仿真逻辑 | `DeviceStateStore` (SQLite CRUD)、`SimulatorEngine` (漂移、规则、事件发布)、`control_device()` |
+| `state_cli.py` | SQLite 查询 CLI | 查询/重置设备状态的 CLI |
+| `dashboard.html` | 控制面板 | 单文件 HTML/JS 面板（HTTP 轮询，无 WebSocket） |
+| `td.py` | 设备元数据 | `find_devices()`、`get_device_by_id()`、`load_tds()` |
 
-### Data Flow
+### 数据流
 
 ```
-MCP call or REST request
+MCP 调用 或 REST 请求
        │
        ▼
-  service.py (route handler)
+  service.py (路由处理)
        │
-       ├─ MCP tool call → simulator.py (control_device / drift / patch_state)
+       ├─ MCP 工具调用 → simulator.py (control_device / drift / patch_state)
        ├─ REST /api/state → simulator.py (DeviceStateStore.get_all())
        ├─ REST /api/control → simulator.py (control_device)
        └─ REST /api/poll → simulator.py (poll_once → drift + rules)
                               │
                               ▼
                          DeviceStateStore
-                         (SQLite at data/state.db)
+                         (SQLite 位于 data/state.db)
                               │
                               ▼
-                         Event published to subscribers
-                         (dashboard auto-polls events via GET /api/events)
+                         发布事件给订阅者
+                         (面板通过 GET /api/events 自动轮询)
 ```
 
 ---
 
-## Environment Variables
+## 环境变量
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `WOT_SIM_TD_ROOT` | `data/td/` | Local TD directory |
-| `WOT_SIM_TD_REGISTRY` | — | Remote TD registry URL |
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `WOT_SIM_TD_ROOT` | `data/td/` | 本地 TD 目录 |
+| `WOT_SIM_TD_REGISTRY` | — | 远程 TD 注册中心 URL |
 
-### Agent-side (for remote deployment)
+### Agent 端（远程部署）
 
-In `wotagent-prototype/.env`:
+在 `wotagent-prototype/.env` 中：
 
 ```bash
 MCP_TRANSPORT_MODE=http
-MCP_SERVER_URL=http://<simulator-ip>:18080/mcp
+MCP_SERVER_URL=http://<仿真平台IP>:18080/mcp
 ```
 
 ---
 
-## Development Notes
+## 开发说明
 
-- **There is no `wot-sim-mcp` CLI command.** `mcp_server.py` is an internal module imported by `service.py` and auto-spawned by the agent in stdio mode. Users do not run it manually.
-- **There is no FastAPI wrapper.** `service.py` uses pure FastMCP with `@mcp.custom_route()` for REST endpoints.
-- **Dashboard uses HTTP polling** (3s interval), not WebSocket.
-- All state is persisted in `data/state.db` (SQLite, WAL mode).
+- **没有 `wot-sim-mcp` CLI 命令。** `mcp_server.py` 是内部模块，被 `service.py` 导入，也被 Agent stdio 模式自动拉起。用户无需手动运行。
+- **没有 FastAPI 封装。** `service.py` 使用纯 FastMCP，REST 端点通过 `@mcp.custom_route()` 注册。
+- **面板使用 HTTP 轮询**（3 秒间隔），不使用 WebSocket。
+- 所有状态持久化在 `data/state.db`（SQLite，WAL 模式）。

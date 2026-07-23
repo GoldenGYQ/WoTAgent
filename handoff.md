@@ -1,333 +1,49 @@
-# WoTAgent 2.0 Project Handoff
+# WoTAgent 项目交接文档
 
-Last updated: 2026-07-23
-Current branch: `trae/run-task-dag`
-Current release baseline: `v2.8.0`
-Current implementation target: `v3.0.0` scene-scoped P1
-Current source baseline before this documentation sync:
+最后更新：2026-07-23
+
+当前分支：`trae/run-task-dag`
+
+当前发布基线：`v2.8.0`
+
+当前实现目标：`v3.0.0` 场景隔离与 P1 授权
+
+本次文档同步前源码基线：
 `4b8f954 docs: add agent abstraction interview guide`
 
-> **Current snapshot rule:** the 2026-07-23 summary and the current source code
-> override older dated progress notes later in this file. Older test totals and
-> failure descriptions are retained as evolution evidence, not current status.
-> Latest verified regression: backend `262 passed, 3 skipped`, simulator
-> `64 passed`, frontend `45 passed` with typecheck/build passing.
+> 本文是当前交接基线。代码与自动化测试优先于旧设计文档；本文后面的历史问题
+> 只用于解释演进，不表示故障仍然存在。
 
-> 2026-07-21 runtime cleanup: resident/space resources now expand through TD
-> locations and the active Deployment Profile, so an assigned resident room
-> exposes every authorized device rather than four hard-coded eldercare device
-> fields. Concrete Supervisor resource claims may narrow this authorized set
-> but cannot expand it. Hybrid Planner keyword filtering and power-direction
-> regex guards were removed; LLM planning now receives the authorized catalog
-> while TD/schema/Policy remain deterministic. Device chat-only termination no
-> longer counts as Task completion. Care Tasks now use bounded `create_agent`
-> plus a scoped MCP gateway instead of the legacy `EldercareChatAgent` path.
-> Conversation state persists active goals, canonical entities, verified facts
-> and last outcomes across Runs. Compact RunEvents and separately persisted raw
-> TraceArtifacts now serve UI and forensic needs without streaming large model
-> payloads on every event.
+## 1. 项目目标
 
-> 2026-07-23 documentation and scheduling verification: the interview guide
-> now records the current Principal / AgentSpec / Domain / Task abstraction
-> and separate private-company and state-owned-enterprise narratives. A new
-> Scheduler regression proves that two independent read Tasks may invoke the
-> same Agent concurrently, while existing write-conflict tests still serialize
-> access to the same resource. Latest backend regression: `262 passed,
-> 3 skipped`.
+WoTAgent 是一个面向实验验证的多 Agent 物联网平台，主要技术包括：
 
-> 2026-07-19 identity update: P1 now separates human Principals from
-> capability-based software Agents. `PrincipalDirectory` resolves domain
-> roles, relationships, capabilities and resources; Run creation persists the
-> trusted Principal context; Task preparation computes device
-> `effective_scope` from Principal, Profile and Agent capability boundaries.
-> Frontend login identities now come from the backend instead of hard-coded
-> cards. Latest regression result: backend `210 passed, 3 skipped`; frontend
-> `26 passed`, typecheck/build passed.
+- LangChain `create_agent` 和 LangGraph；
+- LLM 驱动的任务拆解、专业 Agent 委派和二次决策；
+- WoT Thing Description（TD）能力描述；
+- TD 动态编译的 MCP Tool；
+- Principal、RBAC、关系策略和 Effective Scope；
+- 确定性 Policy、参数校验、执行后状态验证和审计；
+- 持久化 Conversation、Run、Task、事件和 Checkpoint；
+- 养老与别墅/智能家居领域；
+- 独立 Device Simulator 和 Vue 3 控制台。
 
-> 2026-07-19 registration update: `PrincipalDirectory` now has a SQLite-backed
-> `PrincipalStore`. The backend seeds several one-click demonstration
-> Principals and also supports persistent PIN registration. Registration binds
-> a human Principal to a backend-owned role template and resource target; it
-> never accepts arbitrary capabilities from the client. PINs are stored as
-> salted PBKDF2 hashes, session tokens are stored as SHA-256 hashes, and
-> registered Principals must present a Bearer session when creating Runs or
-> using Domain Operations. This is an experiment-grade identity layer, not a
-> production authentication service. Latest regression: backend
-> `214 passed, 3 skipped`; frontend `30 passed`, typecheck/build passed.
+系统职责边界：
 
-> 2026-07-19 production hotfix: real DeepSeek runs exposed that Supervisor
-> natural-language `requested_capability` values were being compared directly
-> with canonical authorization IDs, and that Supervisor
-> `ModelCallLimitMiddleware(run_limit=1)` leaked its count across reused Agent
-> invocations. Task preparation now preserves the model proposal separately,
-> canonicalizes authorization capabilities from AgentSpec/deployment/read-write
-> claims, and relies on RunCoordinator for Supervisor iteration limits. Real
-> runs `run_26882ea68f92` and `run_c39a0fcf6a75` completed successfully; the
-> first verified `light-001` as on at 45%, and the second confirmed no
-> cross-Run model-call-limit failure.
-
-> 2026-07-20 orchestration clarification: a real eldercare health-check Run
-> returned the correct final business answer but exposed two design bugs. The
-> Supervisor created `health_agent` and `care_agent` in the same first-round
-> plan, using `depends_on` only as an execution-order constraint. Because the
-> runtime has no conditional Task skip semantics, the Scheduler still launched
-> `care_agent` after Health completed, even though the Health Finding showed no
-> alert condition. The legacy Care adapter could not interpret the natural
-> language conditional objective and returned `needs_more_information`, causing
-> the fixed Task-status aggregator to mark the Run `partial_success` before the
-> second Supervisor round correctly answered that no notification was needed.
-> The more serious evidence issue is that the latest health data was already
-> many hours stale; the system should only have said the most recent reading was
-> normal but current status could not be fully confirmed. Corrective direction:
-> force Supervisor to use "investigate first, delegate conditionally in the next
-> round" for cross-Agent conditional actions, add explicit conditional/skip Task
-> semantics if such planning is ever allowed, and require Health to surface
-> stale critical data as `needs_more_information` or a data-quality abnormality
-> instead of high-confidence `completed`.
-
-## 2026-07-19 Scene-Scoped P1 Update
-
-- `v2.8.0` preserves the stable pre-scene baseline.
-- A shared `DeploymentProfile` catalog now defines the active domain, site,
-  spaces, devices, enabled Agents and domain prompt.
-- `eldercare` and `villa` use disjoint device sets.
-- user Runs persist `profile_id`, `domain_id` and `site_id`.
-- one Conversation cannot mix deployment profiles.
-- the Supervisor and device Planner receive compact scene context without
-  duplicating the full device whitelist in prompts.
-- the Gateway filters TD capabilities by the Run profile, and the simulator
-  independently rejects cross-profile REST and MCP device access.
-- the frontend switches the backend and simulator together and starts a new
-  Conversation after switching.
-- broad room/catalog questions no longer inherit a previous health-device
-  scope from conversation history.
-- every selectable Profile now has a matching Domain Operations adapter;
-- the villa center exposes Butler/secretary, Security/guard, Environment,
-  Energy, Housekeeping, DeviceOps and a deterministic villa rule Monitor;
-- villa Domain Operations use TD/MCP-backed devices and enforce a first
-  site-level JH-1 operator/JH-2 viewer relationship scope;
-- smoke and energy injection update simulator devices and create deterministic
-  domain events; villa events are currently process-local and do not yet enter
-  the Run pipeline automatically.
-- the independent eldercare Monitor probes the simulator Profile before each
-  collection cycle and reports `paused` without polling eldercare devices while
-  the villa Profile is active.
-- current regression: backend `202 passed, 3 skipped`, frontend `25 passed`
-  plus production build, simulator `63 passed`.
-
-## 2026-07-19 P0.5 Update
-
-P0.5 is complete:
-
-- Run usage, Supervisor rounds, specialist loops, recoveries, finish time and
-  end-to-end duration are projected from durable RunEvents into RunRecord;
-- SQLite-backed metrics survive refresh and service restart;
-- the frontend displays real Token/tool/cost values, end-to-end Run duration
-  and Supervisor decision rounds instead of presenting unavailable TTFT as zero;
-- assistant responses show their Run's total duration;
-- an opt-in simulator-backed multi-Agent smoke test runs Health and Environment
-  Tasks in parallel, reads a scoped eldercare MCP Resource and a TD-derived
-  simulator MCP tool, then returns to the Supervisor for completion;
-- current regression result: backend `190 passed, 3 skipped`, frontend
-  `24 passed`, frontend typecheck and production build passed;
-- simulator smoke result: `1 passed`.
-
-Important qualification: the simulator smoke uses a scripted Supervisor and
-deterministic specialist adapters. It validates orchestration plus MCP/simulator
-integration without external Token cost; it does not replace the separate real
-model Health/Scope smoke suite.
-
-## 中文快速交接摘要
-
-当前项目已经从“每轮消息等于一个 Task”重构为：
-
-```text
-Conversation → Turn → Run → 多个 Task → AgentRun → Loop → ToolCall
-```
-
-当前真实实现不是一个完全统一的 LangGraph 多智能体主图：
-
-- Butler Supervisor 使用 LangChain `create_agent`，负责生成结构化
-  `SupervisorDecision`；
-- 外层 Run、Task DAG、并行调度和二次决策由 Python `RunCoordinator`
-  驱动；
-- Health Agent 使用 `create_agent` ReAct；
-- Care Agent 已迁移为带 Scoped Care MCP 的受限 `create_agent` ReAct；
-- Environment、Security、Energy、Housekeeping、DeviceOps 使用设备
-  LangGraph 子图；
-- Monitor 是独立的确定性监测服务，不由 LLM 驱动。
-
-近期已完成：
-
-1. Run、Task、AgentRun 分层数据模型；
-2. Task DAG、依赖校验、资源冲突检测和有限并行；
-3. Run 级 HTTP、WebSocket 事件流和 Vue 时间线；
-4. LangGraph 原生 `interrupt()` 与 `Command(resume=...)`；
-5. SQLite 持久化 Run、Task、AgentRun、事件和确认负载；
-6. 服务重启后恢复同一个 Task checkpoint；
-7. 最新回归为后端 `262 passed, 3 skipped`、Simulator `64 passed`、前端
-   `45 passed`，typecheck/build 通过；
-8. 模型 Finding Payload 与运行时 Finding Envelope 已拆分；
-9. Task 已增加 Principal、Target、Capability、Effective Scope 和 Failure；
-10. 张爷爷等居民名称在 Task 执行前解析为 canonical resident ID；
-11. Health MCP 已执行居民 Scope 二次检查；
-12. 相同不可恢复失败已由 Coordinator 阻止重复执行。
-13. 前端已由养老专用看板改为平台级“领域运行中心”；
-14. 已增加 DomainManifest、Subject、Resource、Telemetry、Monitor、Event 和
-    Action 通用领域契约，养老作为首个领域适配器；
-15. Monitor outbox 已通过应用层 DomainEventConsumer 创建正式 Run，并将
-    `run_id` 回写风险事件。
-16. Health Agent 缺少原生 structured response 时，可由已验证 MCP
-    ToolMessage 确定性封装 Finding，不再依赖 Repair LLM 才能完成；
-17. Domain Event 已实施一事件一 Run，outbox 重试不再重复创建 Run；
-18. Supervisor 直接回答的零 Task `finish` 已修复为 `run.completed`。
-19. Deployment Profile 已成为运行时场景边界，养老与别墅的空间、设备、提示词和
-    MCP 设备范围彼此隔离。
-20. `smart_home` 已注册通用领域运行适配器；前端在别墅 Profile 下展示管家、
-    安防、环境、能耗、家务、运维和规则 Monitor，而不是隐藏领域中心入口。
-
-但真实模型测试暴露了尚未解决的问题：
-
-1. 历史真实运行曾出现 `Health Agent`/`health_agent` 身份漂移；现在模型不再
-   生成可信身份，Coordinator 注入 Agent、Task 和 AgentRun 身份，真实
-   DeepSeek Health 冒烟测试已通过。
-2. 历史真实运行曾把“张爷爷”直接作为 MCP `resident_id`；现在已增加平台
-   EntityResolver 接口和养老 ResidentEntityResolver，真实模型已验证
-   `张爷爷 → elderly-001`、`李奶奶 → elderly-002`。
-3. 后端已增加持久化 Principal、角色模板、关系授权、PIN 登录、Bearer Session
-   和 MCP Scope 校验；种子演示账号仍支持一键进入，因此整体仍是实验级身份系统，
-   不是生产级统一认证。
-4. 失败分类、fingerprint 和重复终止已接入；更复杂的可重试、补偿和跨 Agent
-   替代策略仍需继续完善。
-5. 自动化测试仍主要使用 Fake/Scripted LLM，但 opt-in 真实模型 Health/Scope
-   三案例已执行并记录；完整多 Agent + simulator 链路仍待单独测试。
-6. 自动化测试不能替代更大样本的真实中文请求、真实模型和真实设备验证。
-7. Run 已持久化 Token、总耗时、Supervisor 轮次、专业循环和工具调用摘要；
-   `ainvoke` 不产生真实 TTFT 时前端应显示“不可用”而不是零。大载荷详细信息通过
-   TraceArtifact 按需读取。
-
-安全状态：
-
-- 项目已有实验级 Principal/PIN/Session，但尚无生产级认证网关、密钥治理和限流；
-- 曾临时使用 Cloudflare Quick Tunnel 暴露 Vite，而 Vite 同时代理后端 API；
-- 2026-07-18 按用户明确要求重新开启 Quick Tunnel，用于短时手机验收；
-- 当前公网地址会同时暴露 Vite 代理的 API 与 WebSocket，完成测试后必须执行
-  `stop-wotagent.bat`，不得作为生产部署。
-
-建议下一步优先顺序：
-
-```text
-P0 真实链路正确性
-→ 已完成本地契约与范围修复
-→ 已完成 Health + Resident Scope 三案例真实模型冒烟测试
-→ 已修复上下文预算、目标扩张和结构化 Finding 兼容问题
-
-P1 资源级授权
-→ Principal / Role Template / Relationship / Capability 已落地
-→ 后端签发 Effective Scope 并由 MCP 二次校验已落地
-→ 下一步补充岗位、班次、紧急上下文和更细空间关系
-
-P2 统一智能体架构
-→ 评估把 RunCoordinator 改为 LangGraph 主图
-→ Health/Care 已使用统一 AgentSpec + bounded create_agent
-→ Monitor 事件进入 Run 已完成，下一步完善条件 Task 与专业 Agent 事件投影
-```
-
-## 1. Purpose Of This Document
-
-This document is the current source of truth for discussing WoTAgent with
-another AI or engineer. It distinguishes:
-
-- what the repository actually implements;
-- what has only been designed or partially migrated;
-- what was covered by deterministic tests;
-- what failed in a real LLM + MCP run;
-- the most important architectural and security decisions still pending.
-
-Do not assume that older design documents describe the current runtime exactly.
-The project has undergone several major refactors.
-
-## 2. Project Goal
-
-WoTAgent 2.0 is an experimental multi-agent IoT platform built around:
-
-- LangGraph and LangChain `create_agent`;
-- LLM-driven task decomposition and specialist delegation;
-- WoT Thing Description (TD) capability descriptions;
-- TD-derived MCP tools and scoped MCP clients;
-- deterministic RBAC, Policy, parameter validation and verification;
-- persistent conversations, Runs, Tasks, events and checkpoints;
-- smart-home and eldercare domains;
-- an independent device simulator and Vue 3 operations console.
-
-The intended responsibility boundary is:
-
-| Component | Responsibility |
+| 组件 | 职责 |
 |---|---|
-| LLM Supervisor | Understand the goal, create Tasks, choose specialists, evaluate findings and decide whether more work is needed |
-| Specialist Agent | Run a bounded Observe-Reason-Act process within an explicit capability scope |
-| Scheduler | Validate the Task DAG, enforce dependencies, resource conflicts and concurrency limits |
-| RBAC/Policy | Decide whether the principal may perform an operation |
-| AgentSpec/MCP scope | Limit which capabilities a specialist can see |
-| TD | Define actual device properties, actions, events and parameter schemas |
-| MCP execution | Invoke resources/tools and return structured results |
-| Verification | Confirm post-action state instead of trusting HTTP/tool success alone |
-| Monitor | Continuously consume device data and produce deterministic risk events |
-| Audit/Trace | Record structured decisions and execution facts without exposing private chain-of-thought |
+| LLM Supervisor | 理解目标、创建 Task、选择专业 Agent、评价 Finding、决定是否继续 |
+| 专业 Agent | 在明确 Capability Scope 内执行有限 Observe-Reason-Act |
+| TaskScheduler | 校验 DAG、依赖、资源冲突和并发上限 |
+| Principal/RBAC/Policy | 判断当前主体是否允许操作目标资源 |
+| AgentSpec/MCP Scope | 限制专业 Agent 可见和可调用的能力 |
+| TD | 定义设备 Property、Action、Event 和参数 Schema |
+| MCP 执行层 | 调用 Resource/Tool 并返回结构化结果 |
+| Verification | 读取动作后状态，不把 HTTP 200 当作目标完成 |
+| Monitor | 持续接收数据并以确定性规则生成风险事件 |
+| Audit/Trace | 记录决策、调用、结果、失败和最终结论，不暴露私有思维链 |
 
-Identity terminology:
-
-| Concept | Meaning |
-|---|---|
-| Human Principal | The requester, such as caregiver, resident, villa owner or security staff |
-| Software Agent | A delegated capability executor, such as health analysis or environment control |
-| Resource/Subject | The resident, site or device affected by the request |
-| Relationship/Policy | The backend rule deciding whether that Principal may delegate that capability over that resource |
-
-Current login and registration model:
-
-```text
-One-click seeded Principal
-  -> backend-owned demo identity and bindings
-
-Registered Principal
-  -> display name + PIN
-  -> choose one backend-owned role template
-  -> choose one domain resource target
-  -> PrincipalStore persists Principal, binding and session
-  -> Run/Domain APIs resolve the Bearer session server-side
-```
-
-The client cannot submit raw capabilities or issue `effective_scope`.
-
-## 3. Current Repository Layout
-
-```text
-WoTAgent/
-├── wotagent-prototype/                 Python backend and evaluation
-│   ├── src/wotagent/
-│   │   ├── agents/                     AgentSpec, contracts, create_agent factories
-│   │   ├── agent_graph/                Device specialist LangGraph
-│   │   ├── orchestration/              Run/Task models, coordinator, scheduler, stores
-│   │   ├── application/                Run application service
-│   │   ├── api/                        FastAPI assembly and routers
-│   │   ├── runtime/                    Dependency construction and production adapters
-│   │   ├── domains/eldercare/          Eldercare domain package
-│   │   ├── auth/ and policy/           Coarse role and device policy checks
-│   │   ├── gateway/ and tools/         MCP device access
-│   │   ├── wot/                        TD models and tool compiler
-│   │   ├── telemetry/                  Legacy detailed trace and pricing
-│   │   └── evaluation/                 HomeBench/SimuHome-oriented evaluation
-│   └── tests/
-├── frontend/wotagent-v2-console/       Vue 3 Run/Task console
-├── wot-device-simulator/               FastMCP device simulator on port 18080
-├── doc/                                Design, API and evaluation documents
-└── handoff.md                          This file
-```
-
-## 4. Current Runtime Model
-
-The current interaction hierarchy is:
+## 2. 当前运行模型
 
 ```text
 Conversation
@@ -341,155 +57,295 @@ Conversation
             └── AgentRun
 ```
 
-- One user message creates one `Turn` and one `Run`.
-- A Supervisor decision can create multiple Tasks.
-- Tasks can have dependencies and resource claims.
-- A Task is executed by one specialist Agent.
-- Multiple ready Tasks may run concurrently when the Scheduler considers them
-  safe.
-- Loop iterations and Tool Calls belong inside an AgentRun; they are not
-  top-level Tasks.
+- 一条用户消息创建一个 Turn 和一个 Run。
+- Supervisor 一轮可以创建多个 Task。
+- Task 可以声明依赖和 Resource Claim。
+- Scheduler 在依赖满足且资源不冲突时有限并行。
+- 一个 Task 由一个专业 Agent 执行。
+- Loop 和 ToolCall 属于 AgentRun，不是顶层 Task。
+- 同一个 AgentSpec 可以在同一 Run 中被调用多次；每次 Task 都有独立
+  AgentRun。
 
-### 4.1 Actual Production Call Chain
+### 2.1 真实调用链
 
 ```mermaid
 flowchart TD
-    UI["Vue 3 Console"] --> API["FastAPI Run API"]
-    API --> RS["RunService"]
-    RS --> RC["RunCoordinator Python loop"]
-    RC --> BS["Butler create_agent Supervisor"]
-    BS --> SD["Structured SupervisorDecision"]
-    SD --> TS["Deterministic TaskScheduler"]
-    TS --> HE["Health create_agent ReAct"]
-    TS --> CE["Care create_agent ReAct"]
-    TS --> DG["Device specialist LangGraph"]
-    HE --> HMCP["Scoped Health MCP Resources"]
-    CE --> EMCP["Scoped Care MCP tools"]
-    DG --> PM["Planner → Policy → Execute → Verify/Recover"]
-    PM --> DMCP["TD-derived device MCP tools"]
-    HMCP --> EDB["Eldercare SQLite store"]
-    EMCP --> EDB
-    DMCP --> SIM["wot-device-simulator / real adapters"]
-    RC --> RDB["SQLite RunStore"]
-    DG --> CDB["LangGraph SQLite checkpointer"]
+    UI[Vue 3 控制台] --> API[FastAPI Run API]
+    API --> RS[RunService]
+    RS --> RC[Python RunCoordinator]
+    RC --> BS[Butler create_agent Supervisor]
+    BS --> SD[结构化 SupervisorDecision]
+    SD --> TS[确定性 TaskScheduler]
+    TS --> HE[Health create_agent ReAct]
+    TS --> CE[Care create_agent ReAct]
+    TS --> DG[设备专业 Agent LangGraph]
+    HE --> HMCP[Scoped Health MCP Resource]
+    CE --> CMCP[Scoped Care MCP Tool]
+    DG --> PM[Planner -> Policy -> Execute -> Verify/Recover]
+    PM --> DMCP[TD 动态生成的设备 MCP Tool]
+    HMCP --> EDB[养老 SQLite Store]
+    CMCP --> EDB
+    DMCP --> SIM[Simulator 或真实设备 Adapter]
+    RC --> RDB[SQLite RunStore]
+    DG --> CDB[LangGraph SQLite Checkpointer]
 ```
 
-Important qualification:
+必须明确：
 
-- The Butler itself is built with LangChain `create_agent`.
-- Device specialists are compiled LangGraph graphs.
-- The outer Run/Supervisor/Scheduler lifecycle is currently an imperative
-  Python `RunCoordinator`, not one unified LangGraph `StateGraph`.
-- `health_agent` and `care_agent` use bounded `create_agent` ReAct runtimes.
-- Device specialists share a constrained LangGraph execution topology.
-- Therefore the runtime has a unified Task/Finding contract, but not one
-  unified LangGraph topology for the outer coordinator and every specialist.
+- Butler 使用 LangChain `create_agent`。
+- Health 和 Care 使用有限 `create_agent` ReAct。
+- 设备专业 Agent 是 LangGraph 子图。
+- 外层 Run、Task DAG、并行调度和 Supervisor 二次决策仍由 Python
+  `RunCoordinator` 驱动，不是统一 LangGraph 主图。
+- Monitor 是独立确定性服务，不是 LLM Agent。
 
-## 5. Supervisor, Tasks And Parallelism
+## 3. 当前 Agent
 
-The Supervisor returns a validated `SupervisorDecision` with one of:
-
-- `create_tasks`;
-- `finish`;
-- `clarify`.
-
-When creating Tasks it supplies:
-
-- `local_id`;
-- `agent_id`;
-- `objective`;
-- `reason`;
-- expected evidence;
-- success criteria;
-- dependencies;
-- resource claims;
-- priority;
-- parallel candidate flag.
-
-The deterministic `TaskScheduler` then:
-
-- rejects unavailable Agent IDs;
-- assigns real `task_id` values;
-- maps local dependencies to real IDs;
-- detects missing/cyclic dependencies through Pydantic validation;
-- selects ready Tasks;
-- limits parallelism;
-- prevents conflicting writes to the same claimed resource.
-
-Current limits default to:
-
-```text
-Supervisor iterations: 4
-Device Agent iterations: 4
-Health Agent iterations: 4
-Maximum tool calls: 16
-Maximum parallel Tasks: 4
-Maximum Tasks per plan: 16
-Total specialist timeout: 30 seconds
-LLM timeout: 12 seconds
-```
-
-## 6. Current Agent Inventory
-
-| Agent | Current implementation | LLM-driven | Current status |
+| Agent | 实现 | LLM 驱动 | 当前状态 |
 |---|---|---:|---|
-| Butler Supervisor | LangChain `create_agent`, structured `SupervisorDecision` | Yes | Active, but outer loop is Python |
-| `health_agent` | `create_agent` with scoped health resource tools | Yes | Active; freshness guard distinguishes stale evidence from infrastructure failure |
-| `care_agent` | `create_agent` with scoped care tools | Yes | Active; supports caregiver notification, duty fallback and care-task creation |
-| `environment_agent` | Device LangGraph with domain prompt/profile | Yes + deterministic execution | Active |
-| `security_agent` | Device LangGraph with scoped AgentSpec | Yes + deterministic execution | Active |
-| `energy_agent` | Device LangGraph with scoped AgentSpec | Yes + deterministic execution | Active |
-| `housekeeping_agent` | Device LangGraph with scoped AgentSpec | Yes + deterministic execution | Active |
-| `device_ops_agent` | Device LangGraph with scoped AgentSpec | Yes + deterministic execution | Active |
-| Monitor | Deterministic long-running domain service | No | Active; outbox events are submitted as source-attested Runs |
+| Butler Supervisor | `create_agent` + `SupervisorDecision` | 是 | 当前主入口 |
+| `health_agent` | Scoped Health MCP + bounded ReAct | 是 | 已接入 |
+| `care_agent` | Scoped Care MCP + bounded ReAct | 是 | 已接入 |
+| `environment_agent` | 设备 LangGraph | 是 + 确定性执行 | 已接入 |
+| `security_agent` | 设备 LangGraph | 是 + 确定性执行 | 已接入 |
+| `energy_agent` | 设备 LangGraph | 是 + 确定性执行 | 已接入 |
+| `housekeeping_agent` | 设备 LangGraph | 是 + 确定性执行 | 已接入 |
+| `device_ops_agent` | 设备 LangGraph | 是 + 确定性执行 | 已接入 |
+| Monitor | 长期运行的确定性服务 | 否 | 已接入 Domain Event Run |
 
-The device graph contains:
+并不是每个专业 Agent 在每个 Profile 中都有完整工作流。别墅主要使用环境、安防、
+能耗、家务和设备运维；养老主要使用健康、护理和环境，其余是扩展槽位。
+
+### 3.1 设备专业 Agent 子图
 
 ```text
 START
-→ plan
-→ policy
-→ confirm or execute
-→ verify/loop control
-→ recover when bounded recovery is allowed
-→ respond
-→ END
+-> plan
+-> policy
+-> confirm 或 execute
+-> verify / loop_control
+-> recover（仅允许的有限恢复）
+-> respond
+-> END
 ```
 
-High-risk confirmation uses native LangGraph `interrupt()` and resumes with
-`Command(resume=...)`.
+高风险确认使用 LangGraph 原生 `interrupt()`，恢复使用
+`Command(resume=...)`。
 
-## 7. Persistence And Restart Recovery
+## 4. Supervisor、Task 与并行
 
-Three separate persistence concerns currently exist:
+Supervisor 返回：
 
-| Store | Default file | Purpose |
+- `create_tasks`
+- `finish`
+- `clarify`
+
+创建 Task 时包含：
+
+- `local_id`
+- `agent_id`
+- `objective`
+- `reason`
+- `expected_evidence`
+- `success_criteria`
+- `depends_on`
+- `resource_claims`
+- `parallel_candidate`
+- `priority`
+- `target_type` / `target_mention`
+- `requested_capability`
+
+Scheduler 负责：
+
+- 拒绝不存在的 Agent ID；
+- 分配真实 `task_id`；
+- 把局部依赖转换成真实 ID；
+- 校验缺失依赖和循环依赖；
+- 选择 Ready Task；
+- 限制并行数量；
+- 阻止同一资源的冲突写；
+- 执行授权与 Effective Scope 约束。
+
+原则：
+
+> Supervisor 有任务拆解和并行建议权；Scheduler 有最终执行裁决权。
+
+同一个 Agent 的两个无依赖只读 Task 可以并行；同资源写操作必须串行。
+
+默认限制：
+
+```text
+Supervisor 最大轮次：4
+设备 Agent 最大循环：4
+Health Agent 最大循环：4
+最大 Tool 调用：16
+最大并行 Task：4
+单次计划最大 Task：16
+专业 Agent 总超时：30 秒
+LLM 超时：12 秒
+```
+
+## 5. Principal 与授权
+
+必须区分：
+
+- Human Principal：JH-1、JH-2、注册用户；
+- Human Role：护理员、家属、别墅业主、安保人员；
+- Software Agent：Health、Care、Environment 等；
+- Resource：Resident、Site、Room、Device；
+- Capability：`health.summary.read`、`device.control` 等。
+
+Task 中携带：
+
+```text
+Principal
+Target
+Requested Capability
+Effective Scope
+```
+
+其中 Requested Capability 可以由 Supervisor 提出，Effective Scope 只能由后端
+授权模块签发。
+
+当前执行范围：
+
+```text
+Principal 能力与关系范围
+INTERSECT Deployment Profile 设备
+INTERSECT AgentSpec/MCP Scope
+INTERSECT TD/Policy
+```
+
+养老已经具备：
+
+- `JH-1 -> caregiver_of elderly-001`
+- `JH-2 -> family_of elderly-002`
+- Resident 名称解析为规范 ID；
+- Task 创建前授权；
+- Health MCP 居民范围二次校验；
+- 跨 Resident 访问负向测试。
+
+别墅第一阶段使用 Site 级关系：
+
+- JH-1：业主，可读写；
+- JH-2：安保/观察主体，当前以只读为主。
+
+身份系统支持：
+
+- 后端维护的 Role Template；
+- 资源目标绑定；
+- 持久化 Principal；
+- PIN 哈希；
+- Bearer Session；
+- 种子演示账号一键进入。
+
+这仍是实验级身份系统，不是生产级统一认证。
+
+## 6. Deployment Profile 与 Domain
+
+当前 Profile：
+
+| Profile | Domain | 空间 | 配置设备 | TD 覆盖 |
+|---|---|---:|---:|---:|
+| `eldercare` | `eldercare` | 2 | 16 | 15 |
+| `villa` | `smart_home` | 12 | 23 | 23 |
+
+当前缺口：`purifier-102` 已写入养老 Profile，但缺少 TD。
+
+Profile 决定当前站点、空间、设备、启用 Agent 和领域提示词；Domain Operations
+决定如何把主体、资源、Telemetry、Monitor、Event 和 Action 投影到前端领域运行
+中心。Profile 不是 Role，Domain 也不是 Agent。
+
+## 7. TD、MCP 与设备链
+
+```text
+设备或 Simulator
+-> 设备注册
+-> WoT TD
+-> TD Parser / Tool Compiler
+-> MCP Tool Schema
+-> MCP Server / Client
+-> AgentSpec-scoped Specialist
+-> Principal/Policy
+-> 执行
+-> 状态验证
+```
+
+当前 TD 目录有 38 份设备 TD。工具名由设备和 Affordance 动态生成，例如：
+
+```text
+light_001__read_state
+light_001__action__turn_on
+light_001__action__set_brightness
+```
+
+LLM 不直接拼任意工具名，也不能绕过 MCP Client。
+
+Simulator 统一承载智能家居和养老设备仿真，端口为 `18080`，同时提供：
+
+- FastMCP；
+- REST；
+- Dashboard；
+- SQLite 状态。
+
+## 8. 养老领域与 Monitor
+
+养老领域包含：
+
+- Resident 与房间/设备关联；
+- Sensor Reading；
+- 健康摘要与趋势；
+- 确定性 Monitor 规则；
+- Risk Event；
+- 护理通知和护理 Task；
+- 低风险环境调节；
+- Health MCP Resource；
+- 养老 SQLite Store。
+
+Monitor 不使用 LLM 做阈值判断。它：
+
+1. 接收或轮询设备数据；
+2. 持久化 Reading；
+3. 执行确定性阈值和时间窗口规则；
+4. 去重风险事件；
+5. 通过 Outbox 创建 `source=monitor` 的正式 Run；
+6. 将 `run_id` 回写事件。
+
+风险等级支持 `medium`、`high`、`critical` 等确定性分类；处置状态机为：
+
+```text
+open -> acknowledged -> in_progress -> resolved | false_positive
+```
+
+当前已经覆盖心率、血压、血氧、温湿度等指标的记录与趋势，其中血压和湿度也已
+进入确定性风险分类。阈值仅用于实验性风险协同，不构成医疗诊断。
+
+## 9. 持久化与恢复
+
+| Store | 默认文件 | 用途 |
 |---|---|---|
-| ConversationStore | `data/conversations.db` | Conversations and Turns |
-| SQLiteRunStore | `data/agent_runs.db` | Runs, Tasks, AgentRuns, RunEvents and pending confirmation payloads |
-| LangGraph checkpointer | `data/agent_checkpoints.db` | Device graph state and native interrupts |
-| EldercareStore | `data/eldercare.db` | Residents, readings, risks and care actions |
+| ConversationStore | `data/conversations.db` | Conversation 与 Turn |
+| SQLiteRunStore | `data/agent_runs.db` | Run、Task、AgentRun、RunEvent、TraceArtifact 和确认负载 |
+| LangGraph Checkpointer | `data/agent_checkpoints.db` | 设备图状态与原生 interrupt |
+| EldercareStore | `data/eldercare.db` | Resident、Reading、Risk、Care Action |
 
-Recently completed behavior:
+已实现：
 
-- confirmation state no longer depends on an in-memory callback closure;
-- `RunService` can rebuild a Coordinator after restart;
-- it reloads the waiting Task and AgentRun from SQLite;
-- the device graph resumes using the same `task_id` as LangGraph `thread_id`;
-- the resumed Finding returns to the Supervisor for another decision.
+- 待确认状态不依赖内存闭包；
+- 重启后可重建 Coordinator；
+- 使用同一个 `task_id` 恢复 LangGraph Checkpoint；
+- 恢复后的 Finding 会回到 Supervisor 二次决策；
+- RunEvent 和 TraceArtifact 可在页面刷新后回放。
 
-Known persistence limitations:
+未实现：
 
-- detailed legacy `TraceStore` remains in memory;
-- RunEvent WebSocket wake-up uses a process-local `asyncio.Condition`;
-- multi-process/multi-instance deployment needs Redis or PostgreSQL
-  notifications;
-- arbitrary recovery of a process crash during a non-interrupted running Task
-  is not implemented.
+- 普通 Running Task 在任意进程崩溃点自动续跑；
+- 多实例 WebSocket 通知；
+- 完整取消和单 Task 独立重试。
 
-## 8. API And Frontend
+## 10. API 与前端
 
-Current Run API:
+主要 Run API：
 
 ```text
 POST /api/v2/runs
@@ -497,701 +353,243 @@ GET  /api/v2/runs/{run_id}
 GET  /api/v2/runs/{run_id}/tasks
 GET  /api/v2/runs/{run_id}/events
 GET  /api/v2/runs/{run_id}/tasks/{task_id}/agent-runs
+GET  /api/v2/runs/{run_id}/trace-artifacts/{artifact_id}
 POST /api/v2/runs/{run_id}/tasks/{task_id}/confirm
 WS   /ws/v2
 ```
 
-The old `/api/v2/tasks` runtime was removed.
-
-The Vue console:
-
-- displays conversations and Turns;
-- displays the Run timeline inline with each chat turn;
-- groups events by Run and Task;
-- shows Task status and Agent execution;
-- supports confirmation actions;
-- provides a generic Domain Operations Center driven by DomainManifest;
-- displays real Monitor heartbeat, domain resources, telemetry, events and
-  linked Agent Runs;
-- persists the selected demo account in local storage.
-
-Current demo identities are hard-coded in the frontend:
-
-```text
-JH-1: 王护理员, role=operator, displayed resident=elderly-001 张爷爷
-JH-2: 赵观察员, role=viewer, displayed resident=elderly-002 李奶奶
-```
-
-These are not authenticated accounts. `user_id` and `role` are client-provided
-values.
-
-Known observability gap:
-
-- RunEvents currently expose Supervisor and Task lifecycle events;
-- detailed model calls, token usage, TTFT, internal specialist loops and tool
-  calls remain in the legacy TraceStore and are not fully projected into
-  RunEvents;
-- therefore the new frontend can show zero token/latency values even when real
-  model calls occurred.
-
-## 9. Device And WoT Chain
-
-The intended device chain is:
-
-```text
-Device or simulator
-→ device registry
-→ WoT TD
-→ TD parser/tool compiler
-→ MCP tool schema
-→ MCP server/client
-→ AgentSpec-scoped specialist
-→ Policy/RBAC
-→ execution
-→ state verification
-```
-
-The standalone simulator:
-
-- runs FastMCP, REST and dashboard on port `18080`;
-- stores simulated state in `wot-device-simulator/data/state.db`;
-- includes smart-home and eldercare-related devices;
-- is the preferred unified simulation entry instead of separate ad-hoc HTTP
-  simulators.
-
-Correct simulator executable:
-
-```powershell
-cd D:\Users\gyq16\Desktop\PRJ\WoTAgent\wot-device-simulator
-.\.venv\Scripts\wot-sim-api.exe
-```
-
-The documented `python -m wot_device_simulator.service` command currently exits
-without starting the server because `service.py` defines `main()` but does not
-invoke it under `if __name__ == "__main__"`.
-
-## 10. Eldercare Domain
-
-The eldercare domain currently contains:
-
-- residents and room/device associations;
-- sensor readings;
-- health summaries and trends;
-- deterministic Monitor rules;
-- risk events;
-- care notifications and care tasks;
-- environment adjustment actions;
-- Health MCP Resources;
-- eldercare SQLite storage;
-- legacy goal graph and strategy modules retained during migration.
-
-Current demo residents:
-
-```text
-elderly-001 → 张爷爷
-elderly-002 → 李奶奶
-```
-
-The recommended conceptual distinction is:
-
-- user/account/caregiver = authorization principal;
-- resident = protected data subject and resource target;
-- Agent = delegated software principal with a limited capability scope;
-- device = protected IoT resource.
-
-## 11. Confirmed Real-World Failure
-
-On 2026-07-18, a real DeepSeek + Health ReAct + MCP request was executed:
-
-```text
-查看张爷爷今天的健康状态
-```
-
-Run:
-
-```text
-run_62a00f682d03
-```
-
-The Run created four Health Tasks and failed after the maximum Supervisor
-iterations.
-
-### 11.1 Agent Identity Contract Failure
-
-The Task expected:
-
-```json
-{"agent_id": "health_agent"}
-```
-
-The model repeatedly returned:
-
-```json
-{"agent": "Health Agent"}
-```
-
-The runtime rejected it:
-
-```text
-specialist returned agent='Health Agent'; expected 'health_agent'
-```
-
-Root cause:
-
-- the system prompt calls the specialist "Health Agent";
-- the internal ID is `health_agent`;
-- `AgentFinding.agent` is an unconstrained `str`;
-- `create_agent(name="health_agent")` does not populate that output field;
-- runtime performs strict string equality after generation.
-
-Remediation implemented locally in `54e2528`:
-
-1. specialist models now return an identity-free `AgentFindingPayload`;
-2. the Coordinator injects Agent, Task and AgentRun identity into the persisted
-   `AgentFinding`;
-3. the prompt explicitly forbids model-generated runtime identity.
-
-The deterministic tests pass, but the real DeepSeek scenario has not yet been
-rerun.
-
-### 11.2 Resident Entity Resolution Failure
-
-The Health Task contained only natural language:
-
-```text
-查询张爷爷今天的健康状态
-```
-
-It did not carry:
-
-```json
-{"resident_id": "elderly-001"}
-```
-
-The model therefore called:
-
-```text
-elderly://张爷爷/profile
-elderly://张爷爷/health/summary
-```
-
-The MCP Resource expects:
-
-```text
-elderly://elderly-001/profile
-elderly://elderly-001/health/summary
-```
-
-This produced `resident not found` errors. In one iteration, repeated tool
-failure also resulted in `structured_response=None`.
-
-This was not merely a prompt problem. `AgentTask` now carries typed Principal,
-Target, requested capability and effective scope. A domain Resolver resolves
-the resident before execution, and the Health executor receives the canonical
-ID.
-
-### 11.3 Ineffective Retry
-
-The Supervisor saw the infrastructure/contract failure and created essentially
-the same Health Task four times.
-
-The following controls are now implemented:
-
-- repeated failure fingerprint detection;
-- duplicate Task detection across Supervisor iterations;
-- recoverable versus non-recoverable error classification;
-- distinction between business evidence shortage and platform contract failure.
-
-The Coordinator now refuses to execute the same non-recoverable subject twice.
-More advanced compensation and alternative delegation remain future work.
-
-## 12. Current Authorization Problem
-
-The backend currently has coarse role-based permissions such as:
-
-```text
-viewer   → device.read
-operator → device.read + device.control
-admin    → wildcard
-```
-
-The new P0 authorization service now enforces the demo relationship:
-
-```text
-JH-1 may access elderly-001
-JH-2 may access elderly-002
-```
-
-This is still not production authentication: the client can currently submit
-its own `user_id` and role. The relationship check is therefore a functional
-experiment boundary, not a secure identity boundary.
-
-`Resident.caregiver` is a display string, not a principal ID. Existing
-`resident_scope` fields constrain some domain delegations, but do not prove that
-the current user is authorized for that resident.
-
-The Health MCP client now independently checks the effective resident scope and
-returns `RESOURCE_SCOPE_DENIED` for cross-resident access.
-
-Recommended target model:
-
-```text
-RBAC + resource scope + relationship/context policy
-```
-
-Suggested entities:
-
-```text
-Principal
-Resident
-CareAssignment
-Permission
-AuthorizationContext
-```
-
-Suggested decision:
-
-```text
-role permits health.summary.read
-AND principal is assigned to the resident
-AND contextual constraints such as shift/purpose/emergency are satisfied
-```
-
-An eventual Task should carry typed fields similar to:
-
-```json
-{
-  "objective": "查看今天的健康状态",
-  "principal": {
-    "user_id": "JH-1",
-    "role": "operator"
-  },
-  "target": {
-    "type": "resident",
-    "resident_id": "elderly-001",
-    "display_name": "张爷爷"
-  },
-  "requested_capability": "health.summary.read",
-  "resource_scope": ["resident:elderly-001"]
-}
-```
-
-The MCP client must independently reject a model-supplied resident outside the
-authorized scope.
-
-## 12.1 Real Run Semantics Bug: Conditional Delegation And Stale Evidence
-
-Another real eldercare request exposed a different failure mode from the older
-identity/ID-resolution bug:
-
-```text
-查看张爷爷今天的健康状态；如果异常则通知护理员
-```
-
-What actually happened:
-
-1. the Supervisor created two Tasks in the first round:
-   - `health_agent`: query Zhang's health status;
-   - `care_agent`: notify caregiver if abnormal;
-2. the Health Task completed successfully and found heart rate `78`, SpO2 `97%`
-   and no fall;
-3. the Care Task had `depends_on`, but that only means "wait for upstream
-   completion", not "execute only if the condition is true";
-4. the Scheduler therefore launched Care anyway after Health finished;
-5. the Care path at the time still used the legacy `EldercareChatAgent`
-   adapter and could not safely interpret the conditional objective "notify
-   only if abnormal, otherwise do nothing", so it returned
-   `needs_more_information`; the production path has since migrated to bounded
-   `create_agent`, while cross-Agent conditional work still follows
-   investigate-then-decide semantics;
-6. because Health succeeded and Care was blocked, the fixed Task-status
-   aggregation marked the Run `partial_success`;
-7. in the next Supervisor round, the model correctly read the Health Finding and
-   returned the final answer: no notification was needed.
-
-Important interpretation:
-
-- the screenshot/result showing a Care failure was a partial failure of one
-  prematurely created Task;
-- it was not proof that the overall business goal failed;
-- the final answer was directionally correct, but the execution plan was not.
-
-Root cause split:
-
-- orchestration bug: cross-Agent conditional work was created too early;
-- evidence-quality bug: stale health data was treated as sufficient evidence for
-  "today is normal".
-
-Why the plan was wrong:
-
-```text
-Current buggy pattern
-Supervisor round 1
--> create Health Task
--> create Care Task with depends_on=Health
--> Scheduler waits for Health, then still runs Care
-```
-
-`depends_on` currently models ordering only. It does not encode:
-
-- conditional execution;
-- skip-on-upstream-false;
-- branch guards;
-- no-op semantics for downstream Tasks.
-
-More appropriate execution pattern:
-
-```text
-Supervisor round 1
--> create Health Task only
--> Health returns structured Finding
--> Supervisor round 2 evaluates the Finding
--> abnormal: create Care Task
--> normal: finish directly
-```
-
-The current architecture already supports second-round Supervisor decisions. The
-failure is that the model was allowed to create a natural-language conditional
-Care Task in round 1, while the runtime does not yet implement condition/skip
-semantics for such Tasks.
-
-Evidence-quality problem:
-
-- the latest health reading was already many hours old;
-- the system therefore should not state with high confidence that "today's
-  health is normal";
-- the correct statement is closer to: the most recent available reading looked
-  normal, but the data is stale, so the current status cannot be fully
-  confirmed.
-
-Required remediation direction:
-
-1. constrain Supervisor prompting and validation so conditional cross-Agent
-   actions follow "investigate first, delegate later";
-2. reject or rewrite first-round conditional Tasks when the runtime only
-   supports pure ordering dependencies;
-3. add explicit Task semantics in the future if conditional branches are needed,
-   such as `guard`, `skip_reason` or a platform-attested no-op outcome;
-4. require Health to downgrade confidence when critical readings are stale;
-5. return `needs_more_information` or a structured data-quality abnormality
-   instead of `completed` when freshness is insufficient for the requested
-   claim.
-
-## 13. Monitor Status
-
-The intended Monitor is not an LLM Agent. It should:
-
-- continuously receive or poll device data;
-- persist readings;
-- execute deterministic threshold and temporal rules;
-- deduplicate risk events;
-- submit a structured event to the Butler;
-- never send high-frequency raw telemetry directly to the LLM.
-
-The eldercare package contains collector, monitor and monitor service behavior.
-The application-layer `DomainEventConsumer` now claims the durable outbox and
-creates a normal Run through `RunService`. Event Runs persist:
-
-```text
-source=monitor
-domain_id=eldercare
-source_event_id=<risk id>
-source_context.target=<canonical resident target>
-```
-
-Each Monitor event uses an isolated Conversation to prevent unrelated sensor
-events from accumulating shared LLM history. The event stores its linked
-`run_id`, so the Domain Operations Center can open the same Run timeline.
-
-## 14. Tests And Their Actual Meaning
-
-Latest verified automated results:
-
-```text
-Backend: 262 passed, 3 skipped
-Simulator: 64 passed
-Frontend: 45 passed
-Frontend typecheck and production build: passed
-```
-
-These tests cover:
-
-- Run/Task/AgentRun models;
-- Task DAG validation;
-- dependency and resource-conflict scheduling;
-- parallel batch execution;
-- Run API and WebSocket replay;
-- native LangGraph interrupt/resume;
-- SQLite RunStore persistence;
-- rebuilding Store and Coordinator before confirmation resume;
-- scripted create_agent multi-step behavior;
-- real-model opt-in Health/Scope smoke cases;
-- Domain/Profile isolation and Principal registration/session paths;
-- deterministic risk classification and event disposition;
-- frontend Run/Task rendering, execution waves, trace details and API calls.
-
-What these results do not prove:
-
-- correctness with the real DeepSeek model;
-- statistical stability across a large real-model Chinese request set;
-- all combinations of Agent, Profile, Principal and device;
-- production-grade identity, authorization and adversarial security;
-- arbitrary crash recovery;
-- production security.
-
-The create_agent tests use a `ScriptedChatModel` that already emits:
-
-```json
-{"agent": "health_agent", "resident_id": "elderly-001"}
-```
-
-This originally hid the production contract and entity-resolution failures.
-The runtime now injects Agent identity, resolves canonical targets before
-execution and enforces effective scope at MCP boundaries; scripted tests still
-cannot prove broad real-model quality.
-
-Required future test layers:
-
-1. deterministic unit tests;
-2. fake-model integration tests;
-3. recorded/replay model contract tests;
-4. opt-in real-model smoke tests with strict token budgets;
-5. simulator-backed end-to-end scenarios;
-6. negative authorization and scope tests.
-
-Every release candidate should execute at least:
-
-```text
-查看张爷爷今天的健康状态
-查询李奶奶最近生命体征
-JH-2 尝试读取张爷爷健康数据
-打开客厅灯并完成确认
-并行查询健康和房间环境
-相同不可恢复错误不得重复执行四次
-```
-
-## 15. Decision Modes: Important Caveat
-
-Configuration exposes:
+旧 `/api/v2/tasks` 已删除。
+
+Vue 控制台当前支持：
+
+- Principal 登录与注册；
+- Profile 切换；
+- 新会话角色化操作提示；
+- Conversation/Turn；
+- Run/Task/AgentRun 分层时间线；
+- 调度波次、依赖、并行和等待关系；
+- 工具输入、输出和验证详情；
+- Markdown 最终回复；
+- 语音输入；
+- 领域运行中心；
+- 风险事件等级、状态和处置动作；
+- 页面刷新后的事件恢复。
+
+## 11. Trace 与指标
+
+RunEvent 用于精简实时流，TraceArtifact 保存大载荷。当前记录：
+
+- 输入来源；
+- Supervisor 决策轮次；
+- Task 创建和调度波次；
+- Agent Objective；
+- 模型请求、响应摘要和 Token；
+- Tool 输入、输出与状态验证；
+- Policy/RBAC 判断；
+- Finding、Failure 和最终 Run 状态；
+- 总耗时、循环次数和 Tool 次数。
+
+`ainvoke` 没有真实首 Token 流，因此 TTFT 不可用时必须显示“不可用”，不能显示
+为零。最终响应总耗时使用 Run 从创建到完成的 End-to-End Duration。
+
+## 12. 决策模式注意事项
+
+配置提供：
 
 ```text
 AGENT_DECISION_MODE=rule|hybrid|agentic
 ```
 
-However, after the Run/Task refactor this is not yet a complete top-level
-strategy switch:
+但当前它不是三个完整且等价的顶层 Run 实现：
 
-- the Run Supervisor path always calls the LLM `create_agent` Supervisor;
-- decision mode still affects parts of device planning and older eldercare
-  strategy code;
-- a full rule-based Run/Supervisor baseline and shadow comparison are not
-  uniformly wired into the new Coordinator.
+- Run Supervisor 仍使用 LLM `create_agent`；
+- Decision Mode 主要影响部分设备和旧养老策略；
+- 完整 Rule Baseline 与 Shadow 对比尚未统一接入 Coordinator。
 
-Do not claim that all three modes currently provide equivalent end-to-end Run
-implementations.
+不能声称三种模式已经实现等价端到端运行。
 
-## 16. Security Status
+## 13. 已解决的真实故障
 
-The system has experiment-grade persistent Principal, PIN and bearer-session
-support. It still lacks production-grade authentication, deployment controls,
-rate limiting and secret governance.
+### 13.1 Agent 身份漂移
 
-On 2026-07-18 a temporary Cloudflare Quick Tunnel was opened to the Vite
-frontend. Because Vite proxied `/api` and `/ws/v2`, this also exposed the
-unauthenticated backend through the same public origin.
+历史上模型曾输出展示名 `Health Agent`，运行时要求 `health_agent`。当前模型只
+生成业务 Finding Payload，Agent、Task 和 AgentRun ID 由运行时注入。
 
-After the user reported suspected account compromise:
+### 13.2 Resident 名称误作 ID
 
-- `cloudflared` was force-stopped;
-- frontend, backend and simulator were stopped;
-- ports `5174`, `8000`, `18080` and the Cloudflare metrics port were verified
-  closed;
-- the temporary public URL returned Cloudflare `530`.
+历史上模型曾调用 `elderly://张爷爷/...`。当前 Supervisor 提供 Mention，
+ResidentEntityResolver 解析为 `elderly-001`，授权模块过滤后才创建 Task。
 
-Service status recorded during the earlier mobile-test session:
+### 13.3 相同失败重复调度
 
-```text
-Frontend: managed and healthy on 127.0.0.1:5174
-Backend: managed and healthy on 127.0.0.1:8000
-Simulator: managed and healthy on 127.0.0.1:18080
-Domain event consumer: enabled
-Independent Monitor: managed and heartbeat online/running
-Cloudflare Quick Tunnel: enabled for temporary mobile testing
-```
+历史上同一个不可恢复 Health 错误被调度四次。当前 `TaskFailure` 包含 Category、
+Code、Retryable 和 Fingerprint，Coordinator 会阻止等价不可恢复 Task。
 
-This is a historical runtime snapshot and must be checked again before use.
-The tunnel was reopened at the user's explicit request despite incomplete
-production controls. Run `stop-wotagent.bat` immediately after testing.
-Do not treat it as a production deployment until at least one of the following
-exists:
+### 13.4 正确回答却被标记失败
 
-- authenticated reverse proxy/access gateway;
-- backend authentication and server-derived roles;
-- strict origin/network restrictions;
-- rate limits;
-- secret and API-key rotation;
-- audit and incident review.
+当前区分：
 
-Never expose the current Vite proxy directly to the public Internet.
+- 业务目标完成；
+- 部分成功；
+- 证据不足并需要外部输入；
+- 基础设施失败。
 
-## 17. Current Git And Workspace State
+健康数据过期时返回 `needs_more_information`，保留有用证据，不再伪装成系统
+异常。
 
-Recent commits:
+### 13.5 条件委派提前执行
+
+历史上 Supervisor 同时创建 Health 和依赖它的 Care Task，但 `depends_on` 只
+保证顺序，不表示条件成立。当前建议先调查，下一轮根据 Finding 决定是否创建
+Care Task。通用 Guard/Skip Task 仍未实现。
+
+## 14. 当前测试结果
+
+最新自动化结果：
 
 ```text
-4b8f954 docs: add agent abstraction interview guide
-1c05023 feat: complete health risk classification workflow
-cf28c5d feat: visualize agent execution waves
-8ea4ef5 fix: preserve insufficient-evidence run outcomes
-1944d9d refactor: close agent scopes and persist focused traces
-f5cc0aa feat: persist run state across restarts
+后端：262 passed, 3 skipped
+Simulator：64 passed
+前端：45 passed
+前端 typecheck/build：通过
 ```
 
-At handoff, the repository also contains runtime-generated changes:
+覆盖：
+
+- Run/Task/AgentRun 模型；
+- DAG、依赖、资源冲突和有限并行；
+- 同一 Agent 多 Task；
+- LangGraph interrupt/resume；
+- SQLite 持久化和确认恢复；
+- Principal、Role Template、关系与 Session；
+- Resident 实体解析和 MCP Scope；
+- Health/Care ReAct；
+- TD/Policy/Verification；
+- Monitor Run 与事件幂等；
+- 风险分类和处置状态机；
+- 前端事件回放和分层 Trace。
+
+这些测试不能证明：
+
+- 大样本真实模型中文稳定性；
+- 所有 Agent/Profile/Principal/Device 组合；
+- 生产级身份与安全；
+- 任意崩溃点恢复；
+- 长期真实设备运行。
+
+真实模型测试必须保持 opt-in、小预算、固定模型和严格循环上限。
+
+## 15. 安全状态
+
+当前身份系统是实验级，不是生产级。历史上曾用 Cloudflare Quick Tunnel 暴露
+Vite，而 Vite 同时代理 API 和 WebSocket。
+
+公网暴露前至少应具备：
+
+- 认证反向代理或 Access Gateway；
+- 生产级后端鉴权；
+- 限流；
+- Secret/API Key 轮换；
+- Origin 与网络限制；
+- 审计和事故处置。
+
+短时测试结束后必须执行 `stop-wotagent.bat`。本文不记录“当前服务是否正在
+运行”，因为进程状态会变化，应使用 `status-wotagent.bat` 实时确认。
+
+## 16. 当前已知缺口
+
+1. 养老 Profile 的 `purifier-102` 缺少 TD。
+2. 通用条件 Task Guard/Skip 未实现。
+3. 外层仍是 Python RunCoordinator，不是统一 LangGraph 主图。
+4. 顶层 Rule/Hybrid Shadow 对比未完整实现。
+5. Care 的确认回执、任务状态更新和升级机制仍可增强。
+6. 养老场景中部分 Agent 只有能力槽位，没有完整专用流程。
+7. 多实例通知、任意崩溃恢复、取消和独立 Task 重试未完成。
+8. 真实模型评测样本仍小。
+9. SimuHome qt1/qt2/qt4 和 600 集动态运行未完成。
+
+## 17. 下一步建议
+
+### P0：补齐当前契约
+
+1. 为 Profile 增加“所有 Device ID 必须存在 TD”的自动化校验。
+2. 添加 `purifier-102` TD，或从 Profile 移除该设备。
+3. 保持真实模型冒烟测试小预算运行。
+4. 继续检测最短 Task 路径、无效保守澄清和历史上下文污染。
+
+### P1：深化授权
+
+1. 增加岗位、班次、目的和紧急上下文。
+2. 把别墅 Site Scope 细化到 Room/Post/Device。
+3. 增加 Session 生命周期、限流和生产认证网关。
+
+### P2：完善智能体协作
+
+1. 决定是否将外层 Coordinator 改造成 LangGraph 主图。
+2. 增加条件 Task Guard/Skip，或继续坚持分轮条件委派。
+3. 扩展 Care 的确认、状态更新和有限升级 Tool。
+4. 统一所有 Specialist Finding 和 Failure 契约。
+5. 完成顶层 Rule Baseline 与 Shadow Mode。
+
+### P3：运行强化
+
+1. 增加取消和独立 Task 重试 API。
+2. 处理服务重启时遗留的 Running Task。
+3. 使用 Redis/PostgreSQL 通知支持多实例。
+4. 增加 Secret 管理和安全部署。
+
+## 18. 建议优先阅读
+
+架构：
 
 ```text
-wot-device-simulator/data/state.db-shm
-wot-device-simulator/data/state.db-wal
-.codex-remote-attachments/
+doc/README.md
+doc/TECHNICAL_GUIDE.md
+wotagent-prototype/src/wotagent/orchestration/run_models.py
+wotagent-prototype/src/wotagent/orchestration/run_coordinator.py
+wotagent-prototype/src/wotagent/orchestration/scheduler.py
+wotagent-prototype/src/wotagent/runtime/run_runtime.py
 ```
 
-These are not part of the intended source change. Do not revert or delete them
-without checking with the user.
-
-## 18. Recommended Next Work
-
-### P0: Restore Correctness
-
-1. Keep the real-model suite opt-in and preserve its explicit token budgets.
-2. Project create_agent usage and repair-call usage into persistent RunEvents.
-3. Add a separate simulator-backed multi-Agent smoke suite; do not mix it with
-   the isolated Health/Scope contract test.
-4. Preserve `source_request` as the immutable user-goal boundary while allowing
-   the Supervisor to propose narrower specialist objectives.
-5. Prevent first-round creation of cross-Agent conditional Tasks unless the
-   runtime has explicit guard/skip semantics.
-6. Make health evidence freshness a first-class completion gate so stale data
-   cannot produce a high-confidence "today is normal" conclusion.
-
-### P1: Complete Authorization
-
-Completed foundation:
-
-- persistent Principals, backend-owned role templates and relationships;
-- PIN login and bearer sessions for registered users;
-- capability/resource context propagated through Run → Task → Agent → MCP;
-- resident and site relationship scope with negative cross-scope tests.
-
-Next:
-
-1. Add contextual checks for shift, purpose and emergency access.
-2. Refine villa site scope into room/post/device relationships where needed.
-3. Add production authentication gateway, session lifecycle hardening and rate
-   limits.
-
-### P2: Finish The Agent Architecture
-
-1. Decide whether the outer Coordinator should become a LangGraph Supervisor
-   graph.
-2. Extend the migrated Care `create_agent` with acknowledgement, task-status
-   updates and bounded escalation tools.
-3. Normalize all specialist output and error contracts.
-4. Project specialist loops, tool calls, model usage and TTFT into RunEvents.
-5. Add explicit conditional Task guard/skip semantics or keep conditional
-   delegation across Supervisor waves.
-6. Restore a real rule baseline and shadow-mode comparison for the Run runtime.
-
-### P3: Operational Hardening
-
-1. Add cancellation and independent Task retry APIs.
-2. Recover or mark abandoned running Tasks after process restart.
-3. Replace process-local WebSocket notifications for multi-instance use.
-4. Add rate limiting, secret management and authenticated deployment.
-5. Fix simulator module startup documentation or add a `__main__` guard.
-
-## 19. Files To Read First
-
-For architecture:
+Agent：
 
 ```text
-src/wotagent/orchestration/run_models.py
-src/wotagent/orchestration/run_coordinator.py
-src/wotagent/orchestration/scheduler.py
-src/wotagent/runtime/run_runtime.py
-src/wotagent/runtime/container.py
+wotagent-prototype/src/wotagent/agents/contracts.py
+wotagent-prototype/src/wotagent/agents/specs.py
+wotagent-prototype/src/wotagent/agents/supervisor_agent.py
+wotagent-prototype/src/wotagent/agents/health.py
+wotagent-prototype/src/wotagent/agents/care.py
+wotagent-prototype/src/wotagent/agent_graph/graph.py
 ```
 
-For Agents:
+领域与授权：
 
 ```text
-src/wotagent/agents/contracts.py
-src/wotagent/agents/specs.py
-src/wotagent/agents/factory.py
-src/wotagent/agents/health.py
-src/wotagent/agent_graph/graph.py
+wotagent-prototype/src/wotagent/domain/operations.py
+wotagent-prototype/src/wotagent/domains/eldercare/
+wotagent-prototype/src/wotagent/domains/smart_home/
+wotagent-prototype/src/wotagent/identity/
+wotagent-prototype/src/wotagent/auth/
+wotagent-prototype/src/wotagent/policy/
 ```
 
-For eldercare:
-
-```text
-src/wotagent/domains/eldercare/models.py
-src/wotagent/domains/eldercare/store.py
-src/wotagent/domains/eldercare/health_gateway.py
-src/wotagent/domains/eldercare/monitor.py
-src/wotagent/domains/eldercare/runtime.py
-```
-
-For API/persistence:
-
-```text
-src/wotagent/application/run_service.py
-src/wotagent/api/app.py
-src/wotagent/api/routers/runs.py
-src/wotagent/orchestration/run_store.py
-src/wotagent/runtime/lifecycle.py
-```
-
-For authorization:
-
-```text
-src/wotagent/auth/rbac.py
-src/wotagent/policy/engine.py
-```
-
-For frontend:
+前端：
 
 ```text
 frontend/wotagent-v2-console/src/App.vue
 frontend/wotagent-v2-console/src/composables/useAgentRuntime.ts
 frontend/wotagent-v2-console/src/components/TaskWorkspace.vue
-frontend/wotagent-v2-console/src/types/agent.ts
+frontend/wotagent-v2-console/src/components/InlineTraceTimeline.vue
 ```
 
-## 20. Questions For The Next AI
+## 19. 不可违反的设计约束
 
-1. Should domain entity resolution be a platform `EntityResolver`, a
-   Supervisor responsibility or a domain adapter? Explain the trust boundary.
-2. What is the cleanest typed representation of principal, target, capability
-   and resource scope without making the platform eldercare-specific?
-3. Should eldercare authorization use RBAC + ABAC, RBAC + ReBAC, or a combined
-   policy model?
-4. Should the specialist `agent` field remain model-generated under `Literal`
-   constraints, or be platform-attested after generation?
-5. How should repeated failure fingerprints be represented so the Supervisor
-   cannot waste iterations on a non-recoverable contract error?
-6. Should the outer RunCoordinator be replaced by a LangGraph StateGraph, and
-   what state/persistence boundaries would that improve?
-7. How can real-model smoke tests remain affordable while still detecting the
-   failures that scripted models missed?
-
-## 21. Non-Negotiable Design Constraints
-
-- Do not let an LLM bypass RBAC, Policy, MCP scope or TD validation.
-- Do not let an LLM directly invoke arbitrary tool names.
-- Do not treat a tool returning HTTP 200 as verified goal completion.
-- Do not expose private chain-of-thought.
-- Do not send high-frequency raw sensor data directly to the LLM.
-- Do not allow unlimited Agent loops or retries.
-- Do not diagnose illness or adjust medication.
-- Do not expose the unauthenticated development stack through a public tunnel.
-- Do not claim a capability is complete based only on fake-model tests.
+- LLM 不得绕过 Principal、RBAC、Policy、MCP Scope 或 TD。
+- LLM 不得直接调用任意工具名或硬件。
+- HTTP 200 不得直接等同于目标完成。
+- 不得暴露私有 Chain-of-Thought。
+- 不得把高频原始传感器数据直接塞给 LLM。
+- 不得允许无限 Agent Loop 或无限重试。
+- 养老场景不得诊断疾病或调整药物。
+- 不得仅凭 Fake LLM 测试声称真实模型能力完成。
+- 未完成生产安全措施前，不得把开发栈作为公网服务长期暴露。

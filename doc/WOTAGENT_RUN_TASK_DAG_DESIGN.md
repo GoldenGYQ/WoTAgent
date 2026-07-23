@@ -70,19 +70,19 @@ Conversation
             └── Agent Run
 ```
 
-### 3.1 Conversation
+### 3.1 对话（Conversation）
 
 持久对话容器，负责保存用户与系统之间可跨轮使用的语义上下文。
 
 标识：`conversation_id`
 
-### 3.2 Turn
+### 3.2 对话轮次（Turn）
 
 一次用户输入和最终系统回复。Turn 是前端聊天界面的基本阅读单位。
 
 标识：`turn_id`
 
-### 3.3 Run
+### 3.3 运行实例（Run）
 
 系统处理一个 Turn 的一次完整运行。重试同一 Turn 时可以创建新的 Run。
 
@@ -96,7 +96,7 @@ Conversation
 - 汇总 Token、耗时、工具调用和结果；
 - 生成最终回复。
 
-### 3.4 Task
+### 3.4 专项任务（Task）
 
 具有独立目标、负责 Agent、预期证据和成功条件的专项工作单元。
 
@@ -109,13 +109,13 @@ Task 必须满足：
 - 可以被其他 Task 依赖；
 - 值得独立监控、确认或重试。
 
-### 3.5 Agent Run
+### 3.5 智能体运行（AgentRun）
 
 某个专业 Agent 执行一个 Task 的一次尝试。Task 重试时创建新的 Agent Run。
 
 标识：`agent_run_id`
 
-### 3.6 Loop
+### 3.6 循环（Loop）
 
 专业 Agent 内部的一次 Observe-Reason-Act 迭代。
 
@@ -123,7 +123,7 @@ Task 必须满足：
 
 Loop 不是 Task。多个 Loop 共同完成同一个 Task。
 
-### 3.7 Tool Call
+### 3.7 工具调用（ToolCall）
 
 一次 MCP Resource 读取或 MCP Tool 调用。
 

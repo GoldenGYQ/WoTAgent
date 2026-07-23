@@ -1,4 +1,4 @@
-# WoTAgent 2.0 Console
+# WoTAgent 控制台
 
 WoTAgent 2.0 的独立 Vue 3 运行控制台。该项目只接入 `/api/v2` 和 `/ws/v2`，不依赖旧版前端代码。
 

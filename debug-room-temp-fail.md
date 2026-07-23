@@ -1,95 +1,86 @@
-# [OPEN] Debug Session: room-temp-fail
+# [已处理] 居民房间温控失败调试记录
 
-## Problem
-- Run ID: `USERrun_f418755a17fd`
-- User task: `把张爷爷房间温度调到 24 度，并确认是否生效`
-- Symptom: task/run failed unexpectedly
-- Goal: use real runtime evidence and, if needed, real LLM execution to identify the root cause
+## 问题
 
-## Initial Hypotheses
-- H1: 目标实体解析错误，`张爷爷房间` 没有被正确映射到可控空间/设备，导致下游任务准备失败。
-- H2: Deployment/RBAC/MCP scope 限制拦截了温控动作，请求在调度前或执行前被拒绝。
-- H3: Supervisor/Environment Agent 选错了工具或任务拆分错误，导致控制链路走偏。
-- H4: 设备侧或 WoT/MCP 网关执行成功，但“确认是否生效”的回读校验失败，最终被判成失败。
-- H5: 当前真实模型在该请求上输出了不符合结构约束的决策/参数，导致运行时解析或修复失败。
+- Run ID：`run_f418755a17fd`
+- 用户请求：`把张爷爷房间温度调到 24 度，并确认是否生效`
+- 现象：Run 意外失败。
+- 目标：使用持久化事件、真实模型和真实 MCP 找到根因。
 
-## Evidence Plan
-- 先读取该 Run 的持久化记录、事件流、任务列表与失败字段。
-- 再定位对应后端日志/运行轨迹，判断失败发生在 Supervisor、TaskPreparation、AgentExecutor 还是 Device/MCP 层。
-- 若现有证据不足，再做最小化运行时插桩并用真实模型复现同类请求。
+## 初始假设
 
-## Status
-- Evidence collected from historical run and real-model reproductions
-- Instrumentation added to runtime events
-- Minimal fixes implemented and post-fix verified
+- H1：`张爷爷房间` 没有解析到规范 Resident、Room 或 Device。
+- H2：Deployment/RBAC/MCP Scope 拒绝温控。
+- H3：Supervisor 或 Environment Agent 选择错误任务/工具。
+- H4：设备执行成功，但回读验证失败。
+- H5：真实模型输出不满足结构约束。
 
-## Evidence Collected
-- Historical failed run in DB is `run_f418755a17fd` rather than `USERrun_f418755a17fd`.
-- `run_f418755a17fd` failed before any task creation:
-  - `task_ids=[]`
-  - `supervisor_iterations=0`
-  - events: `run.started -> model.request.started -> model.request.failed -> run.failed`
-- Pre-fix `model.request.failed` contained an empty error string, but the duration was ~12s, matching `llm_timeout_seconds=12.0`.
-- Real supervisor invocation against the configured DeepSeek endpoint succeeded with a valid structured `SupervisorDecision`, proving the business request itself is valid and the model route is reachable.
-- Forced timeout probe with `llm_timeout_seconds=1.0` now records:
-  - `error_type=TimeoutError`
-  - `error_repr=TimeoutError()`
-  - `timeout_seconds=1.0`
-- Real end-to-end reproduction before resident-context fix sometimes clarified instead of executing because `environment_agent` received:
-  - `target=null`
-  - a narrowed `effective_scope`, but no explicit resident-room mapping
-- Real end-to-end reproduction after resident-context fix completed successfully:
-  - target resolved to `elderly-001`
-  - resident context included `room=A-101`, `environment_device_id=ac-002`, `environment_sensor_device_id=environment-sensor-001`
-  - final response confirmed temperature adjusted to 24C and effective
+## 证据
 
-## Hypothesis Status
-- H1: 目标实体解析错误，`张爷爷房间` 没有被正确映射到可控空间/设备，导致下游任务准备失败。
-  - Partially confirmed. Not the cause of the historical hard failure, but a real instability in the normal execution path because resident context was not injected into `environment_agent`.
-- H2: Deployment/RBAC/MCP scope 限制拦截了温控动作，请求在调度前或执行前被拒绝。
-  - Rejected. Effective scope included the resident's authorized devices and real MCP control calls succeeded.
-- H3: Supervisor/Environment Agent 选错了工具或任务拆分错误，导致控制链路走偏。
-  - Rejected for the historical failed run. The run died before task creation. For live runs, the supervisor produced a correct single `environment_agent` task.
-- H4: 设备侧或 WoT/MCP 网关执行成功，但“确认是否生效”的回读校验失败，最终被判成失败。
-  - Rejected for the historical failed run. No device execution occurred. Post-fix live run verified both control and confirmation successfully.
-- H5: 当前真实模型在该请求上输出了不符合结构约束的决策/参数，导致运行时解析或修复失败。
-  - Rejected. Real-model supervisor output was valid and structured.
+- 数据库中的真实 ID 是 `run_f418755a17fd`，不是带 `USER` 前缀的值。
+- 历史 Run 在创建 Task 前失败：
 
-## Root Cause
-- Root cause A: The historical failed run was caused by a supervisor LLM timeout at the very first model request. The previous runtime only recorded an empty error string, making the failure opaque.
-- Root cause B: In eldercare environment-control tasks, the runtime narrowed device scope correctly but did not always inject the resolved resident target and resident room/device facts into the delegated environment-agent context. This allowed the planner to occasionally ask unnecessary clarification questions about the resident's room.
-- Root cause C: Clarification follow-ups such as `A-101` were not normalized into the original goal context. The conversation store preserved plain chat history, but there was no deterministic continuation binding that converted a short slot-filling reply into `original goal + supplied room`. This allowed the supervisor to re-ask the same room question or reinterpret the reply as a brand new request.
+```text
+task_ids=[]
+supervisor_iterations=0
+run.started -> model.request.started -> model.request.failed -> run.failed
+```
 
-## Fixes Applied
-- Instrumentation:
-  - `model.request.failed` now records `error_type`, `error_repr`, and `timeout_seconds`.
-  - `task.execution.context` now records delegated target/effective scope/runtime context.
-- Timeout hardening:
-  - default `AGENT_LLM_TIMEOUT_SECONDS` increased from `12` to `20`.
-  - supervisor timeout now re-raises with an explicit timeout message.
-- Resident-context fix:
-  - eldercare `environment_agent` tasks now resolve resident targets when possible.
-  - delegated runtime context now includes `resident_context` and `resolved_target`.
-- Failed-run summary visibility:
-  - `RunRecord` now persists `error`.
-  - failed runs now write both `error` and `final_response`.
-  - frontend runtime restores `run.error` directly from `GET /runs/{id}`, so refresh/reload still shows the failure reason without replaying events.
-- Clarification continuation normalization:
-  - supervisor input preprocessing now recognizes short room answers such as `A-101` / `A-102`.
-  - when the immediately preceding assistant turn is asking for the room, the supervisor receives a rewritten request in the form `original goal + 补充信息：目标房间是 A-101` instead of the bare follow-up token.
+- 失败耗时约 12 秒，与当时 `llm_timeout_seconds=12.0` 一致，但旧事件只记录空
+  错误字符串。
+- 使用当前 DeepSeek 端点单独调用 Supervisor，可以获得合法
+  `SupervisorDecision`，说明请求本身和模型路由可用。
+- 修复前，`environment_agent` 偶尔收到 `target=null`。虽然
+  `effective_scope` 已收窄，但没有明确 Resident-Room-Device 上下文。
+- 修复后真实端到端运行成功：
+  - Target：`elderly-001`
+  - Room：`A-101`
+  - 空调：`ac-002`
+  - 环境传感器：`environment-sensor-001`
+  - 最终回读确认 24 摄氏度已经生效。
 
-## Post-Fix Verification
-- Real model + real backend + real MCP run completed successfully.
-- Verified final response:
-  - `张爷爷房间的空调已经调到24度了，现在室温也稳定在24度，已经生效了，您放心。`
-- Verified delegated execution context contained:
-  - `target = elderly-001`
-  - `room = A-101`
-  - `environment_device_id = ac-002`
-  - `environment_sensor_device_id = environment-sensor-001`
-- API contract verification:
-  - backend `pytest tests/test_api_v2.py -q` passed (`6 passed`)
-  - frontend `vitest` for runtime/api contracts passed (`9 passed`)
-- Runtime regression verification:
-  - backend `pytest tests/test_run_runtime.py -q` passed (`10 passed`)
-  - unit verification confirms `A-101 啊！` is normalized into the previous temperature-control goal when the prior assistant turn was a room clarification.
+## 根因
+
+1. 历史硬失败来自 Supervisor 第一次模型调用超时；旧日志没有记录异常类型。
+2. 养老环境控制虽然正确计算了 Device Scope，但没有稳定注入 Resident Target、
+   Room 和 Device Fact，Planner 因而可能反复询问房间。
+3. 用户补充 `A-101` 时，没有确定性绑定回原目标，Supervisor 可能把它当成新请求。
+
+## 修复
+
+- `model.request.failed` 记录 `error_type`、`error_repr` 和
+  `timeout_seconds`。
+- `task.execution.context` 记录 Target、Effective Scope 和 Runtime Context。
+- 默认 `AGENT_LLM_TIMEOUT_SECONDS` 从 12 秒调整为 20 秒。
+- Supervisor 超时返回明确错误。
+- 养老 `environment_agent` 尽量解析 Resident Target，并注入
+  `resident_context` 和 `resolved_target`。
+- `RunRecord` 持久化 `error`，失败 Run 同时保存 `error` 和
+  `final_response`。
+- 前端刷新后直接恢复 `run.error`。
+- 对 `A-101`、`A-102` 等短回答执行 Clarification Continuation
+  规范化，将其合并回原始温控目标。
+
+## 验证
+
+真实模型、真实后端和真实 MCP 运行完成，回复：
+
+```text
+张爷爷房间的空调已经调到24度了，现在室温也稳定在24度，已经生效了。
+```
+
+执行上下文包含：
+
+```text
+target=elderly-001
+room=A-101
+environment_device_id=ac-002
+environment_sensor_device_id=environment-sensor-001
+```
+
+回归：
+
+- 后端 `tests/test_api_v2.py`：`6 passed`。
+- 前端 Runtime/API 契约：`9 passed`。
+- 后端 `tests/test_run_runtime.py`：`10 passed`。
+- `A-101 啊！` 可以在上一轮询问房间时恢复到原温控目标。

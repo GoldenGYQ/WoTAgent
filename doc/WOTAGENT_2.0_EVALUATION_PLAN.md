@@ -183,10 +183,10 @@ LLM 指标必须固定数据集、模型、temperature、Prompt 版本并至少�
 最新完整回归：
 
 ```text
-Backend: 262 passed, 3 skipped
-Device Simulator: 64 passed
-Frontend: 45 passed
-Frontend typecheck/build: passed
+后端： 262 passed, 3 skipped
+设备仿真端： 64 passed
+前端： 45 passed
+前端 typecheck/build：通过
 ```
 
 当前回归覆盖：

@@ -1,98 +1,89 @@
-# WoTAgent Deployment Profiles
+# WoTAgent 部署场景说明
 
-Status: current scene and authorization contract
+状态：当前场景与授权契约
 
-Last verified: 2026-07-23
+最后核对：2026-07-23
 
-## Purpose
+## 目的
 
-WoTAgent separates three independent boundaries:
+WoTAgent 将四个边界分开：
 
 ```text
 Deployment Profile
-  -> which site, spaces, devices and domain prompt exist
+  -> 当前站点、空间、设备和领域提示词
 
-AgentSpec and MCP Scope
-  -> which capability family a specialist Agent may use
+AgentSpec 与 MCP Scope
+  -> 专业 Agent 可以使用哪类能力
 
-RBAC and Relationship Policy
-  -> what the current Principal may do to a target resource
+RBAC 与关系策略
+  -> 当前 Human Principal 可以对目标资源做什么
 
 Domain Operations
-  -> how that world projects subjects, actors, resources, observations,
-     deterministic rules, events and actions to the operations console
+  -> 如何把主体、资源、观测、确定性规则、事件和动作投影到领域运行中心
 ```
 
-A Profile is not a role. Switching from `eldercare` to `villa` changes the
-active IoT world; changing from `viewer` to `operator` changes permissions
-inside that world.
+Profile 不是角色。养老与别墅切换改变的是当前物联网世界；`viewer` 与
+`operator` 切换改变的是同一世界中的权限。
 
-## Shared Catalog
+## 共享场景目录
 
-The source of truth is:
+唯一配置来源：
 
 ```text
 config/deployment_profiles.json
 ```
 
-Both the backend and `wot-device-simulator` load this file. The current
-profiles are:
+后端和 `wot-device-simulator` 共同读取该文件。
 
-| Profile | Domain | Site | Spaces | Devices |
+| Profile | Domain | Site | 空间数 | 设备 |
 |---|---|---|---:|---:|
-| `eldercare` | `eldercare` | `nursing-home-demo` | 2 | 16 configured / 15 TD-backed |
+| `eldercare` | `eldercare` | `nursing-home-demo` | 2 | 配置 16，TD 覆盖 15 |
 | `villa` | `smart_home` | `villa-demo` | 12 | 23 |
 
-Device membership is exclusive. The catalog validator rejects a device
-assigned to multiple profiles.
+设备归属互斥，目录校验器会拒绝一个设备同时属于多个 Profile。
 
-Current known catalog gap: `purifier-102` is present in the eldercare Profile
-but has no TD file. It must not be presented as an executable device capability
-until its TD is added. All 23 villa device IDs currently have TD files.
+当前已知缺口：养老 Profile 包含 `purifier-102`，但 TD 目录中没有对应文件，因此
+在补充 TD 前不能把它展示为可执行能力。别墅 23 个设备均有 TD。
 
-Every selectable Profile must register one `DomainOperations` adapter with the
-same `domain_id`. The current projections are:
+每个可选 Profile 必须注册同 `domain_id` 的 DomainOperations 适配器：
 
-| Profile | Operations center | Primary software actors |
+| Profile | 领域运行中心 | 主要软件主体 |
 |---|---|---|
-| `eldercare` | 养老照护管控 | Butler, Health, Care, eldercare Monitor |
-| `villa` | 别墅智能管控 | Butler/秘书, Security/保安, Environment, Energy, Housekeeping, DeviceOps, villa rule Monitor |
+| `eldercare` | 养老照护管控 | Butler、Health、Care、养老 Monitor |
+| `villa` | 别墅智能管控 | Butler/秘书、Security/保安、Environment、Energy、Housekeeping、DeviceOps、别墅规则 Monitor |
 
-Software actors are not login users. `JH-1` and `JH-2` are authorization
-Principals; Butler and specialist Agents are delegated software Principals with
-their own AgentSpec/MCP capability boundaries.
+软件主体不是登录用户。`JH-1`、`JH-2` 是授权 Principal；Butler 和专业 Agent
+是拥有独立 AgentSpec/MCP 能力边界的软件 Principal。
 
-The backend identity directory resolves the same human Principal differently
-for each domain:
+同一个 Human Principal 在不同 Domain 中可以有不同绑定：
 
-| Principal | Eldercare binding | Smart-home binding |
+| Principal | 养老绑定 | 智能家居绑定 |
 |---|---|---|
-| `JH-1` | caregiver, `caregiver_of elderly-001` | villa owner, `owner_of site:villa-demo` |
-| `JH-2` | family observer, `family_of elderly-002` | security staff, assigned to `site:villa-demo` |
+| `JH-1` | 护理员，`caregiver_of elderly-001` | 别墅业主，`owner_of site:villa-demo` |
+| `JH-2` | 家属观察者，`family_of elderly-002` | 安保人员，分配到 `site:villa-demo` |
 
-These human roles must not be used as specialist Agent identities. Specialist
-names describe capability categories such as health analysis, care
-coordination, security response and environment control.
+Human Role 不能作为专业 Agent 身份。专业 Agent 名称描述的是健康分析、护理协同、
+安防响应、环境控制等能力类别。
 
-## Runtime Flow
+## 运行流程
 
 ```text
-Frontend selects Profile
+前端选择 Profile
 -> PUT /api/v2/deployment/active
--> backend validates Profile
--> simulator activates the same Profile
--> frontend opens a new Conversation
--> POST /api/v2/runs carries profile_id
--> Run persists profile_id/domain_id/site_id
--> Supervisor receives compact domain context
--> device Gateway filters TD capabilities
--> MCP rejects cross-Profile device calls
+-> 后端校验 Profile
+-> Simulator 激活同一 Profile
+-> 前端新建 Conversation
+-> POST /api/v2/runs 携带 profile_id
+-> Run 持久化 profile_id/domain_id/site_id
+-> Supervisor 接收压缩后的领域上下文
+-> Gateway 按 Profile 过滤 TD 能力
+-> MCP 拒绝跨 Profile 设备调用
 ```
 
-One Conversation cannot mix Profiles. The backend returns `409` when a client
-tries to reuse a Conversation after switching worlds.
+一个 Conversation 不能混用多个 Profile。切换场景后继续复用旧 Conversation 时，
+后端返回 `409`。
 
-## APIs
+## 相关 API
 
 ```text
 GET /api/v2/deployment/profiles
@@ -110,36 +101,34 @@ GET /api/scenes/active
 PUT /api/scenes/active
 ```
 
-The first pair belongs to WoTAgent. The second group belongs to the simulator.
+第一组属于 WoTAgent，第二组属于 Simulator。
 
-## Adding A Profile
+## 新增 Profile
 
-1. Add the profile to `config/deployment_profiles.json`.
-2. Assign only existing TD device IDs.
-3. Keep device membership disjoint.
-4. Define spaces, enabled Agents and the domain-specific prompt.
-5. Register a matching `DomainOperations` adapter. A Profile exposed to the
-   frontend without one is an incomplete scene implementation.
-6. Run backend, frontend and simulator regression tests.
+1. 在 `config/deployment_profiles.json` 中新增 Profile。
+2. 只引用已经存在的 TD 设备 ID。
+3. 保证设备归属互斥。
+4. 定义空间、启用 Agent 和领域提示词。
+5. 注册对应的 DomainOperations 适配器。能在前端选择但没有运行投影的 Profile
+   属于不完整实现。
+6. 运行后端、前端和 Simulator 回归。
 
-## Current P1 Boundary
+## 当前 P1 授权边界
 
-For eldercare, the current backend already applies:
+养老场景已经执行：
 
 ```text
-role capability
-AND Principal-to-Resident assignment
-AND effective resident ResourceScope
-AND Health MCP scope validation
+角色能力
+AND Principal 与 Resident 的关系
+AND 有效 Resident ResourceScope
+AND Health MCP 范围二次校验
 ```
 
-`JH-1` is assigned to `elderly-001`; `JH-2` is assigned to `elderly-002`.
-Seeded demo identities use one-click sessions; user-created identities are
-persisted with PIN login and bearer sessions. The backend resolves the
-Principal context and issues the effective scope. This is still an
-experiment-grade identity system rather than production authentication.
+`JH-1` 绑定 `elderly-001`，`JH-2` 绑定 `elderly-002`。演示账号支持一键
+Session；用户注册账号保存 PIN 和 Bearer Session。后端解析 Principal 上下文并
+签发有效范围。它仍是实验级身份系统，不是生产级认证。
 
-For the villa Profile, the first relationship scope is site-level:
+别墅第一阶段采用站点级关系：
 
 ```text
 JH-1 -> site:villa-demo
@@ -150,23 +139,18 @@ JH-2 -> site:villa-demo
   -> domain.read, device.read
 ```
 
-This is intentionally smaller than a final room/post/shift relationship model.
-It proves that the same Domain Operations API can enforce different Principal
-capabilities without asking the LLM to grant access.
+这比最终的房间、岗位、班次关系模型更粗，但已经证明同一 Domain Operations API
+可以在不让 LLM 授权的前提下约束不同 Principal。
 
-The execution boundary is computed as:
+最终执行范围计算公式：
 
 ```text
-Principal capability and relationship scope
-INTERSECT Profile devices
-INTERSECT AgentSpec and MCP scope
-INTERSECT TD and Policy constraints
+Principal 能力与关系范围
+INTERSECT Profile 设备集合
+INTERSECT AgentSpec 与 MCP Scope
+INTERSECT TD 与 Policy 约束
 ```
 
-The resulting `effective_scope` is issued by the backend. A Supervisor may
-request a capability, but it cannot issue or widen that scope.
-
-Registration uses the same boundary. The frontend selects a backend-owned role
-template and resource target; it cannot submit raw capabilities. Seeded demo
-Principals use one-click login. Persisted user-created Principals use a PIN and
-must present their Bearer session to Run and Domain Operations endpoints.
+`effective_scope` 只能由后端签发。Supervisor 可以申请能力，但不能创建或扩大
+权限。注册流程同样只能选择后端维护的角色模板和资源目标，前端不能直接提交任意
+Capability。

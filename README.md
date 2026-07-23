@@ -1,71 +1,128 @@
-# WoTAgent 2.0
+# WoTAgent
 
-WoTAgent 2.0 is an experiment-oriented LLM + Web of Things control system. The LLM converts natural-language requests into typed `TaskPlan` objects. Deterministic code owns RBAC, confirmation, execution, state verification, and bounded recovery. WoT Thing Descriptions are compiled into MCP tools at runtime. The eldercare scenario adds event-driven health monitoring, MCP health Resources, and a Butler supervisor that dispatches risk handling to Care and Environment subgraphs.
+当前发布基线：`v2.8.0`；当前实现目标：`v3.0.0`。
 
-```text
-Vue console -> FastAPI /api/v2 -> LangGraph agent loop
--> Planner -> Policy -> Orchestrator -> Verifier/Recovery -> Response Agent
--> MCP gateway -> TD-generated tools -> simulator / SimuHome / ESP32
-```
+WoTAgent 是一个面向实验验证的 LLM + WoT 多领域物联网智能体平台。LLM
+负责理解目标、生成结构化 Task、选择专业 Agent，并根据新证据二次决策；
+Principal 授权、DAG 调度、确认、TD 校验、MCP 执行、状态验证与有限恢复由
+确定性代码负责。
 
-## Components
-
-- `wotagent-prototype`: Agent graph, API, policy, orchestration, trace, and evaluation.
-- `frontend/wotagent-v2-console`: Dedicated Vue 3 trace console.
-- `wot-device-simulator`: TD registry, MCP tools, REST API, dashboard, and device state.
-- `wotagent-prototype/src/wotagent/eldercare`: Sensor store, scheduled monitor, Butler/subagent graphs, and the eldercare MCP server.
-
-The v1 implementation remains available in Git history and tag `v1.0.0`. The current branch no longer carries the old ReAct runtime, EventBus, polling perception engine, legacy session memory, or legacy Vue frontend.
-
-## Start
-
-Recommended Windows entry points:
+## 核心链路
 
 ```text
-start-wotagent.bat         Start the complete local stack
-start-wotagent-safe.bat    Start without submitting Monitor events to the LLM
-start-wotagent-remote.bat  Start the stack and open a temporary Cloudflare Quick Tunnel
-status-wotagent.bat        Show process and health status
-stop-wotagent.bat          Stop the stack and remove the Tailscale Serve proxy
+Vue 3 Console
+  -> FastAPI Run API
+  -> RunService
+  -> Python RunCoordinator
+  -> Butler create_agent SupervisorDecision
+  -> deterministic TaskScheduler
+  -> Health/Care create_agent | Device specialist LangGraph
+  -> Principal scope -> AgentSpec/MCP scope -> TD/Policy
+  -> MCP execution -> post-action verification
+  -> wot-device-simulator / SimuHome gateway / ESP32 adapter
 ```
 
-The managed stack starts the simulator (`18080`), Agent API (`8000`),
-independent Monitor worker, and Vue console (`5174`) in that order. Logs and
-PID files are stored under `%LOCALAPPDATA%\WoTAgent\stack`, outside the
-repository.
+关键原则：
 
-For phone access, run `start-wotagent-remote.bat`. It prints a temporary
-`trycloudflare.com` URL and records the tunnel process so `stop-wotagent.bat`
-can close it. This URL is public and the experimental API has no real
-authentication, so use it only for short tests and stop it immediately after.
+- LLM 是语义决策核心，但不直接驱动硬件。
+- 普通聊天和 Monitor 事件都进入 Run，并由 Butler 负责目标解析与专业 Agent
+  委派。
+- 一个 Run 可包含多个有依赖关系的 Task；同一 Agent 可执行多个独立 AgentRun。
+- Health/Care 使用受限 ReAct，设备专业 Agent 使用 LangGraph 子图。
+- Supervisor、Finding 和设备 Planner 输出均受 Pydantic Schema 约束。
+- Executor 是确定性编排器，只执行计划中且 TD 已声明的动作。
+- PolicyEngine 在模型之外执行 RBAC 和高风险确认。
+- 每个 Run 生成可重放事件和按需 TraceArtifact，记录节点、工具输入输出、循环、
+  Token、总耗时与可配置费用；非流式 `ainvoke` 没有真实 TTFT 时标记为不可用。
+- SQLite 分别保存会话、Run/Task 运行记录和 LangGraph checkpoint，支持上下文延续与服务重启后的确认恢复。
 
-Private Tailscale access remains available from PowerShell with
-`scripts\wotagent-stack.ps1 private`.
+## 仓库结构
 
-Manual commands remain available:
+```text
+WoTAgent/
+├── wotagent-prototype/              # Agent 后端与评测
+│   ├── src/wotagent/agents/         # AgentSpec、Supervisor、Health/Care
+│   ├── src/wotagent/agent_graph/    # 设备专业 Agent LangGraph
+│   ├── src/wotagent/orchestration/  # Run/Task 模型、Coordinator、Scheduler
+│   ├── src/wotagent/domains/        # eldercare / smart_home 领域适配
+│   ├── src/wotagent/policy/         # RBAC 与确认策略
+│   ├── src/wotagent/gateway/        # MCP 与 SimuHome 网关
+│   └── src/wotagent/evaluation/     # HomeBench/SimuHome 对齐评测
+├── frontend/wotagent-v2-console/    # 独立 Vue 3 运行监控台
+└── wot-device-simulator/            # TD、MCP、REST 与设备状态仿真
+```
+
+1.0 已由 Git tag `v1.0.0` 和 `main` 历史保存；当前分支不再保留旧 ReAct、EventBus、轮询感知、旧 Session Memory 与旧 Vue 前端。
+
+## 本地启动
+
+Windows 下推荐直接双击仓库根目录中的统一入口：
+
+```text
+start-wotagent.bat         启动完整本地服务栈
+start-wotagent-safe.bat    安全模式，不把 Monitor 事件提交给大模型
+start-wotagent-remote.bat  启动服务栈并创建临时 Cloudflare 公网隧道
+status-wotagent.bat        查看进程和健康状态
+stop-wotagent.bat          停止服务栈并关闭 Tailscale Serve
+```
+
+统一脚本依次启动仿真端（`18080`）、Agent API（`8000`）、独立 Monitor
+进程和 Vue 前端（`5174`）。PID 与日志保存在
+`%LOCALAPPDATA%\WoTAgent\stack`，不会写入项目仓库。
+
+手机访问时双击 `start-wotagent-remote.bat`，窗口会输出临时
+`trycloudflare.com` 地址。当前实验 API 没有真实鉴权，因此该地址仅用于短时
+测试；测试完成后应立即双击 `stop-wotagent.bat`。如需 Tailscale 私网方式，
+可在 PowerShell 中执行 `scripts\wotagent-stack.ps1 private`。
+
+### 1. 仿真端
 
 ```powershell
-# Simulator (optional when using stdio MCP)
-cd wot-device-simulator
+cd D:\Users\gyq16\Desktop\PRJ\WoTAgent\wot-device-simulator
 .\.venv\Scripts\python.exe -m wot_device_simulator.service
-
-# Agent API
-cd ..\wotagent-prototype
-.\.venv\Scripts\python.exe -m wotagent.cli api --host 127.0.0.1 --port 8000
-
-# Vue console
-cd ..\frontend\wotagent-v2-console
-npm install
-npm run dev
-
-# Eldercare MCP Resources and Tools (optional standalone service)
-cd ..\..\wotagent-prototype
-.\.venv\Scripts\python.exe -m wotagent.eldercare.mcp_server --transport http --port 18082
 ```
 
-Backend docs: `http://127.0.0.1:8000/docs`. Simulator dashboard: `http://127.0.0.1:18080/dashboard`.
+控制面板：`http://127.0.0.1:18080/dashboard`，MCP：`http://127.0.0.1:18080/mcp`。
 
-## Verify
+默认 stdio 模式下，Agent 也可以自动启动 MCP 子进程，此时不必先启动 HTTP 仿真端。若使用 HTTP：
+
+```env
+MCP_TRANSPORT_MODE=http
+MCP_SERVER_URL=http://127.0.0.1:18080/mcp
+```
+
+### 2. Agent 后端
+
+在 `wotagent-prototype/.env` 配置：
+
+```env
+LLM_MODEL=deepseek-chat
+OPENAI_BASE_URL=https://api.deepseek.com
+OPENAI_API_KEY=your-key
+ENABLE_THINKING=true
+ENABLE_STREAMING=true
+```
+
+启动：
+
+```powershell
+cd D:\Users\gyq16\Desktop\PRJ\WoTAgent\wotagent-prototype
+.\.venv\Scripts\python.exe -m wotagent.cli api --host 127.0.0.1 --port 8000
+```
+
+API 文档：`http://127.0.0.1:8000/docs`。
+
+### 3. Vue 前端
+
+```powershell
+cd D:\Users\gyq16\Desktop\PRJ\WoTAgent\frontend\wotagent-v2-console
+npm install
+npm run dev
+```
+
+访问 Vite 输出的地址，默认配置为 `http://localhost:5174`。
+
+## 验证
 
 ```powershell
 cd wotagent-prototype
@@ -79,4 +136,14 @@ cd ..\..\wot-device-simulator
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-See [README.zh-CN.md](README.zh-CN.md), the [eldercare scenario guide](doc/ELDERCARE_SCENARIO.md), and the [2.0 technical guide](doc/WOTAGENT_2.0_COMPLETE_TECHNICAL_GUIDE.md).
+推荐阅读：
+
+- [文档索引与版本状态](doc/README.md)
+- [面试表达与多主体抽象](doc/WOTAGENT_INTERVIEW_AND_AGENT_ABSTRACTION_GUIDE.md)
+- [当前真实技术地图](doc/TECHNICAL_GUIDE.md)
+- [Run / Task DAG 设计](doc/WOTAGENT_RUN_TASK_DAG_DESIGN.md)
+- [TD / MCP 契约](doc/WOTAGENT_2.0_TD_MCP_CONTRACT.md)
+- [API 指南](doc/API_GUIDE.md)
+
+旧的完整技术指南保留为历史设计材料；当前架构事实以
+[TECHNICAL_GUIDE.md](doc/TECHNICAL_GUIDE.md) 和实际代码为准。

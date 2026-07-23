@@ -1154,7 +1154,7 @@ Butler 应根据验证后的状态判断成功，而不是仅看 HTTP 200。
 
 ```text
 Conversation Context: 3,191 characters
-Completed Findings: 15,301 characters
+已完成 Finding： 15,301 characters
 Total Dynamic Context: 18,492 characters
 Conservative Token Estimate: 9,246
 ```
@@ -1186,10 +1186,10 @@ Conservative Token Estimate: 9,246
 
 ```text
 temperature = 0
-Supervisor iterations <= 2
-Health investigation stages <= 4
-Health tool calls <= 4
-Health model calls <= 5
+Supervisor 轮次 <= 2
+Health 调查阶段 <= 4
+Health Tool 调用 <= 4
+Health 模型调用 <= 5
 Structured repair calls <= 1
 Output tokens per model call <= 900
 Specialist total timeout = 20 seconds
@@ -1208,9 +1208,9 @@ LLM call timeout = 10 seconds
 ### 13.4 最终自动化回归
 
 ```text
-Backend: 176 passed, 2 skipped
-Frontend: 15 passed
-Frontend typecheck and production build: passed
+后端： 176 passed, 2 skipped
+前端： 15 passed
+前端 typecheck 和生产构建：通过
 ```
 
 默认执行 `pytest` 时真实模型测试仍然跳过。只有当前进程显式设置：
@@ -1305,11 +1305,11 @@ Task 创建时仍经过关系授权和 MCP Scope。
 ### 14.4 验证结果
 
 ```text
-Backend: 178 passed, 2 skipped
-Frontend: 15 passed
-Frontend typecheck: passed
-Frontend production build: passed
-Simulator/API/Frontend local HTTP: 200/200/200
+后端： 178 passed, 2 skipped
+前端： 15 passed
+前端 typecheck：通过
+前端生产构建：通过
+Simulator/API/Frontend 本地 HTTP： 200/200/200
 ```
 
 本轮本地 API 验收显式设置
@@ -1354,13 +1354,13 @@ Cloudflare Quick Tunnel 是匿名公网入口。由于当前 Vite 同域代理 `
 本地进程。
 
 ```text
-PowerShell parser: passed
-Frontend tests: 15 passed
-Frontend typecheck/build: passed
-Simulator/API/Frontend health: passed
-Monitor heartbeat: online/running
+PowerShell 语法检查：通过
+前端测试： 15 passed
+前端 typecheck/build：通过
+Simulator/API/Frontend 健康检查：通过
+Monitor 心跳：在线/运行中
 Quick Tunnel frontend: HTTP 200
-Quick Tunnel proxied /api/health: ok
+Quick Tunnel 代理 /api/health：正常
 ```
 
 ## 16. Monitor Event Run 结构化尾包与事件幂等
@@ -1423,15 +1423,15 @@ Real low-SpO2 event:
 event_id: risk_ef1827670ca5
 run_id: run_d522081907d3
 Event-to-Run count: 1
-Health Task: completed, 5 verified tool calls
-Care Task: completed
+Health Task：已完成，5 次已验证 Tool Call
+Care Task：已完成
 Outbox: processed, attempts=1
-Run: completed
+Run：已完成
 
-Real direct finish:
+真实直接结束：
 run_id: run_0d64c3802791
 Task count: 0
-Run: completed
+Run：已完成
 ```
 
 ## 17. 页面刷新后的 RunEvent 回放恢复
@@ -1470,11 +1470,11 @@ GET /api/v2/runs/{run_id}/events?after=0: 12 events
 ```text
 RuntimeRun count: 1
 Replayed event sequences: [1, 2]
-Completed Run stream state: closed
+已完成 Run 的流状态：closed
 Replay cursor: 0
 
-Frontend tests: 16 passed
-Frontend typecheck/build: passed
+前端测试： 16 passed
+前端 typecheck/build：通过
 ```
 
 ## 18. 平台级语音输入与授权上下文显示
@@ -1539,10 +1539,10 @@ Windows 自带英文 SAPI 语音不能用于验证真实中英混合准确率：
 初始化与推理约 3.5 秒；后续请求更快。
 
 ```text
-Speech API tests: 3 passed
-Frontend tests: 18 passed
+语音 API 测试：3 passed
+前端测试： 18 passed
 Full backend tests: 184 passed, 2 skipped
-Frontend typecheck/build: passed
+前端 typecheck/build：通过
 faster-whisper base CPU int8: model load and WAV decode passed
 Quick Tunnel multipart transcription: passed
 ```
@@ -1701,9 +1701,9 @@ TraceStore agent.tool.completed
 - 历史 Run 仍可折叠并回放。
 
 ```text
-Backend: 187 passed, 2 skipped
-Frontend: 19 passed
-Frontend typecheck/build: passed
+后端： 187 passed, 2 skipped
+前端： 19 passed
+前端 typecheck/build：通过
 ```
 
 本轮内置浏览器连接因本机 browser runtime 的 kernel asset 路径错误而失败，因此
@@ -1761,8 +1761,8 @@ JSDOM 中。测试验证原始 script 不会成为 DOM、`javascript:` 链接不
 链接包含安全属性。
 
 ```text
-Frontend: 21 passed
-Frontend typecheck/build: passed
+前端： 21 passed
+前端 typecheck/build：通过
 ```
 
 ## 22. 登录后默认进入角色化新会话
@@ -1804,8 +1804,8 @@ Frontend typecheck/build: passed
 conversation 记录也会被清除。
 
 ```text
-Frontend: 22 passed
-Frontend typecheck/build: passed
+前端： 22 passed
+前端 typecheck/build：通过
 Public frontend HTTP check: 200
 ```
 
@@ -1949,10 +1949,10 @@ Scope 冒烟仍是另一组独立测试，二者不能互相替代。
 验证结果：
 
 ```text
-Backend: 190 passed, 3 skipped
-Simulator multi-Agent smoke: 1 passed
-Frontend: 24 passed
-Frontend typecheck/build: passed
+后端： 190 passed, 3 skipped
+Simulator 多 Agent 冒烟： 1 passed
+前端： 24 passed
+前端 typecheck/build：通过
 ```
 ## 26. P1 第一阶段：Deployment Profile 场景隔离
 
@@ -2068,9 +2068,9 @@ Domain scenario
 完整回归结果：
 
 ```text
-Backend: 202 passed, 3 skipped
-Frontend: 25 passed, typecheck/build passed
-Simulator: 63 passed
+后端： 202 passed, 3 skipped
+前端： 25 passed, typecheck/build passed
+仿真端： 63 passed
 ```
 
 ## 28. P1 第三阶段：人类 Principal 与软件 Agent 分离
@@ -2156,8 +2156,8 @@ INTERSECT Policy/RBAC decision
 验证结果：
 
 ```text
-Backend: 207 passed, 3 skipped
-Frontend: 26 passed, typecheck/build passed
+后端： 207 passed, 3 skipped
+前端： 26 passed, typecheck/build passed
 ```
 
 ### 28.6 真实模型回归：自由文本 capability 与跨 Run 调用计数
@@ -2255,219 +2255,185 @@ GET/POST /api/v2/domains/...（主体、资源、事件、遥测和场景操作�
 测试输出为准：
 
 ```text
-Backend: 214 passed, 3 skipped
-Frontend: 30 passed, typecheck/build passed
+后端： 214 passed, 3 skipped
+前端： 30 passed, typecheck/build passed
 ```
 
-## 30. 2026-07-21 runtime, scope and Trace cleanup
+## 30. 2026-07-21 运行时、Scope 与 Trace 整理
 
-### 30.1 The representative failure was not simply an LLM mistake
+### 30.1 代表性故障不只是 LLM 犯错
 
-The persisted `run_d3d95a5d8b8b` showed a four-stage failure chain:
+持久化 Run `run_d3d95a5d8b8b` 暴露了四段故障链：
 
-1. `JH-1 -> resident:elderly-001` was expanded by hard-coded resident fields,
-   which omitted `light-101`, `fan-101`, `humidifier-101` and `purifier-101`.
-2. Environment Agent therefore received only the AC, environment sensor,
-   wristband and mattress.
-3. Planner selected the AC for a light objective because the authoritative
-   capability context was already wrong.
-4. A chat response with no tool execution was mapped from graph phase
-   `responded` to Finding status `completed`, causing Supervisor to investigate
-   the same problem repeatedly.
+1. `JH-1 -> resident:elderly-001` 通过硬编码 Resident 字段展开，遗漏
+   `light-101`、`fan-101`、`humidifier-101` 和 `purifier-101`。
+2. Environment Agent 因而只看到空调、环境传感器、手环和床垫。
+3. Planner 在错误的权威能力上下文中，只能为灯光目标选择空调。
+4. 没有 Tool 执行的 Chat Response 被从图阶段 `responded` 映射为
+   `completed`，导致 Supervisor 重复调查同一问题。
 
-The lesson is that an apparently foolish Agent result can be produced by a
-broken capability boundary and a false completion adapter. Prompt tuning alone
-cannot repair either issue.
+经验是：看起来“智能体很笨”的结果，可能来自错误能力边界和虚假完成适配器，仅靠
+Prompt 调优无法修复。
 
-### 30.2 Closed device exposure model
+### 30.2 封闭设备暴露模型
 
-`DeploymentResourceResolver` now computes device scope as:
+`DeploymentResourceResolver` 按以下链路计算设备 Scope：
 
 ```text
-trusted Principal resources and relationships
--> canonical resident/space location
--> TD location matching
--> intersection with active Deployment Profile devices
--> optional narrowing by concrete Task resource claims
+可信 Principal 资源和关系
+-> 规范 Resident/Space Location
+-> TD Location 匹配
+-> 与当前 Deployment Profile 设备求交集
+-> 可选地被具体 Task Resource Claim 继续收窄
 ```
 
-Claims such as `light-101` or `device:light-101` can only narrow the authorized
-set. A model-proposed unknown or unauthorized device is ignored and can never
-expand `effective_scope`.
+`light-101` 或 `device:light-101` 等 Claim 只能收窄授权集合。模型提出的未知或
+未授权设备会被忽略，不能扩大 `effective_scope`。
 
-### 30.3 Planner semantics versus deterministic safety
+### 30.3 Planner 语义与确定性安全
 
-Hybrid mode no longer uses Python keyword maps to select a room/device or regex
-rules to reinterpret `turnOn`/`turnOff`. The LLM receives the authorized device
-catalog and creates a typed `TaskPlan`. Deterministic code still validates:
+Hybrid 模式不再使用 Python 关键词映射选择房间/设备，也不再用正则重新解释
+`turnOn`/`turnOff`。LLM 接收授权后的设备目录并生成类型化 `TaskPlan`。确定性
+代码继续校验：
 
-- AgentSpec and MCP scope;
-- concrete device and action existence in TD;
-- action input JSON Schema;
-- RBAC/Policy and confirmation;
-- post-action state verification.
+- AgentSpec 和 MCP Scope；
+- TD 中是否存在具体 Device 和 Action；
+- Action Input JSON Schema；
+- RBAC/Policy 和确认；
+- 动作后状态验证。
 
-Rule-mode fast paths remain available as a baseline. They are not the default
-semantic path.
+Rule Fast Path 仍可作为基线，但不是默认语义路径。
 
-### 30.4 Status must describe business outcome
+### 30.4 状态必须描述业务结果
 
-The status vocabulary now distinguishes `partial_success`, `skipped`,
-`needs_input`, `denied`, `unavailable`, `blocked` and `failed`. A dependent Task
-whose prerequisite cannot provide usable evidence is `skipped`, not another
-generic `blocked`. A device graph that only reaches a chat/clarify response
-without execution evidence becomes `needs_more_information`, not `completed`.
+状态词汇现在区分 `partial_success`、`skipped`、`needs_input`、`denied`、
+`unavailable`、`blocked` 和 `failed`。上游无法提供可用证据时，下游 Task 应为
+`skipped`，而不是泛化成 `blocked`。设备图只产生 Chat/Clarify 且没有执行证据
+时，应为 `needs_more_information`，不是 `completed`。
 
-### 30.5 Cross-Run memory
+### 30.5 跨 Run 记忆
 
-Conversation history is no longer only a flat text transcript. SQLite now also
-persists a bounded `ConversationState` containing active goal, canonical
-entities, verified facts and last outcome. The current request text is not
-rewritten by domain-specific keyword code; Supervisor receives both recent
-dialogue and the structured state.
+Conversation 不再只是平铺文本。SQLite 还保存有界 `ConversationState`，包含
+活跃目标、规范实体、已验证事实和最近结果。当前请求不会被领域关键词代码改写；
+Supervisor 同时接收最近对话和结构化状态。
 
-### 30.6 Raw Trace without an overloaded UI
+### 30.6 不让原始 Trace 压垮界面
 
-Trace persistence is split into two projections:
+Trace 被拆为两个投影：
 
 ```text
-compact RunEvent -> WebSocket replay and focused frontend timeline
-raw TraceArtifact -> full model/tool payload, fetched only on demand
+精简 RunEvent -> WebSocket 回放和前端聚焦时间线
+原始 TraceArtifact -> 完整模型/工具载荷，按需读取
 ```
 
-The event and optional artifact are inserted in one SQLite transaction. The UI
-defaults to a focused timeline, hides low-value model lifecycle noise and
-offers one explicit technical-detail switch. Raw payloads are not pushed over
-the normal event stream.
+事件和可选 Artifact 在同一 SQLite 事务中插入。界面默认隐藏低价值模型生命周期
+噪声，只提供一个明确的技术详情开关。原始载荷不进入普通事件流。
 
-A local Windows benchmark of 100 writes measured a median of 11.588 ms for a
-compact event and 13.595 ms for the same event plus a 50 KB raw artifact. The
-median incremental cost was about 2.006 ms, which is small relative to model
-latency. This is an experiment-scale result, not a production throughput SLA.
+本地 Windows 100 次写入基准中，精简事件中位数为 11.588 ms，增加 50 KB
+Artifact 后为 13.595 ms，增量约 2.006 ms。该结果只代表实验规模，不是生产
+吞吐 SLA。
 
-The benchmark also exposed that Python's `sqlite3.Connection` context manager
-commits or rolls back but does not close the connection. The Store previously
-opened a connection per operation without an explicit close. The connection
-lifecycle now uses `try/commit/rollback/finally/close`, with a Windows unlink
-regression test to prevent handle leaks.
+基准还发现 `sqlite3.Connection` 上下文管理器只 Commit/Rollback，不会自动
+关闭连接。Store 已改用 `try/commit/rollback/finally/close`，并增加 Windows
+文件删除回归以防句柄泄漏。
 
-### 30.7 Care specialist migration and removed entry points
+### 30.7 Care 迁移与旧入口删除
 
-Production Care Tasks now use bounded LangChain `create_agent`, scoped care MCP
-tools and runtime-attested tool messages. A model-generated success claim does
-not complete the Task unless an actual care tool result is successful and
-verified. The old `TaskRunner`, top-level Supervisor and misleading model
-`pipeline.py` entry points were removed; model construction now lives in
-`core/model_runtime.py`.
+Care Task 已使用有限 LangChain `create_agent`、Scoped Care MCP Tool 和运行时
+认证的 ToolMessage。只有真实 Care Tool 成功并通过验证，模型的成功表述才可完成
+Task。旧 `TaskRunner`、顶层 Supervisor 和误导性的 `pipeline.py` 已删除，模型
+装配迁移到 `core/model_runtime.py`。
 
-### 30.8 New regression coverage
+### 30.8 新增回归覆盖
 
-The new tests cover room-wide TD resource expansion, claim-only narrowing,
-cross-resident health/care denial, verified Care execution, chat-only false
-completion, recovered Run completion, structured conversation memory, raw
-TraceArtifact persistence/retrieval, hybrid Planner behavior and focused Trace
-rendering. The complete verification result for this stage is:
+新增测试覆盖房间级 TD 资源展开、Claim 只收窄、跨 Resident 健康/护理拒绝、
+Care 验证执行、Chat-only 虚假完成、恢复后的 Run 完成、结构化对话记忆、
+TraceArtifact 持久化、Hybrid Planner 和聚焦 Trace。该阶段结果：
 
 ```text
-Backend: 256 passed, 3 skipped
-Frontend: 44 passed
-Frontend typecheck and production build: passed
-Simulator: 64 passed (one existing deprecation warning)
+后端：256 passed, 3 skipped
+前端：44 passed
+前端 typecheck/build：通过
+Simulator：64 passed（保留一个既有弃用警告）
 ```
 
-### 30.9 Real-model replay exposed a terminal-plan status bug
+### 30.9 真实模型复验暴露终止计划状态错误
 
-The first replay of `打开张爷爷房间的灯并调到 45% 亮度` correctly narrowed the
-Task to `device:light-101` and produced two successful, verified tool calls.
-However, the device graph then ran one final planning iteration and returned a
-`chat` plan meaning "the objective is complete". `_result_finding` treated any
-terminal chat plan as missing evidence and marked the Task `needs_input`, so the
-Run was shown as failed even though Supervisor and the verified device state
-both said it had completed.
+请求 `打开张爷爷房间的灯并调到 45% 亮度` 正确收窄到
+`device:light-101`，产生两次成功且已验证的 Tool Call。但设备图最后一次规划
+返回表示“目标完成”的 `chat` 计划，`_result_finding` 却把所有终止 Chat 都当成
+缺少证据，将 Task 标为 `needs_input`。
 
-The adapter now downgrades a chat/clarify result only when the complete graph
-state contains no execution or verification evidence. A regression test covers
-the normal sequence `control -> verified execution -> terminal chat`.
+现在只有完整图状态没有任何执行或验证证据时，Adapter 才会把 Chat/Clarify
+降级。回归覆盖：
 
-After the fix, real-model Run `run_9bc2c9f758d1` completed with one
-`environment_agent` Task, scope `device:light-101`, two verified tool calls and
-two Supervisor iterations. Follow-up Run `run_b2ec6ae8ed4a` used the same
-Conversation and resolved `它现在亮度是多少` to the same resident room light,
-returning 45% with one scoped read. Planner and Responder raw artifacts were
-also retrieved through the artifact API without placing their payloads in the
-compact event stream.
+```text
+control -> verified execution -> terminal chat
+```
 
-### 30.10 Insufficient evidence is not an infrastructure failure
+修复后，真实 Run `run_9bc2c9f758d1` 使用一个 `environment_agent` Task、
+`device:light-101` Scope、两次验证 Tool Call 和两轮 Supervisor 完成。后续 Run
+`run_b2ec6ae8ed4a` 在同一 Conversation 中把“它现在亮度是多少”解析回同一盏灯，
+返回 45%。Planner/Responder 原始 Artifact 通过 API 按需获取，没有进入精简
+事件流。
 
-`run_19b5e20b279a` returned a useful best-effort health summary but was marked
-failed. Both Health Tasks had successfully read data and returned
-`needs_more_information` because critical wristband readings were stale. The
-Supervisor then inconsistently emitted `goal_completed=true` together with a
-non-empty `unsatisfied_criteria`, and a second "collect latest vitals" Task
-re-read the same resources even though no refresh capability existed.
+### 30.10 证据不足不是基础设施失败
 
-The contracts now distinguish whether a Finding can continue:
+`run_19b5e20b279a` 返回了有用的健康摘要，却被标记为失败。两个 Health Task 都
+成功读取数据，但因关键手环数据过期返回 `needs_more_information`。Supervisor
+同时输出 `goal_completed=true` 和非空 `unsatisfied_criteria`，又创建一个无法
+获得新数据的重复 Task。
+
+Finding 现在区分继续方式：
 
 ```text
 none | retry_allowed | external_input_required
 ```
 
-The deterministic health freshness guard attests stale critical readings as
-`external_input_required` with outcome code `STALE_HEALTH_DATA`. A proposed
-Task with the same Agent, target and capability is rejected until new external
-input exists. The Run ends as `needs_more_information`, preserving the useful
-evidence and recommended human action without presenting it as either success
-or system failure. Finish decisions with non-empty `unsatisfied_criteria` are
-also normalized to `goal_completed=false` before orchestration.
+确定性健康新鲜度 Guard 将过期关键 Reading 认证为
+`external_input_required`，Outcome Code 为 `STALE_HEALTH_DATA`。在没有外部
+新数据前，相同 Agent、Target、Capability 的 Task 会被拒绝。Run 以
+`needs_more_information` 结束，保留证据和人工建议，不再伪装成成功或系统故障。
+非空 `unsatisfied_criteria` 的 Finish 也会被规范为
+`goal_completed=false`。
 
-### 30.11 Risk acceptance requires a complete data-to-disposition chain
+### 30.11 风险验收需要完整的数据到处置链
 
-The acceptance item for health monitoring initially looked complete because
-heart rate, blood pressure, oxygen saturation, temperature and humidity were
-all stored and could be plotted. A code audit showed a more important
-distinction: a metric being visible and trendable does not mean that it
-participates in Monitor risk classification. Blood pressure and humidity had
-no deterministic risk rules, while one old test explicitly treated high blood
-pressure as a non-event.
+健康验收最初看似完成，因为心率、血压、血氧、温度和湿度都能保存和绘图。但“可见
+且可查趋势”不等于“参与 Monitor 风险分类”。当时血压和湿度没有确定性规则，旧
+测试甚至明确要求高血压不产生事件。
 
-The Monitor now implements bounded, deterministic rules for sustained high
-blood pressure and fresh out-of-range room humidity. Blood pressure requires
-at least three readings spanning five minutes within a ten-minute window;
-values at or above 180/120 are classified as critical and other sustained
-values at or above 140/90 as high. Fresh humidity outside 35%-70% is classified
-as medium. These are experimental warning thresholds for risk coordination,
-not medical diagnoses. Severity remains rule-attested and cannot be weakened
-or overridden by an LLM.
+Monitor 现已实现持续高血压和新鲜异常湿度的有界确定性规则：
 
-Risk handling is now a server-side state machine:
+- 血压需要 10 分钟窗口内至少 3 条、跨度 5 分钟；
+- `>=180/120` 为 `critical`；
+- 其他持续 `>=140/90` 为 `high`；
+- 新鲜湿度不在 35%-70% 时为 `medium`。
+
+这些是风险协同实验阈值，不是医疗诊断；Severity 由规则认证，LLM 不能降低或
+覆盖。
+
+风险处置状态机：
 
 ```text
 open -> acknowledged -> in_progress -> resolved | false_positive
 ```
 
-Illegal transitions are rejected, legacy `handled` rows are migrated to
-`resolved`, and the API supports severity/status filtering. The domain center
-shows the rule severity policy and exposes only the legal next actions for each
-event. This closes the full acceptance path:
+非法迁移会被拒绝，旧 `handled` 行迁移为 `resolved`，API 支持 Severity/Status
+筛选。领域中心只展示当前合法动作，形成完整链路：
 
 ```text
-sensor reading -> history/trend -> deterministic classification
--> risk event -> severity filter -> disposition status query/update
+Sensor Reading -> History/Trend -> 确定性分类
+-> Risk Event -> Severity 筛选 -> 处置状态查询/更新
 ```
 
-The first targeted regression run correctly failed two stale assertions: one
-expected high blood pressure to produce no event and one expected the retired
-`handled` status. Updating those tests was intentional because the product
-contract changed; weakening the implementation to satisfy an obsolete Oracle
-would have preserved the acceptance gap. Final targeted verification produced
-21 passing backend tests. The final complete verification produced 261 backend
-tests passing with 3 skipped, 64 simulator tests passing with one existing
-deprecation warning, and 45 frontend tests passing plus a successful typecheck
-and production build.
+首次定向回归正确地击穿了两个旧断言：高血压不产生事件、状态仍为 `handled`。
+更新测试是因为产品契约发生变化，而不是削弱实现迎合过时 Oracle。最终定向测试
+21 项通过；完整结果为后端 `261 passed, 3 skipped`、Simulator `64 passed`、
+前端 `45 passed`，typecheck/build 通过。
 
-One command-level pitfall was also recorded: this frontend defines the npm
-script as `typecheck`, not `type-check`. The production `build` script invokes
-the correct typecheck automatically.
+另一个命令坑是前端脚本名为 `typecheck`，不是 `type-check`；生产 `build`
+脚本会调用正确的 typecheck。
 
 ## 31. 2026-07-23 文档基线与场景目录复核
 

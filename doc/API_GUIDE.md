@@ -1,67 +1,64 @@
-# WoTAgent 2.0 API Guide
+# WoTAgent API 指南
 
-Status: current API surface
+状态：当前 API 说明
 
-Last verified against routers: 2026-07-23
+最后按实际路由核对：2026-07-23
 
-Base URL: `http://127.0.0.1:8000`.
+基础地址：`http://127.0.0.1:8000`
 
-The FastAPI application reports version `3.0.0`; the `/api/v2` prefix is kept
-as the stable experiment API namespace and is not the product release number.
+FastAPI 应用版本为 `3.0.0`。`/api/v2` 是稳定的实验接口命名空间，不等于产品
+发布版本号。
 
-## Service
+## 服务信息
 
-| Method | Path | Purpose |
+| 方法 | 路径 | 用途 |
 |---|---|---|
-| GET | `/` | Service metadata |
-| GET | `/api/health` | Health and active pipeline |
-| GET | `/api/v2/capabilities` | Thinking, streaming and Agent capabilities |
-| GET | `/api/v2/agents` | Registered specialist Agent metadata |
-| GET | `/api/v2/prompts` | Active prompt profile metadata |
+| GET | `/` | 服务元数据 |
+| GET | `/api/health` | 服务健康状态和当前运行配置 |
+| GET | `/api/v2/capabilities` | 深度思考、流式和 Agent 能力 |
+| GET | `/api/v2/agents` | 已注册的专业 Agent 元数据 |
+| GET | `/api/v2/prompts` | 当前提示词配置元数据 |
 
-## Deployment Profiles
+## 部署场景
 
-| Method | Path | Purpose |
+| 方法 | 路径 | 用途 |
 |---|---|---|
-| GET | `/api/v2/deployment/profiles` | List scene/profile definitions |
-| PUT | `/api/v2/deployment/active` | Activate the same Profile in backend and simulator-facing runtime |
+| GET | `/api/v2/deployment/profiles` | 查询可用场景/Profile |
+| PUT | `/api/v2/deployment/active` | 切换当前 Profile |
 
-A Run persists `profile_id`, `domain_id` and `site_id`. One Conversation cannot
-mix Profiles.
+Run 会持久化 `profile_id`、`domain_id` 和 `site_id`。一个 Conversation 不能
+混用多个 Profile。
 
-## Principals And Sessions
+## Principal 与会话
 
-| Method | Path | Purpose |
+| 方法 | 路径 | 用途 |
 |---|---|---|
-| GET | `/api/v2/principals` | List visible Principals |
-| GET | `/api/v2/principals/{id}/context` | Resolve roles, relationships, capabilities and resources |
-| GET | `/api/v2/principals/role-templates` | List backend-owned registration templates |
-| GET | `/api/v2/principals/registration-targets` | List valid resource targets |
-| POST | `/api/v2/principals/register` | Persist a PIN-protected Principal from a template |
-| POST | `/api/v2/principals/login` | Create a bearer session |
-| GET | `/api/v2/principals/session` | Resolve the current bearer session |
+| GET | `/api/v2/principals` | 查询可见 Principal |
+| GET | `/api/v2/principals/{id}/context` | 查询角色、关系、能力和资源 |
+| GET | `/api/v2/principals/role-templates` | 查询后端维护的注册模板 |
+| GET | `/api/v2/principals/registration-targets` | 查询可绑定的资源目标 |
+| POST | `/api/v2/principals/register` | 按模板注册带 PIN 的 Principal |
+| POST | `/api/v2/principals/login` | 登录并创建 Bearer Session |
+| GET | `/api/v2/principals/session` | 查询当前 Session |
 
-The code also retains `/users` compatibility endpoints in the Principal router.
-New clients should use the template-based registration and session endpoints.
-Seeded demo identities support one-click use; registered identities must supply
-their bearer session. This remains experiment-grade identity, not a production
-authentication service.
+Principal 路由仍保留 `/users` 兼容接口，新客户端应使用模板注册与 Session
+接口。种子演示账号支持一键进入；用户注册账号必须提供 Bearer Session。当前仍是
+实验级身份系统，不是生产级统一认证。
 
-## Conversations
+## 对话
 
-| Method | Path | Purpose |
+| 方法 | 路径 | 用途 |
 |---|---|---|
-| POST | `/api/v2/conversations` | Create a persistent conversation |
-| GET | `/api/v2/conversations` | List conversations |
-| GET | `/api/v2/conversations/{id}` | Read conversation metadata |
-| GET | `/api/v2/conversations/{id}/turns` | Read persisted turns |
-| DELETE | `/api/v2/conversations/{id}` | Delete a conversation |
+| POST | `/api/v2/conversations` | 创建持久化 Conversation |
+| GET | `/api/v2/conversations` | 查询 Conversation 列表 |
+| GET | `/api/v2/conversations/{id}` | 查询 Conversation 元数据 |
+| GET | `/api/v2/conversations/{id}/turns` | 查询已持久化 Turn |
+| DELETE | `/api/v2/conversations/{id}` | 删除 Conversation |
 
-## Runs And Tasks
+## Run 与 Task
 
-One user query creates one Run. The Supervisor may create multiple dependent or
-parallel Tasks under that Run; each professional Agent execution is recorded as
-an AgentRun.
+一次用户输入创建一个 Run。Supervisor 可以在 Run 下创建多个并行或存在依赖的
+Task；每次专业 Agent 执行记录为 AgentRun。
 
 ```http
 POST /api/v2/runs
@@ -71,90 +68,92 @@ Content-Type: application/json
   "conversation_id": "conv_123",
   "message": "检查照明，并在需要时调节客厅环境",
   "role": "operator",
-  "user_id": "local-user",
+  "user_id": "JH-1",
   "thinking": false
 }
 ```
 
-The API returns `202 Accepted` with a `run_id` and `turn_id`.
+接口返回 `202 Accepted`、`run_id` 和 `turn_id`。
 
-| Method | Path | Purpose |
+| 方法 | 路径 | 用途 |
 |---|---|---|
-| GET | `/api/v2/runs/{run_id}` | Read Run status and final response |
-| GET | `/api/v2/runs/{run_id}/tasks` | List the Run's Task DAG |
-| GET | `/api/v2/runs/{run_id}/tasks/{task_id}/agent-runs` | List Agent attempts |
-| POST | `/api/v2/runs/{run_id}/tasks/{task_id}/confirm` | Resume a waiting Task |
-| GET | `/api/v2/runs/{run_id}/events?after=N` | Replay ordered Run events |
-| GET | `/api/v2/runs/{run_id}/trace-artifacts/{artifact_id}` | Fetch one on-demand raw trace artifact |
+| GET | `/api/v2/runs/{run_id}` | 查询 Run 状态和最终回复 |
+| GET | `/api/v2/runs/{run_id}/tasks` | 查询 Run 的 Task DAG |
+| GET | `/api/v2/runs/{run_id}/tasks/{task_id}/agent-runs` | 查询 Agent 执行尝试 |
+| POST | `/api/v2/runs/{run_id}/tasks/{task_id}/confirm` | 恢复等待确认的 Task |
+| GET | `/api/v2/runs/{run_id}/events?after=N` | 按序号回放 RunEvent |
+| GET | `/api/v2/runs/{run_id}/trace-artifacts/{artifact_id}` | 按需读取原始 TraceArtifact |
 
-Confirmation body:
+确认请求：
 
 ```json
 {"approved": true}
 ```
 
-Run metadata, Tasks, AgentRuns, ordered events and pending confirmation payloads
-are persisted in SQLite. Device subgraphs use the same `task_id` as their
-LangGraph `thread_id`, so confirmation can resume the original checkpoint after
-an application restart.
+Run、Task、AgentRun、事件和待确认负载保存到 SQLite。设备子图使用 `task_id`
+作为 LangGraph `thread_id`，因此应用重启后仍可从原 checkpoint 恢复确认。
 
-## WebSocket Events
+## WebSocket 事件
 
-Connect to `ws://127.0.0.1:8000/ws/v2`, then send:
+连接 `ws://127.0.0.1:8000/ws/v2`，然后发送：
 
 ```json
 {"run_id":"run_123","after":0}
 ```
 
-The server replays events in sequence order. Events include Supervisor
-decisions, Task creation, Agent execution, confirmation and final Run state.
-The stream sends `stream.completed` after a terminal Run status. Private
-chain-of-thought is deliberately not exposed.
+服务端按 sequence 回放 Supervisor、Task、Agent、确认和 Run 终态事件。Run 到达
+终态后发送 `stream.completed`。接口不会暴露私有 Chain-of-Thought。
 
-## Domain Operations
+## 领域运行接口
 
-The generic Domain Operations API powers both eldercare and smart-home/villa
-views:
+通用 Domain Operations API 同时服务养老和别墅/智能家居：
 
-| Method | Path | Purpose |
+| 方法 | 路径 | 用途 |
 |---|---|---|
-| GET | `/api/v2/domains` | List registered domain manifests |
-| GET | `/api/v2/domains/{domain_id}/subjects` | List domain subjects |
-| GET | `/api/v2/domains/{domain_id}/subjects/{subject_id}/overview` | Read operational summary |
-| GET | `/api/v2/domains/{domain_id}/subjects/{subject_id}/resources` | Read protected resources/devices |
-| GET | `/api/v2/domains/{domain_id}/subjects/{subject_id}/events` | Read risk/operational events |
-| GET | `/api/v2/domains/{domain_id}/subjects/{subject_id}/actions` | Read action/audit records |
-| GET | `/api/v2/domains/{domain_id}/monitor/status` | Read deterministic Monitor status |
-| POST | `/api/v2/domains/{domain_id}/telemetry` | Submit domain telemetry |
-| POST | `/api/v2/domains/{domain_id}/scenarios` | Trigger an experiment scenario |
-| POST | `/api/v2/domains/{domain_id}/events/{event_id}/acknowledge` | Acknowledge an event |
-| POST | `/api/v2/domains/{domain_id}/events/{event_id}/status` | Apply a valid event-state transition |
+| GET | `/api/v2/domains` | 查询 DomainManifest |
+| GET | `/api/v2/domains/{domain_id}/subjects` | 查询领域主体 |
+| GET | `/api/v2/domains/{domain_id}/subjects/{subject_id}/overview` | 查询运行概览 |
+| GET | `/api/v2/domains/{domain_id}/subjects/{subject_id}/resources` | 查询资源和设备 |
+| GET | `/api/v2/domains/{domain_id}/subjects/{subject_id}/events` | 查询风险/运行事件 |
+| GET | `/api/v2/domains/{domain_id}/subjects/{subject_id}/actions` | 查询动作和审计记录 |
+| GET | `/api/v2/domains/{domain_id}/monitor/status` | 查询确定性 Monitor 状态 |
+| POST | `/api/v2/domains/{domain_id}/telemetry` | 提交领域遥测 |
+| POST | `/api/v2/domains/{domain_id}/scenarios` | 触发实验场景 |
+| POST | `/api/v2/domains/{domain_id}/events/{event_id}/acknowledge` | 确认事件 |
+| POST | `/api/v2/domains/{domain_id}/events/{event_id}/status` | 执行合法状态迁移 |
 
-The `/api/v2/eldercare/*` router remains as a domain-specific compatibility and
-experiment surface. New cross-domain frontend work should prefer
-`/api/v2/domains/*`.
+`/api/v2/eldercare/*` 作为养老兼容和实验接口保留。新的跨领域前端功能应优先使用
+`/api/v2/domains/*`。
 
-## Speech
+## 语音转写
 
 ```text
 POST /api/v2/speech/transcriptions
 Content-Type: multipart/form-data
-field: audio
+字段：audio
 ```
 
-The endpoint accepts WebM, M4A/MP4, MP3, OGG and WAV up to the configured byte
-limit. It returns transcription text for the chat composer; it does not create
-a Run automatically.
+接口支持 WebM、M4A/MP4、MP3、OGG 和 WAV，大小上限由配置决定。它只返回转写
+文本供输入框使用，不会自动创建 Run。
 
-## Status Values
+## 状态值
 
-Run: `accepted`, `running`, `waiting_confirmation`, `completed`,
-`partial_success`, `failed`, `cancelled`.
+Run：
 
-Task: `pending`, `ready`, `running`, `waiting_confirmation`, `completed`,
-`failed`, `blocked`, `cancelled`.
+```text
+accepted | running | waiting_confirmation | needs_more_information
+| completed | partial_success | failed | cancelled
+```
 
-## Persistence Configuration
+Task：
+
+```text
+pending | ready | running | waiting_confirmation | completed
+| partial_success | skipped | needs_input | denied | unavailable
+| failed | blocked | cancelled
+```
+
+## 持久化配置
 
 ```dotenv
 WOTAGENT_CONVERSATION_DB=./data/conversations.db
@@ -162,15 +161,13 @@ WOTAGENT_RUN_DB=./data/agent_runs.db
 WOTAGENT_CHECKPOINT_DB=./data/agent_checkpoints.db
 ```
 
-`WOTAGENT_RUN_DB` stores API orchestration state. `WOTAGENT_CHECKPOINT_DB`
-stores LangGraph node state and native interrupts. Both are required for
-restart-safe confirmation recovery.
+`WOTAGENT_RUN_DB` 保存 API 编排状态，`WOTAGENT_CHECKPOINT_DB` 保存 LangGraph
+节点状态和原生 interrupt。两者共同支持重启后的确认恢复。
 
-Principal/session and domain data use their own SQLite stores configured by the
-runtime container. RunEvents are durable; the in-process WebSocket condition is
-only a wake-up mechanism, so multi-instance notification is not yet supported.
+Principal/Session 和领域数据使用各自的 SQLite Store。RunEvent 是持久化数据；
+进程内 `asyncio.Condition` 只负责唤醒 WebSocket，因此尚不支持多实例通知。
 
-## Removed APIs
+## 已删除接口
 
-The old `/api/v2/tasks`, `/api/v2/traces`, SSE Task stream and v1 routes are not
-part of the Run/Task runtime.
+旧 `/api/v2/tasks`、`/api/v2/traces`、Task SSE 和 v1 路由不属于当前
+Run/Task 运行时。
