@@ -449,6 +449,25 @@ DEMO_PRINCIPALS = [
         )],
     ),
     PrincipalProfile(
+        principal_id="system:villa-monitor",
+        principal_type="service",
+        display_name="别墅规则监视服务",
+        bindings=[DomainRoleBinding(
+            domain_id="smart_home",
+            platform_role="operator",
+            roles=["monitor_service"],
+            role_labels=["确定性监视服务"],
+            capabilities=["*"],
+            resource_ids=["site:villa-demo"],
+            relationships=[PrincipalRelationship(
+                relation="monitors",
+                target_type="site",
+                target_id="villa-demo",
+                target_label="云栖别墅",
+            )],
+        )],
+    ),
+    PrincipalProfile(
         principal_id="local-user",
         display_name="本地管理员",
         bindings=[

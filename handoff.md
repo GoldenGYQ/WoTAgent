@@ -116,7 +116,20 @@ flowchart TD
 并不是每个专业 Agent 在每个 Profile 中都有完整工作流。别墅主要使用环境、安防、
 能耗、家务和设备运维；养老主要使用健康、护理和环境，其余是扩展槽位。
 
-### 3.1 设备专业 Agent 子图
+### 3.1 Agent Registry 与 Profile
+
+当前所有专业 Agent 由 `AgentRegistry` 统一注册。Registry 保存稳定 Agent ID、
+运行时类型、委派能力和 MCP 范围；Deployment Profile 只选择当前场景允许启用的
+`enabled_agents`。启动时会拒绝未知 Agent ID，Supervisor Catalog、Scheduler 和
+设备子图发现都从同一个 Registry 派生，不再分别维护 Agent 清单。
+
+```text
+AgentRegistry：平台有哪些软件能力
+Deployment Profile：当前场景启用哪些软件能力和设备
+Principal / Authorization：当前用户能对哪些资源做什么
+```
+
+### 3.2 设备专业 Agent 子图
 
 ```text
 START
@@ -320,6 +333,25 @@ open -> acknowledged -> in_progress -> resolved | false_positive
 当前已经覆盖心率、血压、血氧、温湿度等指标的记录与趋势，其中血压和湿度也已
 进入确定性风险分类。阈值仅用于实验性风险协同，不构成医疗诊断。
 
+### 8.1 跨领域事件链
+
+平台现在提供统一的 `DomainEventEnvelope`、`DomainEventSource` 和持久化
+`SQLiteDomainEventStore`。养老通过 `EldercareDomainEventSource` 适配既有
+RiskEvent；Villa 的烟雾和能耗事件直接写入通用事件库。两者由同一个
+`DomainEventConsumer` 转换为正式 Run：
+
+```text
+领域 Monitor / 确定性规则
+→ 持久化 Domain Event + Outbox
+→ 通用 DomainEventConsumer
+→ RunService
+→ RunCoordinator
+→ Supervisor / Task DAG / 专业 Agent
+```
+
+消费者不知道居民、别墅或具体风险语义。后续实验室、园区等领域只需实现
+`DomainEventSource`，不需要复制 Run 创建和重试逻辑。
+
 ## 9. 持久化与恢复
 
 | Store | 默认文件 | 用途 |
@@ -328,6 +360,7 @@ open -> acknowledged -> in_progress -> resolved | false_positive
 | SQLiteRunStore | `data/agent_runs.db` | Run、Task、AgentRun、RunEvent、TraceArtifact 和确认负载 |
 | LangGraph Checkpointer | `data/agent_checkpoints.db` | 设备图状态与原生 interrupt |
 | EldercareStore | `data/eldercare.db` | Resident、Reading、Risk、Care Action |
+| DomainEventStore | `data/domain_events.db` | 跨领域事件、Outbox、租约、重试和 Run 绑定 |
 
 已实现：
 
@@ -448,7 +481,7 @@ Care Task。通用 Guard/Skip Task 仍未实现。
 最新自动化结果：
 
 ```text
-后端：262 passed, 3 skipped
+后端：273 passed, 3 skipped
 Simulator：64 passed
 前端：45 passed
 前端 typecheck/build：通过
@@ -546,7 +579,7 @@ RBAC、AgentSpec Scope、TD 校验与确认机制不删除。
 ### P1：深化授权
 
 1. 增加岗位、班次、目的和紧急上下文。
-2. 把 Villa Monitor 事件接入通用持久化领域事件 Outbox，并统一生成 Run。
+2. 为通用领域事件 Outbox 增加管理端重放、死信查看和跨进程通知能力。
 3. 增加 Session 生命周期、限流和生产认证网关。
 
 ### P2：完善智能体协作

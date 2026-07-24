@@ -10,9 +10,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from langgraph.checkpoint.memory import InMemorySaver
 
+from ..agents import DEFAULT_AGENT_REGISTRY
 from ..application import DomainEventConsumer, RunService
-from ..domain import DeploymentProfileRegistry, DomainPluginRegistry
-from ..domains.eldercare import EldercareDomainPlugin
+from ..domain import (
+    DeploymentProfileRegistry,
+    DomainPluginRegistry,
+    SQLiteDomainEventStore,
+)
+from ..domains.eldercare import (
+    EldercareDomainEventSource,
+    EldercareDomainPlugin,
+)
 from ..domains.smart_home import SmartHomeDomainPlugin
 from ..identity import DEMO_PRINCIPALS, PrincipalStore
 from ..orchestration import SQLiteRunStore
@@ -52,6 +60,8 @@ _run_store = SQLiteRunStore(
     os.getenv("WOTAGENT_RUN_DB") or data_path("agent_runs.db")
 )
 _deployment_profiles = DeploymentProfileRegistry.load()
+for _profile in _deployment_profiles.list():
+    DEFAULT_AGENT_REGISTRY.select(_profile.enabled_agents)
 _principal_store = PrincipalStore(
     os.getenv("WOTAGENT_PRINCIPAL_DB") or data_path("principals.db"),
     seed_profiles=DEMO_PRINCIPALS,
@@ -69,8 +79,15 @@ _run_service = RunService(
     deployment_profiles=_deployment_profiles,
     principal_directory=_principal_store,
 )
+_domain_event_store = SQLiteDomainEventStore(
+    os.getenv("WOTAGENT_DOMAIN_EVENT_DB")
+    or data_path("domain_events.db")
+)
 _domain_event_consumer = DomainEventConsumer(
-    _runtime.eldercare_store,
+    [
+        EldercareDomainEventSource(_runtime.eldercare_store),
+        _domain_event_store,
+    ],
     _run_service,
 )
 _speech_transcriber = SpeechTranscriber()
@@ -85,6 +102,7 @@ _domain_registry = DomainPluginRegistry([
         get_gateway=lambda: _runtime.gateway,
         get_profile=lambda: _deployment_profiles.require("villa"),
         principals=_principal_store,
+        event_store=_domain_event_store,
     ),
 ])
 
@@ -118,6 +136,7 @@ app.state.runtime = _runtime
 app.state.run_store = _run_store
 app.state.run_service = _run_service
 app.state.domain_registry = _domain_registry
+app.state.domain_event_store = _domain_event_store
 app.state.deployment_profiles = _deployment_profiles
 app.state.principal_store = _principal_store
 app.add_middleware(
@@ -136,6 +155,7 @@ app.add_middleware(
 app.include_router(create_system_router(
     get_pipeline=lambda: _runtime.models,
     get_settings=lambda: _runtime.settings,
+    get_agent_registry=lambda: _runtime.agent_registry,
     bool_env=lambda key, default: _bool_env(key, default=default),
 ))
 app.include_router(create_eldercare_router(

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from ..agent_graph import (
@@ -15,7 +15,8 @@ from ..agent_graph import (
 )
 from ..agentic_config import AgenticSettings
 from ..agents import (
-    AGENT_SPECS,
+    DEFAULT_AGENT_REGISTRY,
+    AgentRegistry,
     AgentFindingPayload,
     build_care_react_agent,
     build_health_react_agent,
@@ -48,12 +49,8 @@ from ..prompting import profile_for
 from ..telemetry import InMemoryTraceStore
 
 
-DOMAIN_GRAPH_AGENTS = (
-    "environment_agent",
-    "security_agent",
-    "energy_agent",
-    "housekeeping_agent",
-    "device_ops_agent",
+DOMAIN_GRAPH_AGENTS = DEFAULT_AGENT_REGISTRY.ids(
+    runtime="langgraph_subgraph"
 )
 
 HEALTH_FINDING_REPAIR_SCHEMA: dict[str, Any] = {
@@ -85,6 +82,12 @@ class RuntimeContainer:
     health_finding_repair_runnable: Any
     health_gateway: ScopedHealthMCPClient
     conditional_plan_review_runnable: Any
+    agent_registry: AgentRegistry = field(
+        default_factory=lambda: DEFAULT_AGENT_REGISTRY,
+    )
+    _supervisor_cache: dict[tuple[str, ...], Any] = field(
+        default_factory=dict,
+    )
 
     def build_graph(
         self,
@@ -92,7 +95,9 @@ class RuntimeContainer:
         *,
         agent_id: str = "environment_agent",
     ):
-        allowed_scopes = set(AGENT_SPECS[agent_id].mcp_scopes)
+        allowed_scopes = set(
+            self.agent_registry.require(agent_id).mcp_scopes
+        )
         gateway = MCPDeviceGateway(allowed_scopes=allowed_scopes)
         policy = PolicyEngine()
         dependencies = AgentGraphDependencies(
@@ -127,8 +132,24 @@ class RuntimeContainer:
     def build_domain_graphs(self, checkpointer: Any) -> dict[str, Any]:
         return {
             agent_id: self.build_graph(checkpointer, agent_id=agent_id)
-            for agent_id in DOMAIN_GRAPH_AGENTS
+            for agent_id in self.agent_registry.ids(
+                runtime="langgraph_subgraph"
+            )
         }
+
+    def supervisor_for(self, enabled_agents: list[str]) -> Any:
+        if not enabled_agents:
+            return self.run_supervisor_agent
+        key = tuple(sorted(set(enabled_agents)))
+        cached = self._supervisor_cache.get(key)
+        if cached is not None:
+            return cached
+        supervisor = build_run_supervisor_agent(
+            self.models.response_model,
+            self.agent_registry.select(key),
+        )
+        self._supervisor_cache[key] = supervisor
+        return supervisor
 
 
 def create_runtime_container(
@@ -181,7 +202,7 @@ def create_runtime_container(
     )
     run_supervisor_agent = build_run_supervisor_agent(
         models.response_model,
-        AGENT_SPECS,
+        DEFAULT_AGENT_REGISTRY.as_mapping(),
     )
     eldercare_runtime = EldercareRuntime(
         eldercare_store,
@@ -237,7 +258,9 @@ def create_runtime_container(
     care_react_agent = build_care_react_agent(
         models.response_model,
         care_gateway,
-        max_iterations=AGENT_SPECS["care_agent"].max_iterations,
+        max_iterations=DEFAULT_AGENT_REGISTRY.require(
+            "care_agent"
+        ).max_iterations,
         max_tool_calls=min(settings.max_tool_calls, 4),
     )
     health_finding_repair_runnable = models.response_model.bind(
@@ -263,6 +286,7 @@ def create_runtime_container(
         health_finding_repair_runnable=health_finding_repair_runnable,
         health_gateway=health_gateway,
         conditional_plan_review_runnable=conditional_plan_review_runnable,
+        agent_registry=DEFAULT_AGENT_REGISTRY,
     )
 
 

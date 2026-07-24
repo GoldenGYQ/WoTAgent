@@ -85,10 +85,10 @@ open -> acknowledged -> in_progress -> resolved | false_positive
 
 ## 当前验证
 
-2026-07-23 最新完整回归：
+2026-07-24 最新完整回归：
 
 ```text
-后端：262 passed, 3 skipped
+后端：273 passed, 3 skipped
 仿真端：64 passed
 前端：45 passed，typecheck/build 通过
 ```
@@ -117,3 +117,87 @@ Villa 领域场景分为 `agent_run` 与 `direct_simulation`：
   Specialist 契约和 Scoped MCP。
 
 当前 HTTP 主接口为 `/api/v2/*` 和 `/api/health`，事件 WebSocket 为 `/ws/v2`。
+
+## 领域抽象与统一运行链
+
+养老和 Villa 不是两套智能体平台，而是同一平台上的两个 Deployment Profile。
+二者复用以下平台能力：
+
+```text
+Principal / Authorization
+AgentRegistry / AgentSpec
+Supervisor / TaskScheduler
+Run / Task / AgentRun
+DomainEventEnvelope / Outbox
+MCP Scope / TD / Policy / Verification
+Trace / Checkpoint / Persistence
+```
+
+领域包只负责提供本领域内容：
+
+```text
+领域实体与名称解析
+确定性监测规则
+事件上下文
+场景入口
+资源映射
+Profile 启用的专业 Agent 集合
+```
+
+因此，切换到 Villa 不会创建一套新的 Supervisor、Scheduler 或 Trace；切换到养老
+也不会让平台核心理解“老人”这一专用概念。养老通过
+`EldercareDomainEventSource` 把既有 RiskEvent 转换为平台事件，Villa 原生发布
+`DomainEventEnvelope`，二者最终进入同一个消费者：
+
+```text
+Monitor 或确定性场景
+→ DomainEventStore 持久化事件与 Outbox
+→ DomainEventConsumer 领取事件
+→ RunService.create_event_run()
+→ RunCoordinator
+→ Supervisor 决策
+→ Task DAG
+→ 专业 Agent
+→ MCP / TD / Policy / Verification
+```
+
+`DomainEventConsumer` 不再包含 resident、risk 或 villa 等领域判断。新增领域只需实现
+`DomainEventSource`，无需复制消费者或 Run 创建逻辑。
+
+## Agent Registry 与 Profile 装配
+
+`AgentRegistry` 是专业 Agent 的单一注册入口。每个 `AgentSpec` 声明稳定 ID、运行时
+类型、委派能力和 MCP 范围。Deployment Profile 只选择允许启用的 Agent ID：
+
+```text
+AgentRegistry
+→ Profile 选择 enabled_agents
+→ 启动时校验未知 Agent ID
+→ 为当前 Profile 构建 Supervisor Agent Catalog
+→ Scheduler 只接受已启用 Agent
+→ Specialist 只获得 AgentSpec 允许的能力
+```
+
+这解决了两个旧问题：
+
+1. `DOMAIN_GRAPH_AGENTS`、Supervisor Catalog 和 API 列表各自维护，容易发生漂移。
+2. Villa 请求可能看到养老 Agent，或养老 Profile 引用不存在的 Agent。
+
+Agent Registry 负责“系统有哪些软件能力”，Profile 负责“当前部署启用哪些能力”；
+Human Principal、Role 和资源关系仍由身份与授权模块负责，两者不能混为一谈。
+
+## 当前验证基线
+
+2026-07-24 验证结果：
+
+```text
+后端：273 passed, 3 skipped
+仿真端：64 passed
+前端：45 passed
+前端 typecheck/build：通过
+```
+
+本轮后端和仿真端测试分别使用项目内
+`wotagent-prototype/.venv/Scripts/python.exe` 与
+`wot-device-simulator/.venv/Scripts/python.exe`。原虚拟环境曾指向已经删除的 UV
+基础解释器，现已重新绑定到仓库内 Python 运行时并完成核心依赖导入与全量测试。

@@ -7,7 +7,8 @@ from .contracts import (
     Evidence,
     ToolExecutionResult,
 )
-from .specs import AGENT_SPECS, get_agent_spec
+from .registry import AgentRegistry
+from .specs import AGENT_SPECS, DEFAULT_AGENT_REGISTRY, get_agent_spec
 
 
 def build_delegation_tool(*args, **kwargs):
@@ -51,6 +52,8 @@ def build_run_supervisor_agent(*args, **kwargs):
 
 __all__ = [
     "AGENT_SPECS",
+    "AgentRegistry",
+    "DEFAULT_AGENT_REGISTRY",
     "AgentFinding",
     "AgentFindingPayload",
     "AgentSpec",

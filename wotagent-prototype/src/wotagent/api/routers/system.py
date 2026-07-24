@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter
 
 from ...agentic_config import AgenticSettings
-from ...agents import AGENT_SPECS
+from ...agents import AgentRegistry
 from ...prompting import (
     AGENT_PROMPT_PROFILES,
     CONTEXT_PACK_VERSION,
@@ -20,6 +20,7 @@ def create_system_router(
     *,
     get_pipeline: Callable[[], Any],
     get_settings: Callable[[], AgenticSettings],
+    get_agent_registry: Callable[[], AgentRegistry],
     bool_env: Callable[[str, bool], bool],
 ) -> APIRouter:
     router = APIRouter(tags=["system"])
@@ -58,14 +59,28 @@ def create_system_router(
                 "parallel_when_safe": True,
                 "max_supervisor_iterations": settings.butler_max_iterations,
             },
+            "domain_events": {
+                "persistent_outbox": True,
+                "consumer": bool_env(
+                    "DOMAIN_EVENT_CONSUMER_ENABLED",
+                    bool_env(
+                        "ELDERCARE_EVENT_CONSUMER_ENABLED",
+                        True,
+                    ),
+                ),
+                "domains": ["eldercare", "smart_home"],
+            },
             "eldercare": {
                 "event_driven": True,
                 "monitor_process": "wotagent monitor",
                 "embedded_monitor": False,
                 "event_outbox": True,
                 "event_consumer": bool_env(
-                    "ELDERCARE_EVENT_CONSUMER_ENABLED",
-                    True,
+                    "DOMAIN_EVENT_CONSUMER_ENABLED",
+                    bool_env(
+                        "ELDERCARE_EVENT_CONSUMER_ENABLED",
+                        True,
+                    ),
                 ),
                 "mcp_resources": True,
                 "subagents": [
@@ -86,12 +101,20 @@ def create_system_router(
                     "fallback": "rule",
                 },
             },
-            "agents": [spec.model_dump() for spec in AGENT_SPECS.values()],
+            "agents": [
+                spec.model_dump()
+                for spec in get_agent_registry().as_mapping().values()
+            ],
         }
 
     @router.get("/api/v2/agents")
     async def list_domain_agents() -> dict[str, Any]:
-        return {"agents": [spec.model_dump() for spec in AGENT_SPECS.values()]}
+        return {
+            "agents": [
+                spec.model_dump()
+                for spec in get_agent_registry().as_mapping().values()
+            ]
+        }
 
     @router.get("/api/v2/prompts")
     async def list_prompt_profiles() -> dict[str, Any]:

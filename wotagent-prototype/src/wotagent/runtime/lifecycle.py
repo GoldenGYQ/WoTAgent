@@ -47,13 +47,20 @@ def create_lifespan(
             domain_graphs = build_domain_graphs(checkpointer)
             set_graphs(domain_graphs["environment_agent"], domain_graphs)
 
-        if bool_env("ELDERCARE_EVENT_CONSUMER_ENABLED", True):
+        consumer_enabled = bool_env(
+            "DOMAIN_EVENT_CONSUMER_ENABLED",
+            bool_env("ELDERCARE_EVENT_CONSUMER_ENABLED", True),
+        )
+        if consumer_enabled:
             consumer_task = asyncio.create_task(
                 get_domain_event_consumer().run_forever(
                     runtime_stop,
                     interval_seconds=float(os.getenv(
-                        "ELDERCARE_EVENT_CONSUMER_INTERVAL_SECONDS",
-                        "1",
+                        "DOMAIN_EVENT_CONSUMER_INTERVAL_SECONDS",
+                        os.getenv(
+                            "ELDERCARE_EVENT_CONSUMER_INTERVAL_SECONDS",
+                            "1",
+                        ),
                     )),
                 )
             )

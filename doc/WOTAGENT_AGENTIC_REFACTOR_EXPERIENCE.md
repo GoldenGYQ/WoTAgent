@@ -2489,8 +2489,112 @@ Agent 场景现在包括安防巡检、离家、回家、全屋体检和节能�
 `C:\Users\gyq16\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none`
 基础解释器。没有改用项目外解释器，也没有把未运行的后端测试标记为通过。
 
-### 33.4 尚未完成
+### 33.4 后续进展
 
-Villa 的烟雾和能耗事件目前仍保存在进程内。下一步应建立通用、持久化的领域事件
-Outbox，让 Villa Monitor 与养老 Monitor 使用同一条
-`Domain Event → RunService → Run` 链路，而不是增加新的进程内回调。
+Villa 的烟雾和能耗事件已经迁移到通用、持久化的领域事件 Outbox。Villa Monitor
+与养老 Monitor 现在使用同一条
+`Domain Event → RunService → Run` 链路，不再依赖进程内事件列表或新增领域专用回调。
+
+## 34. 领域事件与 Agent 装配平台化（2026-07-24）
+
+### 34.1 问题不是领域功能不同，而是公共能力放错了位置
+
+养老和 Villa 的业务内容当然不同。养老关注居民、生命体征、护理协同和风险事件；
+Villa 关注房间、环境、安防、能耗、家务和设备运维。但这种差异不应该演变成两套
+事件存储、两套消费者、两套 Agent 清单和两套 Run 创建方式。
+
+旧实现存在三个明显泄漏：
+
+1. `DomainEventConsumer` 直接读取居民和 RiskEvent，应用层知道养老语义。
+2. Villa 事件只存在进程内列表，服务重启后丢失，也不能可靠进入 Run。
+3. Supervisor、设备子图和 API 分别维护 Agent ID，Profile 只能“写一个字符串”，
+   无法证明该 Agent 已注册。
+
+### 34.2 统一领域事件契约
+
+平台新增 `DomainEventEnvelope`、`DomainEventSource`、`DomainEventStore` 和
+`SQLiteDomainEventStore`。统一事件包含：
+
+```text
+event_id
+domain_id
+event_type
+severity
+status
+principal
+subject
+source_context
+goal
+run_id
+created_at / updated_at
+```
+
+领域可以保留自己的内部模型，但必须在边界上转换。养老通过
+`EldercareDomainEventSource` 适配原有 RiskEvent 和 Outbox；Villa 直接向通用
+EventStore 发布事件。通用消费者只处理领取、租约、重试、Run 绑定和完成状态，
+不再判断“这是不是某位老人”。
+
+这样新增实验室、园区或工厂领域时，只需要实现领域事件来源，不需要复制整个消费
+服务。
+
+### 34.3 Agent Registry 与部署装配
+
+新增 `AgentRegistry` 后，AgentSpec 成为稳定 Agent ID、运行时类型和能力范围的单一
+事实来源。Runtime 根据 Registry 自动发现设备 LangGraph 子图，Supervisor 根据
+当前 Profile 的 `enabled_agents` 构建受限 Catalog，Scheduler 同样只接受这个集合。
+
+这形成了清晰的三层关系：
+
+```text
+AgentRegistry：平台具备哪些软件能力
+Deployment Profile：本次部署启用哪些软件能力与设备
+Principal / Authorization：当前用户能对哪些资源做什么
+```
+
+因此“Villa 有 security_agent”不等于“登录用户是保安”，也不等于该用户自动拥有
+安防设备控制权限。
+
+### 34.4 测试暴露的真实缺陷
+
+首次完整回归出现 9 个失败，根因只有一个：
+`_canonical_task_capability()` 在抽取 Registry 依赖时引用了不存在的 `runtime`
+局部变量。新增 Registry 测试本身通过，但旧 Task Context 测试立即发现了集成边界
+断裂。
+
+修复不是再加全局变量，而是在 `_task_preparer(runtime)` 初始化时取得 Registry，
+并显式传给能力规范化函数。定向测试恢复为 `11 passed`，完整后端最终为
+`273 passed, 3 skipped`。
+
+这个问题说明：
+
+> 新抽象的单元测试通过，只能证明抽象本身可用；必须运行旧功能的完整回归，才能
+> 证明依赖注入路径没有断裂。
+
+### 34.5 Windows 虚拟环境故障
+
+后端与仿真端的 `.venv` 目录存在，但其 `pyvenv.cfg` 均指向已经删除的 UV
+Python。目录存在不代表解释器可用，直接运行会出现 `Unable to create process`。
+
+修复过程采用：
+
+1. 使用仓库内 Python 运行时；
+2. 复制现有依赖到临时环境；
+3. 重新绑定基础解释器；
+4. 验证核心依赖导入；
+5. 停止明确占用旧 `.venv` 的遗留后端进程；
+6. 删除旧环境并原位替换；
+7. 从后端和仿真端最终 `.venv` 分别执行完整回归。
+
+另外，pytest 在部分 Windows 临时目录上可能出现访问拒绝。测试命令固定使用仓库内
+的 `.test-tmp` 和 `.test-cache`，并将二者加入 `.gitignore`。
+
+### 34.6 当前结论
+
+现在可以更准确地描述项目：
+
+> WoTAgent 是一个可通过 Deployment Profile 装配不同物联网领域的多智能体平台。
+> 养老与 Villa 共用身份、事件、Run、调度、Agent 注册、安全执行和可观测性能力；
+> 领域包只提供实体、规则、场景、资源映射和专业能力组合。
+
+这比“分别实现养老系统和别墅系统”更符合项目最初的抽象目标，也为后续实验室、
+园区和其他 IoT 场景保留了明确扩展点。

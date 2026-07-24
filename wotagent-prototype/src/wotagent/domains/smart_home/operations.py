@@ -9,6 +9,11 @@ from typing import Any
 from uuid import uuid4
 
 from ...domain import DeploymentProfile
+from ...domain.events import (
+    DomainEventEnvelope,
+    DomainEventStore,
+    InMemoryDomainEventStore,
+)
 from ...domain.operations import (
     DomainAccessDenied,
     DomainActorDefinition,
@@ -111,11 +116,12 @@ class SmartHomeDomainPlugin:
         get_gateway: Callable[[], Any],
         get_profile: Callable[[], DeploymentProfile],
         principals: PrincipalDirectory | None = None,
+        event_store: DomainEventStore | None = None,
     ) -> None:
         self.get_gateway = get_gateway
         self.get_profile = get_profile
         self.principals = principals or DEFAULT_PRINCIPAL_DIRECTORY
-        self._events: list[dict[str, Any]] = []
+        self.event_store = event_store or InMemoryDomainEventStore()
         self._actions: list[dict[str, Any]] = []
 
     def manifest(self) -> DomainManifest:
@@ -345,8 +351,11 @@ class SmartHomeDomainPlugin:
                 ),
             ],
             "open_event_count": len([
-                item for item in self._events
-                if item["status"] in {"open", "acknowledged", "in_progress"}
+                item for item in self.event_store.list_events(
+                    domain_id="smart_home",
+                    subject_id=subject_id,
+                )
+                if item.status in {"open", "acknowledged", "in_progress"}
             ]),
             "generated_at": datetime.now(UTC).isoformat(),
         }
@@ -386,10 +395,13 @@ class SmartHomeDomainPlugin:
     ) -> list[dict[str, Any]]:
         self._require(subject_id, principal_id, "domain.read")
         return [
-            item
-            for item in reversed(self._events)
-            if (severity is None or item["severity"] == severity)
-            and (status is None or item["status"] == status)
+            item.public_record()
+            for item in self.event_store.list_events(
+                domain_id="smart_home",
+                subject_id=subject_id,
+                severity=severity,
+                status=status,
+            )
         ]
 
     def actions(
@@ -529,17 +541,14 @@ class SmartHomeDomainPlugin:
             principal_id,
             "event.acknowledge",
         )
-        event = next(
-            (item for item in self._events if item["event_id"] == event_id),
-            None,
-        )
+        event = self.event_store.get_event(event_id)
         if event is None:
             raise KeyError("smart-home event not found")
-        event["status"] = "acknowledged"
+        event = self.event_store.update_status(event_id, "acknowledged")
         return {
             "event_id": event_id,
-            "status": event["status"],
-            "run_id": event.get("run_id"),
+            "status": event.status,
+            "run_id": event.run_id,
         }
 
     def update_event_status(
@@ -549,10 +558,7 @@ class SmartHomeDomainPlugin:
         status: str,
     ) -> dict[str, Any]:
         self._require("villa-demo", principal_id, "event.acknowledge")
-        event = next(
-            (item for item in self._events if item["event_id"] == event_id),
-            None,
-        )
+        event = self.event_store.get_event(event_id)
         if event is None:
             raise KeyError("smart-home event not found")
         allowed = {
@@ -562,16 +568,16 @@ class SmartHomeDomainPlugin:
             "resolved": set(),
             "false_positive": set(),
         }
-        current = str(event["status"])
+        current = event.status
         if status != current and status not in allowed.get(current, set()):
             raise ValueError(
                 f"event status cannot transition from '{current}' to '{status}'"
             )
-        event["status"] = status
+        event = self.event_store.update_status(event_id, status)
         return {
             "event_id": event_id,
             "status": status,
-            "run_id": event.get("run_id"),
+            "run_id": event.run_id,
         }
 
     async def _resource(
@@ -652,19 +658,39 @@ class SmartHomeDomainPlugin:
         message: str,
         source: str,
     ) -> dict[str, Any]:
-        event = {
-            "event_id": f"event_{uuid4().hex[:12]}",
-            "subject_id": "villa-demo",
-            "event_type": event_type,
-            "severity": severity,
-            "message": message,
-            "status": "open",
-            "occurred_at": datetime.now(UTC).isoformat(),
-            "source": source,
-            "run_id": None,
-        }
-        self._events.append(event)
-        return event
+        event_id = f"event_{uuid4().hex[:12]}"
+        event = self.event_store.publish(DomainEventEnvelope(
+            event_id=event_id,
+            domain_id="smart_home",
+            subject_id="villa-demo",
+            event_type=event_type,
+            severity=severity,
+            message=message,
+            source=source,
+            run_goal=(
+                f"处理别墅规则监测事件：{message}"
+                f"事件类型：{event_type}，严重级别：{severity}。"
+                "请先委派匹配的专业 Agent 核查设备状态和必要证据，再在授权"
+                "范围内决定是否处置；所有状态改变都必须验证。"
+            ),
+            source_context={
+                "target": {
+                    "type": "site",
+                    "id": "villa-demo",
+                    "display_name": self.get_profile().title,
+                },
+                "event": {
+                    "event_id": event_id,
+                    "event_type": event_type,
+                    "severity": severity,
+                    "message": message,
+                    "source": source,
+                },
+            },
+            principal_id="system:villa-monitor",
+            role="operator",
+        ))
+        return event.public_record()
 
     def _subject(self, principal_id: str) -> dict[str, Any]:
         profile = self.get_profile()

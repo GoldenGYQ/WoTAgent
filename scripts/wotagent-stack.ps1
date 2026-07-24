@@ -171,10 +171,10 @@ function Start-Stack {
     Assert-Dependencies
     New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 
-    $oldConsumer = $env:ELDERCARE_EVENT_CONSUMER_ENABLED
+    $oldConsumer = $env:DOMAIN_EVENT_CONSUMER_ENABLED
     $oldMcpUrl = $env:MCP_SERVER_URL
     try {
-        $env:ELDERCARE_EVENT_CONSUMER_ENABLED = if ($EnableEventConsumer) { "true" } else { "false" }
+        $env:DOMAIN_EVENT_CONSUMER_ENABLED = if ($EnableEventConsumer) { "true" } else { "false" }
         $env:MCP_SERVER_URL = "http://127.0.0.1:18080/mcp"
 
         Start-StackService "simulator"
@@ -183,7 +183,7 @@ function Start-Stack {
         Start-StackService "frontend"
     }
     finally {
-        $env:ELDERCARE_EVENT_CONSUMER_ENABLED = $oldConsumer
+        $env:DOMAIN_EVENT_CONSUMER_ENABLED = $oldConsumer
         $env:MCP_SERVER_URL = $oldMcpUrl
     }
 

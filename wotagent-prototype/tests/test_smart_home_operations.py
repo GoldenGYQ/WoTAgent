@@ -190,6 +190,10 @@ def test_operator_smoke_scenario_executes_td_action_and_emits_event() -> None:
     assert action["verified"] is True
     assert events[0]["event_type"] == "smoke_alarm"
     assert events[0]["severity"] == "high"
+    claimed = operations.event_store.claim_events()
+    assert claimed[0].event.domain_id == "smart_home"
+    assert claimed[0].event.principal_id == "system:villa-monitor"
+    assert claimed[0].event.source_context["target"]["id"] == "villa-demo"
 
 
 def test_agent_scenario_cannot_bypass_the_platform_run() -> None:

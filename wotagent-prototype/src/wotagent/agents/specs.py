@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .contracts import AgentSpec
+from .registry import AgentRegistry
 
 
 AGENT_SPECS: dict[str, AgentSpec] = {
@@ -131,13 +132,15 @@ AGENT_SPECS: dict[str, AgentSpec] = {
         mcp_scopes=frozenset({"wot.device_ops"}),
     ),
 }
+DEFAULT_AGENT_REGISTRY = AgentRegistry(AGENT_SPECS.values())
 
 
 def get_agent_spec(agent_id: str) -> AgentSpec:
-    try:
-        return AGENT_SPECS[agent_id]
-    except KeyError as exc:
-        raise LookupError(f"unknown agent spec: {agent_id}") from exc
+    return DEFAULT_AGENT_REGISTRY.require(agent_id)
 
 
-__all__ = ["AGENT_SPECS", "get_agent_spec"]
+__all__ = [
+    "AGENT_SPECS",
+    "DEFAULT_AGENT_REGISTRY",
+    "get_agent_spec",
+]

@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 .venv/
+.runtime/
 venv/
 env/
 
@@ -16,6 +17,8 @@ dist/
 build/
 *.egg
 .pytest_cache/
+.test-cache/
+.test-tmp/
 .mypy_cache/
 .ruff_cache/
 .cache/
@@ -41,6 +44,7 @@ wotagent-prototype/data/conversations.db*
 wotagent-prototype/data/agent_checkpoints.db*
 wotagent-prototype/data/agent_runs.db*
 wotagent-prototype/data/eldercare.db*
+wotagent-prototype/data/domain_events.db*
 wotagent-prototype/data/principals.db*
 chroma_db/
 

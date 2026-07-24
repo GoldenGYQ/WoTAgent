@@ -13,7 +13,7 @@ from uuid import uuid4
 from langgraph.types import Command
 
 from ..agents import (
-    AGENT_SPECS,
+    DEFAULT_AGENT_REGISTRY,
     AgentFinding,
     AgentFindingPayload,
     Evidence,
@@ -75,10 +75,11 @@ def build_run_coordinator(
     context: dict[str, Any],
     domain_graphs: dict[str, Any],
 ) -> RunCoordinator:
+    registry = getattr(runtime, "agent_registry", DEFAULT_AGENT_REGISTRY)
     return RunCoordinator(
         store=store,
         scheduler=TaskScheduler(
-            available_agents=set(AGENT_SPECS),
+            available_agents=set(registry.ids()),
             max_tasks_per_run=16,
             max_parallel_tasks=4,
         ),
@@ -135,8 +136,20 @@ def _supervisor_decider(
         )
         started = time.perf_counter()
         try:
+            enabled_agents = list(
+                base_context.get("deployment", {}).get(
+                    "enabled_agents",
+                    [],
+                )
+            )
+            supervisor_for = getattr(runtime, "supervisor_for", None)
+            supervisor = (
+                supervisor_for(enabled_agents)
+                if callable(supervisor_for)
+                else runtime.run_supervisor_agent
+            )
             result = await asyncio.wait_for(
-                runtime.run_supervisor_agent.ainvoke({
+                supervisor.ainvoke({
                     "messages": [{
                         "role": "user",
                         "content": json.dumps(
@@ -713,6 +726,11 @@ def _task_preparer(runtime: Any) -> Callable[[AgentTask, str, dict[str, Any]], A
     authorization = RelationshipAuthorizationService(
         DEMO_RESIDENT_ASSIGNMENTS
     )
+    agent_registry = getattr(
+        runtime,
+        "agent_registry",
+        DEFAULT_AGENT_REGISTRY,
+    )
 
     async def prepare(
         task: AgentTask,
@@ -724,6 +742,7 @@ def _task_preparer(runtime: Any) -> Callable[[AgentTask, str, dict[str, Any]], A
         capability = _canonical_task_capability(
             task,
             deployment,
+            agent_registry,
         )
         task.requested_capability = capability
         enabled_agents = set(deployment.get("enabled_agents", []))
@@ -859,8 +878,9 @@ def _task_preparer(runtime: Any) -> Callable[[AgentTask, str, dict[str, Any]], A
 def _canonical_task_capability(
     task: AgentTask,
     deployment: dict[str, Any],
+    agent_registry: Any,
 ) -> str:
-    spec = AGENT_SPECS[task.agent_id]
+    spec = agent_registry.require(task.agent_id)
     proposed = task.requested_capability.strip()
     if proposed in spec.delegation_capabilities:
         return proposed

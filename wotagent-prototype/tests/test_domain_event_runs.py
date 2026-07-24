@@ -7,7 +7,9 @@ from fastapi import BackgroundTasks
 from wotagent.application import DomainEventConsumer, RunService
 from wotagent.agents import AgentFinding, Evidence
 from wotagent.conversation import ConversationStore
+from wotagent.domain import DomainEventEnvelope, InMemoryDomainEventStore
 from wotagent.domains.eldercare import (
+    EldercareDomainEventSource,
     EldercareMonitorService,
     EldercareStore,
     Resident,
@@ -132,7 +134,10 @@ def test_monitor_outbox_creates_a_source_attested_run(tmp_path) -> None:
         )
 
     service = RunService(conversations, runs, coordinator_factory)
-    consumer = DomainEventConsumer(store, service)
+    consumer = DomainEventConsumer(
+        [EldercareDomainEventSource(store)],
+        service,
+    )
 
     results = asyncio.run(consumer.consume_once())
 
@@ -188,7 +193,10 @@ def test_failed_event_retry_does_not_create_a_second_run(tmp_path) -> None:
             return await runs.get_run(run_id)
 
     service = FailingRunService()
-    consumer = DomainEventConsumer(store, service)
+    consumer = DomainEventConsumer(
+        [EldercareDomainEventSource(store)],
+        service,
+    )
 
     first = asyncio.run(consumer.consume_once())
     outbox = store.list_outbox()[0]
@@ -204,3 +212,83 @@ def test_failed_event_retry_does_not_create_a_second_run(tmp_path) -> None:
     assert service.calls == 1
     assert store.list_risks("elderly-001")[0].run_id == "run-event-failed"
     assert store.list_outbox()[0]["attempts"] == 2
+
+
+def test_villa_event_uses_the_same_consumer_and_run_lifecycle(tmp_path) -> None:
+    source = InMemoryDomainEventStore()
+    source.publish(DomainEventEnvelope(
+        event_id="villa-smoke-1",
+        domain_id="smart_home",
+        subject_id="villa-demo",
+        event_type="smoke_alarm",
+        severity="high",
+        message="大厅烟雾浓度达到 75%。",
+        source="smoke-sensor-001",
+        run_goal="核查并处置别墅烟雾告警。",
+        source_context={
+            "target": {"type": "site", "id": "villa-demo"},
+            "event": {"event_type": "smoke_alarm", "severity": "high"},
+        },
+        principal_id="system:villa-monitor",
+    ))
+    conversations = ConversationStore(tmp_path / "villa-conversations.db")
+    runs = InMemoryRunStore()
+    decisions = iter([
+        SupervisorDecision(
+            action="create_tasks",
+            goal="处置烟雾告警",
+            tasks=[{
+                "local_id": "security-check",
+                "agent_id": "security_agent",
+                "objective": "核查烟雾传感器和燃气状态",
+                "reason": "需要安防证据",
+                "success_criteria": ["获得现场安全状态"],
+            }],
+            success_criteria=["完成安全核查"],
+            reason="委派安防 Agent",
+        ),
+        SupervisorDecision(
+            action="finish",
+            goal_completed=True,
+            goal="处置烟雾告警",
+            final_response="烟雾告警已核查。",
+            satisfied_criteria=["完成安全核查"],
+            reason="已取得安防证据",
+        ),
+    ])
+
+    async def execute(task):
+        return AgentFinding(
+            agent=task.agent_id,
+            objective=task.objective,
+            status="completed",
+            finding="烟雾传感器告警，已完成现场核查。",
+            confidence=1,
+            evidence=[Evidence(
+                source="smoke-sensor-001",
+                value={"alarm": True},
+                reliability=1,
+                description="烟雾设备状态",
+            )],
+        )
+
+    def coordinator_factory(_context):
+        return RunCoordinator(
+            runs,
+            TaskScheduler(available_agents={"security_agent"}),
+            lambda _state: next(decisions),
+            {"security_agent": execute},
+        )
+
+    service = RunService(conversations, runs, coordinator_factory)
+    consumer = DomainEventConsumer([source], service)
+
+    results = asyncio.run(consumer.consume_once())
+
+    assert results[0]["domain_id"] == "smart_home"
+    run = asyncio.run(runs.get_run(results[0]["run_id"]))
+    assert run is not None
+    assert run.status == "completed"
+    assert run.user_id == "system:villa-monitor"
+    assert source.get_event("villa-smoke-1").run_id == run.run_id
+    assert source.claim_events() == []

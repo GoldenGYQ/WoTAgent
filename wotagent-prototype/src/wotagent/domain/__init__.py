@@ -30,13 +30,25 @@ from .operations import (
     TelemetrySignal,
 )
 from .resources import DeploymentResourceResolver, ResourceLocationResolver
+from .events import (
+    ClaimedDomainEvent,
+    DomainEventEnvelope,
+    DomainEventSource,
+    DomainEventStore,
+    InMemoryDomainEventStore,
+    SQLiteDomainEventStore,
+)
 
 __all__ = [
     "Condition",
+    "ClaimedDomainEvent",
     "DeploymentProfile",
     "DeploymentProfileCatalog",
     "DeploymentProfileRegistry",
     "DomainAccessDenied",
+    "DomainEventEnvelope",
+    "DomainEventSource",
+    "DomainEventStore",
     "DomainActorDefinition",
     "DomainManifest",
     "DomainNotFound",
@@ -47,11 +59,13 @@ __all__ = [
     "TelemetrySignal",
     "DeploymentResourceResolver",
     "ExecutionResult",
+    "InMemoryDomainEventStore",
     "PlanStep",
     "PolicyDecision",
     "RetryPolicy",
     "ResourceLocationResolver",
     "StepTrace",
+    "SQLiteDomainEventStore",
     "TaskPlan",
     "TaskStatus",
     "TaskTrace",

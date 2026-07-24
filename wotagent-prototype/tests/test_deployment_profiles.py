@@ -6,6 +6,7 @@ import pytest
 from fastapi import BackgroundTasks, HTTPException
 
 from wotagent.application import RunService
+from wotagent.agents import DEFAULT_AGENT_REGISTRY
 from wotagent.conversation import ConversationStore
 from wotagent.domain import DeploymentProfileRegistry
 from wotagent.gateway import MCPDeviceGateway, deployment_device_scope
@@ -44,6 +45,9 @@ def test_profiles_define_disjoint_device_worlds() -> None:
 
     assert eldercare.domain_id == "eldercare"
     assert villa.domain_id == "smart_home"
+    villa_agents = DEFAULT_AGENT_REGISTRY.select(villa.enabled_agents)
+    assert "security_agent" in villa_agents
+    assert "health_agent" not in villa_agents
     assert set(eldercare.device_ids).isdisjoint(villa.device_ids)
     assert eldercare.spaces == ["A-101", "A-102"]
     assert "living_room" in villa.spaces
