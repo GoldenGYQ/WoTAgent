@@ -2458,3 +2458,39 @@ TD。这个问题被写入部署、TD 和评测文档，后续应增加
 无依赖只读 Task 可并行，同资源写冲突仍会被串行。因此最新后端总回归为
 `262 passed, 3 skipped`；Simulator 为 `64 passed`；前端为 `45 passed`，
 typecheck/build 通过。
+
+## 33. Villa 场景统一进入 Run（2026-07-24）
+
+### 33.1 发现的问题
+
+Villa 领域中心虽然已经展示专业主体和场景按钮，但 `security_patrol` 与
+`away_mode` 曾直接在 `SmartHomeDomainPlugin.simulate()` 中调用门锁和摄像头。
+这会绕过 Supervisor、Task DAG、AgentRun、专业 Agent 循环和统一 Trace。界面上
+看似执行了领域流程，实际上只是领域插件执行了两个设备动作。
+
+### 33.2 修复方式
+
+新增 `DomainScenarioRunRequest`，把场景分成：
+
+- `agent_run`：领域声明目标，应用层创建 Run，Supervisor 动态拆解；
+- `direct_simulation`：只负责可重复的数据注入。
+
+Agent 场景现在包括安防巡检、离家、回家、全屋体检和节能评估。旧的直接执行旁路
+被拒绝，防止同一场景存在两套运行语义。前端收到 `run_id` 后直接打开统一 Run
+时间线。
+
+### 33.3 验证与环境问题
+
+前端领域中心组件测试、TypeScript 类型检查和生产构建通过。新增后端测试覆盖场景
+分类、Run 目标生成、禁止绕过 Run 和场景 Run 创建。
+
+本轮无法执行后端测试：仓库内 `wotagent-prototype/.venv` 与
+`wot-device-simulator/.venv` 虽然存在，但其中启动器均指向已经不存在的
+`C:\Users\gyq16\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none`
+基础解释器。没有改用项目外解释器，也没有把未运行的后端测试标记为通过。
+
+### 33.4 尚未完成
+
+Villa 的烟雾和能耗事件目前仍保存在进程内。下一步应建立通用、持久化的领域事件
+Outbox，让 Villa Monitor 与养老 Monitor 使用同一条
+`Domain Event → RunService → Run` 链路，而不是增加新的进程内回调。

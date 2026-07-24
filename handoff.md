@@ -510,6 +510,32 @@ Vite，而 Vite 同时代理 API 和 WebSocket。
 
 ## 17. 下一步建议
 
+### 17.0 当前主线：Villa 优先
+
+2026-07-24 起，后续演示与架构开发优先面向 Villa Domain，养老领域保留为第二领域
+适配证明。Villa 领域中心已把场景分为两类：
+
+- Agent 编排：安防巡检、离家模式、回家模式、全屋运行体检、节能评估；
+- 直接仿真：烟雾告警、能耗峰值。
+
+Agent 编排场景不再由领域插件直接调用设备，而是提交标准 Run：
+
+```text
+领域中心
+→ DomainScenarioRunRequest
+→ RunService
+→ Butler Supervisor
+→ Task DAG / Scheduler
+→ 专业 Agent
+→ TD / MCP / 验证
+```
+
+领域只给出目标、来源和建议关注的专业主体，不预先写死 Task DAG；最终拆解仍由
+Supervisor 决定。直接仿真仅负责向设备入口注入可重复数据。
+
+当前优先级为流程、架构和演示闭环。生产认证网关、限流和完整安全加固暂缓，但已有
+RBAC、AgentSpec Scope、TD 校验与确认机制不删除。
+
 ### P0：补齐当前契约
 
 1. 为 Profile 增加“所有 Device ID 必须存在 TD”的自动化校验。
@@ -520,7 +546,7 @@ Vite，而 Vite 同时代理 API 和 WebSocket。
 ### P1：深化授权
 
 1. 增加岗位、班次、目的和紧急上下文。
-2. 把别墅 Site Scope 细化到 Room/Post/Device。
+2. 把 Villa Monitor 事件接入通用持久化领域事件 Outbox，并统一生成 Run。
 3. 增加 Session 生命周期、限流和生产认证网关。
 
 ### P2：完善智能体协作

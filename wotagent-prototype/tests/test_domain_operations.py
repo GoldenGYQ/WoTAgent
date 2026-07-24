@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -175,6 +176,45 @@ def test_smart_home_domain_api_enforces_site_relationship_scope(
     assert allowed.json()["verified"] is True
     assert denied.status_code == 403
     assert events.json()["events"][0]["event_type"] == "smoke_alarm"
+
+
+def test_smart_home_agent_scenario_is_submitted_as_a_platform_run(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    async def create_domain_scenario_run(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            run_id="run-villa-check",
+            conversation_id="conv-villa-check",
+            status="accepted",
+        )
+
+    monkeypatch.setattr(
+        app_module._run_service,
+        "create_domain_scenario_run",
+        create_domain_scenario_run,
+    )
+    monkeypatch.setenv("ELDERCARE_EVENT_CONSUMER_ENABLED", "false")
+
+    with TestClient(app_module.app) as client:
+        response = client.post(
+            "/api/v2/domains/smart_home/scenarios",
+            json={
+                "subject_id": "villa-demo",
+                "scenario": "whole_house_check",
+                "principal_id": "JH-1",
+            },
+        )
+
+    assert response.status_code == 202
+    assert response.json()["execution_mode"] == "agent_run"
+    assert response.json()["run_id"] == "run-villa-check"
+    assert captured["domain_id"] == "smart_home"
+    assert captured["scenario"] == "whole_house_check"
+    assert captured["user_id"] == "JH-1"
+    assert captured["source_context"]["subject"]["id"] == "villa-demo"
 
 
 def test_eldercare_event_filters_and_status_transitions(

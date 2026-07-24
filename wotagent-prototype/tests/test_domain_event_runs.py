@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
+from fastapi import BackgroundTasks
+
 from wotagent.application import DomainEventConsumer, RunService
 from wotagent.agents import AgentFinding, Evidence
 from wotagent.conversation import ConversationStore
@@ -18,6 +20,44 @@ from wotagent.orchestration import (
     SupervisorDecision,
     TaskScheduler,
 )
+
+
+def test_domain_scenario_creates_an_accepted_platform_run(tmp_path) -> None:
+    conversations = ConversationStore(tmp_path / "conversations.db")
+    runs = InMemoryRunStore()
+    background_tasks = BackgroundTasks()
+    service = RunService(
+        conversations,
+        runs,
+        lambda _context: None,
+    )
+
+    run = asyncio.run(service.create_domain_scenario_run(
+        message="对整栋别墅执行一次只读运行体检。",
+        domain_id="smart_home",
+        scenario="whole_house_check",
+        source_context={
+            "subject": {"type": "site", "id": "villa-demo"},
+            "preferred_agents": [
+                "environment_agent",
+                "security_agent",
+                "energy_agent",
+                "device_ops_agent",
+            ],
+        },
+        user_id="JH-1",
+        background_tasks=background_tasks,
+    ))
+
+    assert run.status == "accepted"
+    assert run.source == "system"
+    assert run.domain_id == "smart_home"
+    assert run.profile_id == "villa"
+    assert run.source_context["type"] == "domain_scenario"
+    assert run.source_context["scenario"] == "whole_house_check"
+    assert len(background_tasks.tasks) == 1
+    events = asyncio.run(runs.events(run.run_id))
+    assert events[0].type == "run.source.received"
 
 
 class EmptyGateway:

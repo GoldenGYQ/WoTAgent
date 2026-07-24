@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, Field
 
@@ -23,6 +23,18 @@ class TelemetrySignal(BaseModel):
 class DomainScenario(BaseModel):
     key: str
     label: str
+    description: str = ""
+    execution_mode: Literal["agent_run", "direct_simulation"] = (
+        "direct_simulation"
+    )
+    expected_agents: list[str] = Field(default_factory=list)
+
+
+class DomainScenarioRunRequest(BaseModel):
+    """A domain-owned goal submitted through the platform Run lifecycle."""
+
+    goal: str = Field(min_length=1)
+    source_context: dict[str, object] = Field(default_factory=dict)
 
 
 class MonitorRuleDefinition(BaseModel):
@@ -112,6 +124,13 @@ class DomainPlugin(Protocol):
         scenario: str,
     ) -> dict[str, Any]: ...
 
+    def prepare_scenario_run(
+        self,
+        subject_id: str,
+        principal_id: str,
+        scenario: str,
+    ) -> DomainScenarioRunRequest | None: ...
+
     def acknowledge(
         self,
         event_id: str,
@@ -156,6 +175,7 @@ __all__ = [
     "DomainPlugin",
     "DomainPluginRegistry",
     "DomainScenario",
+    "DomainScenarioRunRequest",
     "MonitorRuleDefinition",
     "TelemetrySignal",
 ]

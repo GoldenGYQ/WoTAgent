@@ -179,6 +179,73 @@ class RunService:
         )
         return await self.require_run(run_id)
 
+    async def create_domain_scenario_run(
+        self,
+        *,
+        message: str,
+        domain_id: str,
+        scenario: str,
+        source_context: dict[str, object],
+        user_id: str,
+        background_tasks: BackgroundTasks,
+    ) -> RunRecord:
+        """Create a user-visible Run from a trusted domain scenario."""
+        profile = self._profile_for_domain(domain_id)
+        principal = self.principal_directory.resolve(user_id, domain_id)
+        role = principal.roles[0]
+        conversation_id = self._resolve_conversation(
+            None,
+            user_id=user_id,
+            role=role,
+        )
+        run_id = f"run_{uuid4().hex[:12]}"
+        turn = self.conversation_store.start_turn(
+            conversation_id=conversation_id,
+            run_id=run_id,
+            user_message=message,
+            role=role,
+        )
+        run = await self.run_store.create_run(RunRecord(
+            run_id=run_id,
+            conversation_id=conversation_id,
+            turn_id=turn["turn_id"],
+            root_goal=message,
+            role=role,
+            user_id=user_id,
+            principal=principal,
+            thinking=False,
+            source="system",
+            domain_id=domain_id,
+            profile_id=profile.profile_id,
+            site_id=profile.site_id,
+            source_context={
+                "type": "domain_scenario",
+                "scenario": scenario,
+                **source_context,
+            },
+            status="accepted",
+        ))
+        await self.run_store.record_event(
+            run_id,
+            "run.source.received",
+            node="domain_scenario",
+            data={
+                "source": "domain_scenario",
+                "domain_id": domain_id,
+                "scenario": scenario,
+                "context": source_context,
+            },
+        )
+        background_tasks.add_task(
+            self.execute,
+            run_id=run_id,
+            message=message,
+            role=role,
+            user_id=user_id,
+            thinking=False,
+        )
+        return run
+
     async def execute(
         self,
         *,

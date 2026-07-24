@@ -122,6 +122,40 @@ def test_manifest_exposes_butler_security_and_monitor_subjects() -> None:
     assert "security_agent" in actors["butler_run_supervisor"].delegates_to
 
 
+def test_manifest_distinguishes_agent_workflows_from_data_injection() -> None:
+    operations, _ = make_operations()
+
+    scenarios = {
+        item.key: item
+        for item in operations.manifest().scenarios
+    }
+
+    assert scenarios["away_mode"].execution_mode == "agent_run"
+    assert scenarios["whole_house_check"].expected_agents == [
+        "environment_agent",
+        "security_agent",
+        "energy_agent",
+        "device_ops_agent",
+    ]
+    assert scenarios["smoke_alarm"].execution_mode == "direct_simulation"
+
+
+def test_villa_agent_scenario_builds_a_run_goal_without_touching_devices() -> None:
+    operations, gateway = make_operations()
+
+    request = operations.prepare_scenario_run(
+        "villa-demo",
+        "JH-1",
+        "away_mode",
+    )
+
+    assert request is not None
+    assert "Supervisor" in request.goal
+    assert request.source_context["scenario"] == "away_mode"
+    assert request.source_context["subject"]["id"] == "villa-demo"
+    assert gateway.calls == []
+
+
 def test_villa_resources_are_profile_scoped() -> None:
     operations, _ = make_operations()
 
@@ -158,18 +192,19 @@ def test_operator_smoke_scenario_executes_td_action_and_emits_event() -> None:
     assert events[0]["severity"] == "high"
 
 
-def test_security_patrol_uses_td_required_duration() -> None:
+def test_agent_scenario_cannot_bypass_the_platform_run() -> None:
     operations, gateway = make_operations()
 
-    asyncio.run(
-        operations.simulate(
-            "villa-demo",
-            "JH-1",
-            "security_patrol",
+    with pytest.raises(ValueError, match="must be submitted as an Agent Run"):
+        asyncio.run(
+            operations.simulate(
+                "villa-demo",
+                "JH-1",
+                "security_patrol",
+            )
         )
-    )
 
-    assert gateway.calls[0]["parameters"] == {"durationSeconds": 60}
+    assert gateway.calls == []
 
 
 def test_viewer_can_read_but_cannot_execute_or_acknowledge() -> None:

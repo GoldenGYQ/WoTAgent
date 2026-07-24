@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, Literal
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException
 from pydantic import BaseModel
 
 from ...domain import (
@@ -52,6 +52,7 @@ class EventStatusUpdateRequest(BaseModel):
 def create_domain_router(
     get_registry: Callable[[], DomainPluginRegistry],
     get_principals: Callable[[], PrincipalDirectory] | None = None,
+    get_run_service: Callable[[], Any] | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/v2/domains", tags=["domains"])
 
@@ -257,6 +258,7 @@ def create_domain_router(
     async def simulate(
         domain_id: str,
         request: ScenarioRequest,
+        background_tasks: BackgroundTasks,
         authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
         principal_id = authorized_principal(
@@ -264,8 +266,38 @@ def create_domain_router(
             request.principal_id,
             authorization,
         )
+        domain_adapter = adapter(domain_id)
+        prepare_run = getattr(
+            domain_adapter,
+            "prepare_scenario_run",
+            None,
+        )
+        if get_run_service is not None and callable(prepare_run):
+            run_request = guarded(
+                lambda: prepare_run(
+                    request.subject_id,
+                    principal_id,
+                    request.scenario,
+                )
+            )
+            if run_request is not None:
+                run = await get_run_service().create_domain_scenario_run(
+                    message=run_request.goal,
+                    domain_id=domain_id,
+                    scenario=request.scenario,
+                    source_context=run_request.source_context,
+                    user_id=principal_id,
+                    background_tasks=background_tasks,
+                )
+                return {
+                    "scenario": request.scenario,
+                    "execution_mode": "agent_run",
+                    "run_id": run.run_id,
+                    "conversation_id": run.conversation_id,
+                    "status": run.status,
+                }
         return await guarded_async(
-            lambda: adapter(domain_id).simulate(
+            lambda: domain_adapter.simulate(
                 request.subject_id,
                 principal_id,
                 request.scenario,

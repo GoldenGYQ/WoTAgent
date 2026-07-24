@@ -24,6 +24,10 @@ from .operations import (
     DomainManifest,
     DomainNotFound,
     DomainPluginRegistry,
+    DomainScenario,
+    DomainScenarioRunRequest,
+    MonitorRuleDefinition,
+    TelemetrySignal,
 )
 from .resources import DeploymentResourceResolver, ResourceLocationResolver
 
@@ -37,6 +41,10 @@ __all__ = [
     "DomainManifest",
     "DomainNotFound",
     "DomainPluginRegistry",
+    "DomainScenario",
+    "DomainScenarioRunRequest",
+    "MonitorRuleDefinition",
+    "TelemetrySignal",
     "DeploymentResourceResolver",
     "ExecutionResult",
     "PlanStep",

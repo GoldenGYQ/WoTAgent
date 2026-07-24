@@ -380,6 +380,16 @@ class EldercareDomainPlugin:
         self._require_access(subject_id, principal_id)
         return await self.get_runtime().simulate(scenario, subject_id)
 
+    def prepare_scenario_run(
+        self,
+        subject_id: str,
+        principal_id: str,
+        scenario: str,
+    ) -> None:
+        del scenario
+        self._require_access(subject_id, principal_id)
+        return None
+
     def acknowledge(
         self,
         event_id: str,

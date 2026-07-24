@@ -14,6 +14,7 @@ from ...domain.operations import (
     DomainActorDefinition,
     DomainManifest,
     DomainScenario,
+    DomainScenarioRunRequest,
     MonitorRuleDefinition,
     TelemetrySignal,
 )
@@ -21,6 +22,86 @@ from ...identity import DEFAULT_PRINCIPAL_DIRECTORY, PrincipalDirectory
 
 
 SITE_RESOURCE_ID = "site:villa-demo"
+
+VILLA_AGENT_SCENARIOS: dict[str, DomainScenarioRunRequest] = {
+    "security_patrol": DomainScenarioRunRequest(
+        goal=(
+            "对整栋别墅执行一次只读安防巡检。核查入口门锁、摄像头、烟雾"
+            "传感器和燃气传感器的当前状态，汇总可验证证据；只有发现异常时"
+            "才提出后续处置，不要为展示流程而执行无关动作。"
+        ),
+        source_context={
+            "scenario": "security_patrol",
+            "intent": "inspect",
+            "preferred_agents": ["security_agent"],
+        },
+    ),
+    "away_mode": DomainScenarioRunRequest(
+        goal=(
+            "为整栋别墅执行离家模式。由 Supervisor 按专业边界协调安防、"
+            "环境、能耗和家务 Agent：确认入口安全并完成布防，关闭不必要的"
+            "灯光与环境负载，检查高耗能设备和家务设备是否仍在运行；互不依赖"
+            "的检查可以并行，所有状态改变都必须执行后验证，最后说明已完成项"
+            "和仍需人工确认的事项。"
+        ),
+        source_context={
+            "scenario": "away_mode",
+            "intent": "coordinate",
+            "preferred_agents": [
+                "security_agent",
+                "environment_agent",
+                "energy_agent",
+                "housekeeping_agent",
+            ],
+        },
+    ),
+    "home_mode": DomainScenarioRunRequest(
+        goal=(
+            "为整栋别墅执行回家模式。检查入口与主要设备是否在线，在授权和"
+            "确认约束下恢复入口可用状态，并协调环境 Agent 打开客厅基础照明、"
+            "将客厅环境调整到舒适状态。可并行的检查应并行，动作完成后必须"
+            "读取设备状态验证。"
+        ),
+        source_context={
+            "scenario": "home_mode",
+            "intent": "coordinate",
+            "preferred_agents": [
+                "security_agent",
+                "environment_agent",
+                "device_ops_agent",
+            ],
+        },
+    ),
+    "whole_house_check": DomainScenarioRunRequest(
+        goal=(
+            "对整栋别墅执行一次只读运行体检。并行核查环境、安防、能耗和"
+            "设备接入状态，分别给出关键观测证据、异常项和建议；不要改变任何"
+            "设备状态。"
+        ),
+        source_context={
+            "scenario": "whole_house_check",
+            "intent": "inspect",
+            "preferred_agents": [
+                "environment_agent",
+                "security_agent",
+                "energy_agent",
+                "device_ops_agent",
+            ],
+        },
+    ),
+    "energy_saving": DomainScenarioRunRequest(
+        goal=(
+            "评估别墅当前实时能耗和主要可调负载，先读取可验证数据；如果存在"
+            "明显非必要负载，再由 Energy Agent 在授权范围内选择最小影响的"
+            "节能动作并验证结果。不要为了节能关闭安防或安全设备。"
+        ),
+        source_context={
+            "scenario": "energy_saving",
+            "intent": "observe_then_act",
+            "preferred_agents": ["energy_agent"],
+        },
+    ),
+}
 
 
 class SmartHomeDomainPlugin:
@@ -68,18 +149,61 @@ class SmartHomeDomainPlugin:
                 DomainScenario(
                     key="security_patrol",
                     label="启动安防巡查",
+                    description="由 Security Agent 核查门锁、摄像头、烟雾与燃气。",
+                    execution_mode="agent_run",
+                    expected_agents=["security_agent"],
                 ),
                 DomainScenario(
                     key="away_mode",
                     label="执行离家布防",
+                    description="多专业 Agent 并行检查并完成离家状态验证。",
+                    execution_mode="agent_run",
+                    expected_agents=[
+                        "security_agent",
+                        "environment_agent",
+                        "energy_agent",
+                        "housekeeping_agent",
+                    ],
+                ),
+                DomainScenario(
+                    key="home_mode",
+                    label="执行回家模式",
+                    description="协调入口、基础照明和舒适环境恢复。",
+                    execution_mode="agent_run",
+                    expected_agents=[
+                        "security_agent",
+                        "environment_agent",
+                        "device_ops_agent",
+                    ],
+                ),
+                DomainScenario(
+                    key="whole_house_check",
+                    label="全屋运行体检",
+                    description="并行执行环境、安防、能耗和设备接入只读检查。",
+                    execution_mode="agent_run",
+                    expected_agents=[
+                        "environment_agent",
+                        "security_agent",
+                        "energy_agent",
+                        "device_ops_agent",
+                    ],
+                ),
+                DomainScenario(
+                    key="energy_saving",
+                    label="评估并执行节能",
+                    description="先观察真实负载，再决定是否执行最小影响调度。",
+                    execution_mode="agent_run",
+                    expected_agents=["energy_agent"],
                 ),
                 DomainScenario(
                     key="smoke_alarm",
                     label="模拟烟雾告警",
+                    description="向模拟设备注入高烟雾数据，触发确定性规则。",
                 ),
                 DomainScenario(
                     key="energy_peak",
                     label="模拟能耗峰值",
+                    description="向智能电表注入峰值功率，触发确定性规则。",
                 ),
             ],
             monitor_rules=[
@@ -356,32 +480,10 @@ class SmartHomeDomainPlugin:
         scenario: str,
     ) -> dict[str, Any]:
         self._require(subject_id, principal_id, "scenario.execute")
-        if scenario == "security_patrol":
-            return await self._execute(
-                principal_id,
-                "camera-001",
-                "startRecording",
-                {"durationSeconds": 60},
-                "security_agent",
+        if scenario in VILLA_AGENT_SCENARIOS:
+            raise ValueError(
+                f"scenario '{scenario}' must be submitted as an Agent Run"
             )
-        if scenario == "away_mode":
-            results = [
-                await self._execute(
-                    principal_id,
-                    "door-lock-001",
-                    "lock",
-                    {},
-                    "security_agent",
-                ),
-                await self._execute(
-                    principal_id,
-                    "camera-001",
-                    "startRecording",
-                    {"durationSeconds": 60},
-                    "security_agent",
-                ),
-            ]
-            return {"scenario": scenario, "results": results}
         if scenario == "smoke_alarm":
             return await self.ingest(
                 subject_id,
@@ -395,6 +497,27 @@ class SmartHomeDomainPlugin:
                 {"signal": "power_watts", "value": 9200},
             )
         raise ValueError(f"unknown smart-home scenario: {scenario}")
+
+    def prepare_scenario_run(
+        self,
+        subject_id: str,
+        principal_id: str,
+        scenario: str,
+    ) -> DomainScenarioRunRequest | None:
+        self._require(subject_id, principal_id, "scenario.execute")
+        request = VILLA_AGENT_SCENARIOS.get(scenario)
+        if request is None:
+            return None
+        return request.model_copy(update={
+            "source_context": {
+                **request.source_context,
+                "subject": {
+                    "type": "site",
+                    "id": subject_id,
+                    "display_name": self.get_profile().title,
+                },
+            },
+        })
 
     def acknowledge(
         self,

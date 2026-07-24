@@ -96,6 +96,17 @@ open -> acknowledged -> in_progress -> resolved | false_positive
 当前目录存在一个明确缺口：养老 Profile 配置了 16 个设备 ID，但只有 15 个
 设备存在 TD，`purifier-102` 暂缺 TD；别墅 Profile 配置的 23 个设备均有 TD。
 
+### 4.3 Villa 场景执行边界
+
+Villa 领域场景分为 `agent_run` 与 `direct_simulation`：
+
+- `agent_run` 只声明目标和场景上下文，经 `RunService` 进入统一 Run/Task 生命周期；
+- `direct_simulation` 只向仿真设备写入确定性数据，用于触发 Monitor 规则。
+
+安防巡检、离家、回家、全屋体检和节能评估属于 `agent_run`。烟雾告警与能耗峰值
+属于 `direct_simulation`。专业 Agent 的实际数量、依赖和并行关系由 Supervisor
+与 Scheduler 决定，领域插件不得直接替代 Agent 调用设备。
+
 ## 已删除的旧入口
 
 - `core/pipeline.py` 已由 `core/model_runtime.py` 替代。旧文件实际只负责模型

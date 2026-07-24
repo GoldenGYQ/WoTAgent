@@ -131,7 +131,13 @@ describe('DomainOperationsCenter', () => {
         subject_label: '管理范围',
         subject_label_plural: '管理范围',
         telemetry_signals: [],
-        scenarios: [],
+        scenarios: [{
+          key: 'whole_house_check',
+          label: '全屋运行体检',
+          description: '并行执行只读检查',
+          execution_mode: 'agent_run',
+          expected_agents: ['environment_agent', 'security_agent'],
+        }],
         monitor_rules: [],
         actors: [
           {
@@ -188,6 +194,15 @@ describe('DomainOperationsCenter', () => {
       updated_at: '2026-07-19T08:00:00Z',
       age_seconds: 0,
     })
+    const simulateScenario = vi.spyOn(
+      agentV2Api,
+      'simulateDomainScenario',
+    ).mockResolvedValue({
+      scenario: 'whole_house_check',
+      execution_mode: 'agent_run',
+      run_id: 'run-villa-check',
+      status: 'accepted',
+    })
 
     const wrapper = mount(DomainOperationsCenter, {
       props: {
@@ -203,6 +218,16 @@ describe('DomainOperationsCenter', () => {
     expect(wrapper.text()).toContain('安防处置 Agent')
     expect(wrapper.text()).toContain('LLM 驱动')
     expect(wrapper.text()).not.toContain('养老照护')
+    await wrapper.get('[data-section="telemetry"]').trigger('click')
+    expect(wrapper.text()).toContain('Agent 编排')
+    await wrapper.get('[data-mode="agent_run"]').trigger('click')
+    await flushPromises()
+    expect(simulateScenario).toHaveBeenCalledWith('smart_home', {
+      subject_id: 'villa-demo',
+      scenario: 'whole_house_check',
+      principal_id: 'JH-1',
+    })
+    expect(wrapper.emitted('inspectRun')).toEqual([['run-villa-check']])
     wrapper.unmount()
   })
 })

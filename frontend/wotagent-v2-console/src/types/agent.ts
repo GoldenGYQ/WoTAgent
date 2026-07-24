@@ -194,6 +194,9 @@ export interface DomainTelemetrySignal {
 export interface DomainScenario {
   key: string
   label: string
+  description?: string
+  execution_mode?: 'agent_run' | 'direct_simulation'
+  expected_agents?: string[]
 }
 
 export interface DomainMonitorRule {

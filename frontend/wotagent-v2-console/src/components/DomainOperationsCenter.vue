@@ -276,11 +276,14 @@ async function runScenario(scenario: string): Promise<void> {
   loading.value = true
   error.value = ''
   try {
-    await agentV2Api.simulateDomainScenario(domainId.value, {
+    const result = await agentV2Api.simulateDomainScenario(domainId.value, {
       subject_id: subjectId.value,
       scenario,
       principal_id: props.principalId,
     })
+    if (typeof result.run_id === 'string') {
+      emit('inspectRun', result.run_id)
+    }
     await refresh()
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause)
@@ -566,8 +569,17 @@ onBeforeUnmount(() => {
           <div><h2>领域场景</h2><p>用于可重复的 Monitor 与 Agent 闭环实验</p></div>
         </div>
         <div class="scenario-list">
-          <button v-for="item in manifest?.scenarios ?? []" :key="item.key" type="button" :disabled="loading || !subjectId" @click="runScenario(item.key)">
-            <Play :size="14" />{{ item.label }}
+          <button
+            v-for="item in manifest?.scenarios ?? []"
+            :key="item.key"
+            type="button"
+            :disabled="loading || !subjectId"
+            :title="item.description"
+            :data-mode="item.execution_mode ?? 'direct_simulation'"
+            @click="runScenario(item.key)"
+          >
+            <Play :size="14" />
+            <span>{{ item.label }}<small>{{ item.execution_mode === 'agent_run' ? 'Agent 编排' : '仿真注入' }}</small></span>
           </button>
         </div>
       </div>
@@ -744,9 +756,14 @@ td small { margin-top: 3px; color: var(--text-faint); font-size: 9px; }
 .telemetry-form, .scenario-list { flex-wrap: wrap; padding: 14px 0; }
 .telemetry-form input { width: 120px; }
 .telemetry-form .unit-input { width: 70px; }
-.telemetry-form button, .scenario-list button, .event-action, .run-link { height: 32px; display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line-strong); border-radius: 5px; padding: 0 10px; background: #fff; font-size: 10px; }
+.telemetry-form button, .scenario-list button, .event-action, .run-link { min-height: 32px; display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line-strong); border-radius: 5px; padding: 6px 10px; background: #fff; font-size: 10px; }
 .telemetry-form button { color: #fff; border-color: var(--teal); background: var(--teal); }
 .scenario-list button:hover { border-color: var(--teal); color: var(--teal); }
+.scenario-list button { align-items: flex-start; text-align: left; }
+.scenario-list button > svg { margin-top: 2px; flex: 0 0 auto; }
+.scenario-list button span { display: grid; gap: 2px; }
+.scenario-list button small { color: var(--text-muted); font-size: 9px; font-weight: 400; }
+.scenario-list button[data-mode="agent_run"] small { color: var(--teal); }
 .severity { display: inline-flex; padding: 2px 5px; border-radius: 3px; color: var(--amber); background: var(--amber-soft); }
 .severity[data-level="critical"] { color: var(--red); background: var(--red-soft); }
 .severity[data-level="high"] { color: #9b4a13; background: #fff0e7; }

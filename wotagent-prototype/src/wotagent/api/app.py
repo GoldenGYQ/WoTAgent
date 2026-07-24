@@ -146,6 +146,7 @@ app.include_router(create_eldercare_router(
 app.include_router(create_domain_router(
     lambda: _domain_registry,
     lambda: _principal_store,
+    lambda: _run_service,
 ))
 app.include_router(create_deployment_router(
     lambda: _deployment_profiles
