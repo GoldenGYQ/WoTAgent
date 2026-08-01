@@ -54,6 +54,30 @@ function Get-PidFile {
     return Join-Path $runtimeDir "$Name.pid"
 }
 
+function Get-ExpectedProcessNames {
+    param([string]$Name)
+    switch ($Name) {
+        "simulator" { return @("wot-sim-api") }
+        "backend" { return @("wotagent") }
+        "monitor" { return @("wotagent") }
+        "frontend" { return @("cmd", "node", "npm", "npm.cmd") }
+        "cloudflared" { return @("cloudflared") }
+        default { return @() }
+    }
+}
+
+function Test-TrackedProcessIdentity {
+    param(
+        [string]$Name,
+        [System.Diagnostics.Process]$Process
+    )
+    $expected = Get-ExpectedProcessNames $Name
+    if ($expected.Count -eq 0) {
+        return $true
+    }
+    return $expected -contains $Process.ProcessName.ToLowerInvariant()
+}
+
 function Get-TrackedProcess {
     param([string]$Name)
     $pidFile = Get-PidFile $Name
@@ -69,6 +93,12 @@ function Get-TrackedProcess {
     $process = Get-Process -Id ([int]$savedPid) -ErrorAction SilentlyContinue
     if (-not $process) {
         Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
+        return $null
+    }
+    if (-not (Test-TrackedProcessIdentity -Name $Name -Process $process)) {
+        Write-Step "$Name PID record is stale: PID $savedPid now belongs to $($process.ProcessName)."
+        Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
+        return $null
     }
     return $process
 }
@@ -128,8 +158,21 @@ function Start-StackService {
     $definition = $services[$Name]
     $tracked = Get-TrackedProcess $Name
     if ($tracked) {
-        Write-Step "$Name is already managed (PID $($tracked.Id))."
-        return
+        $healthy = if ($definition.HealthUrl) {
+            Test-HttpEndpoint $definition.HealthUrl
+        }
+        else {
+            $true
+        }
+        if ($healthy) {
+            Write-Step "$Name is already managed and ready (PID $($tracked.Id))."
+            return
+        }
+
+        Write-Step "$Name is managed but unhealthy; restarting PID $($tracked.Id)."
+        & taskkill.exe /PID $tracked.Id /T /F 2>$null | Out-Null
+        Remove-Item -LiteralPath (Get-PidFile $Name) -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Milliseconds 500
     }
 
     if ($definition.Port) {
@@ -336,24 +379,35 @@ function Enable-QuickTunnel {
     $stdout = Join-Path $logDir "cloudflared.stdout.log"
     $stderr = Join-Path $logDir "cloudflared.stderr.log"
     $tracked = Get-TrackedProcess "cloudflared"
-    if ($tracked -and (Test-Path -LiteralPath $remoteFile)) {
-        Write-Host "Public phone URL: $(Get-Content -LiteralPath $remoteFile)" -ForegroundColor Green
-        return
-    }
     if ($tracked) {
-        $existingUrl = Get-QuickTunnelUrl -LogFiles @($stdout, $stderr)
-        if ($existingUrl) {
-            Set-Content -LiteralPath $remoteFile -Value $existingUrl -Encoding UTF8
+        $existingUrl = if (Test-Path -LiteralPath $remoteFile) {
+            [string](Get-Content -LiteralPath $remoteFile)
+        }
+        else {
+            Get-QuickTunnelUrl -LogFiles @($stdout, $stderr)
+        }
+        if ($existingUrl -and (Test-HttpEndpoint $existingUrl.Trim())) {
+            $existingUrl = $existingUrl.Trim()
             Write-Host "Public phone URL: $existingUrl" -ForegroundColor Green
             return
         }
-        throw "A managed cloudflared process is running without a published URL. Run stop-wotagent.bat and retry."
+
+        Write-Step "Cloudflare process is running but the public endpoint is unavailable; rebuilding the tunnel."
+        & taskkill.exe /PID $tracked.Id /T /F 2>$null | Out-Null
+        Remove-Item -LiteralPath (Get-PidFile "cloudflared") -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $remoteFile -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Milliseconds 500
     }
 
     Remove-Item -LiteralPath $stdout, $stderr -Force -ErrorAction SilentlyContinue
     $process = Start-Process `
         -FilePath $cloudflared `
-        -ArgumentList @("tunnel", "--url", "http://127.0.0.1:5174", "--no-autoupdate") `
+        -ArgumentList @(
+            "tunnel",
+            "--url", "http://127.0.0.1:5174",
+            "--protocol", "http2",
+            "--no-autoupdate"
+        ) `
         -WorkingDirectory $repoRoot `
         -WindowStyle Hidden `
         -RedirectStandardOutput $stdout `
@@ -365,7 +419,10 @@ function Enable-QuickTunnel {
     $remoteUrl = $null
     while ((Get-Date) -lt $deadline) {
         if ($process.HasExited) {
-            throw "cloudflared exited with code $($process.ExitCode). Check $stderr."
+            $process.WaitForExit()
+            $exitCode = $process.ExitCode
+            Remove-Item -LiteralPath (Get-PidFile "cloudflared") -Force -ErrorAction SilentlyContinue
+            throw "cloudflared exited with code $exitCode. Check $stderr."
         }
         $remoteUrl = Get-QuickTunnelUrl -LogFiles @($stdout, $stderr)
         if ($remoteUrl) {
@@ -376,7 +433,22 @@ function Enable-QuickTunnel {
     }
 
     if (-not $remoteUrl) {
+        & taskkill.exe /PID $process.Id /T /F 2>$null | Out-Null
+        Remove-Item -LiteralPath (Get-PidFile "cloudflared") -Force -ErrorAction SilentlyContinue
         throw "Cloudflare Quick Tunnel did not return a URL within 45 seconds. Check $stderr."
+    }
+
+    $publicDeadline = (Get-Date).AddSeconds(45)
+    while ((Get-Date) -lt $publicDeadline) {
+        if (Test-HttpEndpoint $remoteUrl) {
+            break
+        }
+        Start-Sleep -Seconds 1
+    }
+    if (-not (Test-HttpEndpoint $remoteUrl)) {
+        & taskkill.exe /PID $process.Id /T /F 2>$null | Out-Null
+        Remove-Item -LiteralPath (Get-PidFile "cloudflared") -Force -ErrorAction SilentlyContinue
+        throw "Cloudflare returned $remoteUrl but the public endpoint did not become healthy. Check $stderr."
     }
 
     Set-Content -LiteralPath $remoteFile -Value $remoteUrl -Encoding UTF8
@@ -413,6 +485,9 @@ function Show-Status {
         if ($remoteUrl -match "trycloudflare\.com" -and -not $quickTunnel) {
             Write-Host "remote     stale record (cloudflared is stopped)"
         }
+        elseif ($remoteUrl -match "trycloudflare\.com" -and -not (Test-HttpEndpoint $remoteUrl)) {
+            Write-Host "remote     unavailable ($remoteUrl)"
+        }
         else {
             Write-Host "remote     $remoteUrl"
         }
@@ -434,7 +509,14 @@ switch ($Action) {
     }
     "remote" {
         Start-Stack -EnableEventConsumer $true
-        Enable-QuickTunnel
+        try {
+            Enable-QuickTunnel
+        }
+        catch {
+            Write-Warning "Cloudflare Quick Tunnel is unavailable on the current network."
+            Write-Host $_.Exception.Message -ForegroundColor Yellow
+            Write-Host "The local stack remains ready: http://127.0.0.1:5174/" -ForegroundColor Green
+        }
     }
     "private" {
         Start-Stack -EnableEventConsumer $true
