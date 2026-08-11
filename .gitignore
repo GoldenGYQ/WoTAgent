@@ -62,6 +62,7 @@ ollama_models/
 .idea/
 .claude/
 .claude_settings.json
+.codex-remote-attachments/
 
 # --- OS ---
 Thumbs.db
@@ -73,6 +74,19 @@ Thumbs.db
 # --- Project specific ---
 wot-device-simulator/*.egg-info/
 wot-device-simulator/.venv/
+.tmp_run_*.json
+tmp_run_*.json
+tmp_run_*.txt
+tmp_test_output.txt
+debug-*.md
+/query
+/stop
+
+# --- Personal career documents (NOT part of this project) ---
+/蚂蚁国际面试准备_关英颀.md
+/蚂蚁面试准备.md
+/面试一问一答.md
+/面试一问一答.xlsx
 
 # --- Thesis / defense documents (NOT part of this project) ---
 预答辩*/
