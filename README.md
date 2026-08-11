@@ -7,6 +7,44 @@ WoTAgent 是一个面向实验验证的 LLM + WoT 多领域物联网智能体平
 Principal 授权、DAG 调度、确认、TD 校验、MCP 执行、状态验证与有限恢复由
 确定性代码负责。
 
+## 界面预览
+
+### Agent 任务工作台
+
+登录后根据当前 Principal、领域角色与资源关系展示可执行任务，支持文本、语音、
+电话模式和深度思考。
+
+![WoTAgent Agent 任务工作台](doc/assets/screenshots/02-agent-workspace.png)
+
+### 多 Agent 任务 DAG 与运行 Trace
+
+一次用户请求可以形成多个并行或串行 Task。时间线展示 Supervisor 决策、执行波次、
+专业 Agent、依赖关系、Token、工具调用、总耗时与费用。
+
+![WoTAgent 多 Agent 执行过程](doc/assets/screenshots/03-multi-agent-execution.gif)
+
+<details>
+<summary>查看静态 Trace 截图</summary>
+
+![WoTAgent 多 Agent 任务 DAG 与运行 Trace](doc/assets/screenshots/03-multi-agent-trace.png)
+
+</details>
+
+### Villa 领域的软件能力主体
+
+Deployment Profile 决定当前场景启用的专业 Agent 与资源范围；人类 Principal、
+软件 Agent 和确定性 Monitor 在界面中明确区分。
+
+![WoTAgent Villa 领域运行中心](doc/assets/screenshots/04-villa-domain-center.png)
+
+![WoTAgent Villa 专业 Agent](doc/assets/screenshots/05-villa-agent-registry.png)
+
+### Principal 与角色入口
+
+演示账号展示护理员、观察者、居民、管理员等身份，以及与居民或场景资源的关系。
+
+![WoTAgent Principal 与角色入口](doc/assets/screenshots/01-principal-login.png)
+
 ## 核心链路
 
 ```text
