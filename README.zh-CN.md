@@ -1,187 +1,361 @@
-# WoTAgent
+<div align="center">
+  <h1>WoTAgent</h1>
 
-当前发布基线：`v2.8.0`；当前实现目标：`v3.0.0`。
+  <p><strong>面向真实物联网任务的多 Agent 管控与可观测执行平台</strong></p>
+  <p>让 LLM 负责理解目标、拆分任务和动态委派，让确定性系统负责权限、设备约束、执行与验证。</p>
 
-WoTAgent 是一个面向实验验证的 LLM + WoT 多领域物联网智能体平台。LLM
-负责理解目标、生成结构化 Task、选择专业 Agent，并根据新证据二次决策；
-Principal 授权、DAG 调度、确认、TD 校验、MCP 执行、状态验证与有限恢复由
-确定性代码负责。
+  <p>
+    <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python 3.11+" />
+    <img src="https://img.shields.io/badge/LangGraph-1.x-1C3C3C" alt="LangGraph 1.x" />
+    <img src="https://img.shields.io/badge/FastAPI-0.110%2B-009688?logo=fastapi&logoColor=white" alt="FastAPI" />
+    <img src="https://img.shields.io/badge/Vue-3.5-42B883?logo=vuedotjs&logoColor=white" alt="Vue 3" />
+    <img src="https://img.shields.io/badge/WoT-TD%20%2B%20MCP-2563EB" alt="WoT TD + MCP" />
+    <img src="https://img.shields.io/badge/Baseline-v2.8.0-16A34A" alt="v2.8.0" />
+  </p>
+</div>
 
-## 界面预览
+> WoTAgent 是一个实验型 AI + IoT 工程项目。当前发布基线为 `v2.8.0`，正在向
+> `v3.0.0` 演进。项目重点不是让大模型绕过规则直接控制设备，而是在可审计、可授权、
+> 可验证的边界内，将设备操作升级为目标驱动的多 Agent 协作。
+
+## 为什么做这个项目
+
+传统智能家居通常要求用户精确选择设备并执行固定动作；通用 LLM 虽然能理解自然语言，
+却不能天然保证权限正确、参数合法、动作真正生效，也不适合直接接收高频传感器数据。
+
+WoTAgent 尝试解决三个问题：
+
+- **统一设备能力**：使用 WoT Thing Description 描述属性、动作、事件和参数约束，
+  再编译为 MCP Resource / Tool。
+- **组织复杂任务**：一次请求可以形成多个有依赖关系的 Task，由 Supervisor 选择专业
+  Agent，并由调度器决定串行、并行或等待。
+- **约束模型行为**：LLM 决定“做什么和下一步是什么”，RBAC、Resource Scope、TD、
+  Policy、确认与执行后验证决定“能不能做、怎么安全地做”。
+
+## 产品体验
 
 ### Agent 任务工作台
 
-登录后根据当前 Principal、领域角色与资源关系展示可执行任务，支持文本、语音、
-电话模式和深度思考。
+对话不是一个黑盒请求。每轮消息会形成独立 Run，前端同时展示最终回答、任务状态、
+Token、耗时、工具调用以及可展开的运行 Trace。当前 Principal、领域角色和资源关系会
+随会话一起显示。
 
-![WoTAgent Agent 任务工作台](doc/assets/screenshots/02-agent-workspace.png)
+<p align="center">
+  <img src="doc/assets/screenshots/02-agent-workspace.png" alt="WoTAgent Agent 任务工作台" width="1000" />
+</p>
 
-### 多 Agent 任务 DAG 与运行 Trace
+### 领域运行中心
 
-一次用户请求可以形成多个并行或串行 Task。时间线展示 Supervisor 决策、执行波次、
-专业 Agent、依赖关系、Token、工具调用、总耗时与费用。
+平台能力与具体领域分层。Deployment Profile 决定当前运行在 Villa 还是养老照护场景，
+并限定可见空间、设备、软件 Agent、Monitor 规则与提示词上下文。
 
-![WoTAgent 多 Agent 执行过程](doc/assets/screenshots/03-multi-agent-execution.gif)
+<p align="center">
+  <img src="doc/assets/screenshots/04-villa-domain-center.png" alt="WoTAgent Villa 领域运行中心" width="1000" />
+</p>
+
+### Principal 与资源关系
+
+用户身份与软件 Agent 是两类主体。前端展示人类 Principal 的角色、岗位或照护关系；
+后端将这些关系转换为任务可用的 Capability 与 Resource Scope，而不是只依赖一个
+`viewer/operator/admin` 标签。
+
+<p align="center">
+  <img src="doc/assets/screenshots/01-principal-login.png" alt="WoTAgent Principal 登录入口" width="1000" />
+</p>
+
+## 核心能力
+
+| 能力 | 当前实现 |
+|---|---|
+| 目标驱动 Supervisor | LangChain `create_agent` 输出结构化决策，创建、补充或结束 Task |
+| Run / Task DAG | `Conversation → Turn → Run → Task → AgentRun → Loop / ToolCall` |
+| 有限并行 | 根据依赖、资源读写声明、冲突和并发上限选择执行波次 |
+| 专业 Agent | Health、Care 使用受限 ReAct；Environment、Security、Energy、Housekeeping、DeviceOps 使用设备 LangGraph |
+| WoT / MCP | TD 编译 MCP 能力，Scoped MCP Client 限制 Agent 可见资源和工具 |
+| 执行安全 | Principal、RBAC、Resource Scope、Policy、TD 参数校验和高风险确认 |
+| 结果验证 | 写操作后读取设备状态，区分调用成功与目标真正完成 |
+| Monitor | 独立确定性服务持续接收或轮询数据，按规则产生领域事件并提交 Run |
+| 持久化 | SQLite 保存会话、Run、Task、事件和 LangGraph checkpoint |
+| 可观测性 | Run 事件流、嵌套 Trace、模型使用量、工具输入输出、耗时和可配置费用 |
+| 多领域 | `smart_home` 与 `eldercare` 复用平台能力，通过 Deployment Profile 装配 |
+| 仿真与评测 | 统一设备 Simulator，并保留 HomeBench / SimuHome 对齐评测入口 |
+
+## 系统架构
+
+```mermaid
+flowchart TD
+    U["用户或 Monitor 事件"] --> API["FastAPI Run API"]
+    API --> RS["RunService"]
+    RS --> RC["RunCoordinator"]
+    RC --> BS["Butler Supervisor"]
+    BS --> SD["结构化 SupervisorDecision"]
+    SD --> TS["Task DAG Scheduler"]
+
+    TS --> HA["Health / Care ReAct"]
+    TS --> DA["Device Specialist LangGraph"]
+
+    HA --> SCOPE["Principal + AgentSpec + Resource Scope"]
+    DA --> SCOPE
+    SCOPE --> POLICY["RBAC / Policy / TD Validation"]
+    POLICY --> MCP["Scoped MCP Client"]
+    MCP --> DEV["Simulator / SimuHome / ESP32 Adapter"]
+    DEV --> VERIFY["Post-action Verification"]
+    VERIFY --> FINDING["AgentFinding"]
+    FINDING --> RC
+
+    RC --> STORE["Conversation / Run / Checkpoint SQLite"]
+    RC --> TRACE["RunEvents / WebSocket / Vue Trace"]
+```
+
+当前外层 Run 生命周期由 Python `RunCoordinator` 驱动，并不是一个完全统一的
+LangGraph 主图；专业设备 Agent 使用 LangGraph 子图，高风险操作通过原生
+`interrupt()` 与 `Command(resume=...)` 恢复。这一边界在 README 中明确保留，避免把
+“使用了 LangGraph”描述成“所有调度都由 LangGraph 完成”。
+
+## 一次请求如何执行
+
+例如：
+
+> 同时检查张爷爷的健康状态和房间环境，有风险时创建护理任务。
+
+Supervisor 第一轮创建 Health 与 Environment 两个无冲突 Task，调度器并行执行；
+新证据表明需要人工处置后，Supervisor 第二轮再创建依赖前述结果的 Care Task，最终
+汇总成功条件并结束 Run。
+
+<p align="center">
+  <img src="doc/assets/screenshots/03-multi-agent-execution.gif" alt="WoTAgent 多 Agent 执行过程" width="1000" />
+</p>
 
 <details>
-<summary>查看静态 Trace 截图</summary>
+<summary>查看完整静态 Trace</summary>
 
-![WoTAgent 多 Agent 任务 DAG 与运行 Trace](doc/assets/screenshots/03-multi-agent-trace.png)
+<p align="center">
+  <img src="doc/assets/screenshots/03-multi-agent-trace.png" alt="WoTAgent 多 Agent 任务 DAG 与运行 Trace" width="1000" />
+</p>
 
 </details>
 
-### Villa 领域的软件能力主体
-
-Deployment Profile 决定当前场景启用的专业 Agent 与资源范围；人类 Principal、
-软件 Agent 和确定性 Monitor 在界面中明确区分。
-
-![WoTAgent Villa 领域运行中心](doc/assets/screenshots/04-villa-domain-center.png)
-
-![WoTAgent Villa 专业 Agent](doc/assets/screenshots/05-villa-agent-registry.png)
-
-### Principal 与角色入口
-
-演示账号展示护理员、观察者、居民、管理员等身份，以及与居民或场景资源的关系。
-
-![WoTAgent Principal 与角色入口](doc/assets/screenshots/01-principal-login.png)
-
-## 核心链路
+这段执行体现了三个不同层次：
 
 ```text
-Vue 3 Console
-  -> FastAPI Run API
-  -> RunService
-  -> Python RunCoordinator
-  -> Butler create_agent SupervisorDecision
-  -> deterministic TaskScheduler
-  -> Health/Care create_agent | Device specialist LangGraph
-  -> Principal scope -> AgentSpec/MCP scope -> TD/Policy
-  -> MCP execution -> post-action verification
-  -> wot-device-simulator / SimuHome gateway / ESP32 adapter
+Run                 一次用户目标或领域事件
+├── Task Wave 1     Health Agent 与 Environment Agent 并行调查
+├── Supervisor      根据 AgentFinding 再次判断
+├── Task Wave 2     Care Agent 串行执行后续处置
+└── Finish          检查成功条件并生成最终答复
 ```
 
-关键原则：
-
-- LLM 是语义决策核心，但不直接驱动硬件。
-- 普通聊天和 Monitor 事件都进入 Run，并由 Butler 负责目标解析与专业 Agent
-  委派。
-- 一个 Run 可包含多个有依赖关系的 Task；同一 Agent 可执行多个独立 AgentRun。
-- Health/Care 使用受限 ReAct，设备专业 Agent 使用 LangGraph 子图。
-- Supervisor、Finding 和设备 Planner 输出均受 Pydantic Schema 约束。
-- Executor 是确定性编排器，只执行计划中且 TD 已声明的动作。
-- PolicyEngine 在模型之外执行 RBAC 和高风险确认。
-- 每个 Run 生成可重放事件和按需 TraceArtifact，记录节点、工具输入输出、循环、
-  Token、总耗时与可配置费用；非流式 `ainvoke` 没有真实 TTFT 时标记为不可用。
-- SQLite 分别保存会话、Run/Task 运行记录和 LangGraph checkpoint，支持上下文延续与服务重启后的确认恢复。
-
-## 仓库结构
+## WoT 设备链路
 
 ```text
-WoTAgent/
-├── wotagent-prototype/              # Agent 后端与评测
-│   ├── src/wotagent/agents/         # AgentSpec、Supervisor、Health/Care
-│   ├── src/wotagent/agent_graph/    # 设备专业 Agent LangGraph
-│   ├── src/wotagent/orchestration/  # Run/Task 模型、Coordinator、Scheduler
-│   ├── src/wotagent/domains/        # eldercare / smart_home 领域适配
-│   ├── src/wotagent/policy/         # RBAC 与确认策略
-│   ├── src/wotagent/gateway/        # MCP 与 SimuHome 网关
-│   └── src/wotagent/evaluation/     # HomeBench/SimuHome 对齐评测
-├── frontend/wotagent-v2-console/    # 独立 Vue 3 运行监控台
-└── wot-device-simulator/            # TD、MCP、REST 与设备状态仿真
+Device / Simulator
+  → Device Registry
+  → WoT Thing Description
+  → TD Parser & Tool Compiler
+  → MCP Resource / Tool Schema
+  → AgentSpec-scoped MCP Client
+  → Policy / RBAC / Parameter Validation
+  → Execute
+  → Read-after-write Verification
 ```
 
-1.0 已由 Git tag `v1.0.0` 和 `main` 历史保存；当前分支不再保留旧 ReAct、EventBus、轮询感知、旧 Session Memory 与旧 Vue 前端。
+TD 是设备能力契约，不是给模型阅读的一段说明文字。它限定属性是否可读写、动作名称、
+参数类型与范围；Agent 只能调用当前 AgentSpec 和 Principal Scope 共同允许的 MCP 能力。
 
-## 本地启动
+## 领域与主体模型
 
-Windows 下推荐直接双击仓库根目录中的统一入口：
+平台把“谁在使用系统”和“哪个软件 Agent 执行任务”分开建模：
 
-```text
-start-wotagent.bat         启动完整本地服务栈
-start-wotagent-safe.bat    安全模式，不把 Monitor 事件提交给大模型
-start-wotagent-remote.bat  启动服务栈并创建临时 Cloudflare 公网隧道
-status-wotagent.bat        查看进程和健康状态
-stop-wotagent.bat          停止服务栈并关闭 Tailscale Serve
-```
+| 概念 | 示例 | 作用 |
+|---|---|---|
+| Principal | 业主、护理员、观察员、管理员 | 请求发起者与授权主体 |
+| Role / Relationship | `operator`、照护关系、区域责任 | 产生基础能力与资源关系 |
+| Deployment Profile | Villa、养老照护 | 选择领域、空间、设备、Agent 与上下文 |
+| Specialist Agent | Health、Care、Environment、Security | 在有限能力范围内完成专业任务 |
+| Monitor | 健康阈值、跌倒、环境规则 | 无需 LLM 的持续监测和事件触发 |
+| Resource | 居民、房间、灯、空调、传感器 | 被读取或控制的受保护对象 |
 
-统一脚本依次启动仿真端（`18080`）、Agent API（`8000`）、独立 Monitor
-进程和 Vue 前端（`5174`）。PID 与日志保存在
-`%LOCALAPPDATA%\WoTAgent\stack`，不会写入项目仓库。
+Villa 与养老照护不是两套独立平台：它们复用 Run、Task、Agent、Policy、TD、MCP、
+Monitor 和 Trace 基础设施，只在领域实体、规则、设备集合、专业能力与提示词上下文上装配
+不同实现。
 
-手机访问时双击 `start-wotagent-remote.bat`，窗口会输出临时
-`trycloudflare.com` 地址。当前实验 API 没有真实鉴权，因此该地址仅用于短时
-测试；测试完成后应立即双击 `stop-wotagent.bat`。如需 Tailscale 私网方式，
-可在 PowerShell 中执行 `scripts\wotagent-stack.ps1 private`。
+## 快速开始
 
-### 1. 仿真端
+### 环境要求
 
-```powershell
-cd D:\Users\gyq16\Desktop\PRJ\WoTAgent\wot-device-simulator
-.\.venv\Scripts\python.exe -m wot_device_simulator.service
-```
+- Windows 10 / 11
+- Python 3.11+
+- Node.js 20+
+- 一个 OpenAI-compatible LLM Provider
 
-控制面板：`http://127.0.0.1:18080/dashboard`，MCP：`http://127.0.0.1:18080/mcp`。
-
-默认 stdio 模式下，Agent 也可以自动启动 MCP 子进程，此时不必先启动 HTTP 仿真端。若使用 HTTP：
-
-```env
-MCP_TRANSPORT_MODE=http
-MCP_SERVER_URL=http://127.0.0.1:18080/mcp
-```
-
-### 2. Agent 后端
-
-在 `wotagent-prototype/.env` 配置：
+在 `wotagent-prototype/.env` 中至少配置：
 
 ```env
 LLM_MODEL=deepseek-chat
 OPENAI_BASE_URL=https://api.deepseek.com
 OPENAI_API_KEY=your-key
-ENABLE_THINKING=true
-ENABLE_STREAMING=true
+AGENT_DECISION_MODE=hybrid
 ```
 
-启动：
+首次安装：
 
 ```powershell
-cd D:\Users\gyq16\Desktop\PRJ\WoTAgent\wotagent-prototype
+git clone https://github.com/GoldenGYQ/WoTAgent.git
+cd WoTAgent
+
+# Agent API 与 Monitor
+cd wotagent-prototype
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e .
+Copy-Item .env.example .env
+
+# Device Simulator
+cd ..\wot-device-simulator
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e .
+
+# Vue Console
+cd ..\frontend\wotagent-v2-console
+npm install
+cd ..\..
+```
+
+编辑 `wotagent-prototype/.env` 后，在仓库根目录运行：
+
+```powershell
+.\start-wotagent.bat
+```
+
+统一入口会启动：
+
+| 服务 | 默认地址 | 职责 |
+|---|---|---|
+| Device Simulator | `http://127.0.0.1:18080` | TD、MCP、REST 与模拟设备状态 |
+| Agent API | `http://127.0.0.1:8000` | Run、Task、Agent、领域与事件 API |
+| Monitor | 独立后台进程 | 采集数据、执行规则、产生领域事件 |
+| Vue Console | `http://127.0.0.1:5174` | 对话、领域中心与运行 Trace |
+
+常用入口：
+
+```text
+start-wotagent.bat         启动完整本地服务栈
+start-wotagent-safe.bat    启动但不把 Monitor 事件提交给 LLM
+status-wotagent.bat        查看进程、端口和健康状态
+stop-wotagent.bat          停止全部服务和临时隧道
+```
+
+<details>
+<summary>查看各服务的手动启动方式</summary>
+
+```powershell
+# Device Simulator
+cd wot-device-simulator
+.\.venv\Scripts\python.exe -m wot_device_simulator.service
+
+# Agent API
+cd ..\wotagent-prototype
 .\.venv\Scripts\python.exe -m wotagent.cli api --host 127.0.0.1 --port 8000
-```
 
-API 文档：`http://127.0.0.1:8000/docs`。
-
-### 3. Vue 前端
-
-```powershell
-cd D:\Users\gyq16\Desktop\PRJ\WoTAgent\frontend\wotagent-v2-console
+# Vue Console
+cd ..\frontend\wotagent-v2-console
 npm install
 npm run dev
 ```
 
-访问 Vite 输出的地址，默认配置为 `http://localhost:5174`。
+</details>
 
-## 验证
+> 当前实验 API 没有生产级登录鉴权。不要把 Vite 代理或 Agent API 裸露到公网；临时测试
+> 完成后应立即执行 `stop-wotagent.bat`。
+
+## 如何体验
+
+### Villa 场景
+
+```text
+打开客厅灯并调到 45%，然后确认是否生效
+检查所有灯，若开灯数量为奇数则打开空调，否则打开加湿器
+同时检查房间环境和安防状态，只处理真正异常的项目
+```
+
+### 养老照护场景
+
+```text
+查看张爷爷今天的健康状态，并说明证据是否足够新鲜
+同时检查张爷爷的健康状态和房间环境，有风险时创建护理任务
+查询李奶奶最近的血氧趋势，不要做疾病诊断
+```
+
+还可以在领域运行中心主动触发血氧过低、疑似跌倒、温度异常等模拟事件，观察 Monitor
+如何生成 Run，以及 Health、Environment、Care Agent 如何接力处置。
+
+## 仓库结构
+
+```text
+WoTAgent/
+├── wotagent-prototype/
+│   ├── src/wotagent/agents/          # Supervisor、AgentSpec 与专业 Agent
+│   ├── src/wotagent/orchestration/   # Run/Task 模型、Coordinator、Scheduler
+│   ├── src/wotagent/agent_graph/     # 设备专业 Agent LangGraph
+│   ├── src/wotagent/domains/         # eldercare / smart_home 领域插件
+│   ├── src/wotagent/identity/        # Principal、角色与关系目录
+│   ├── src/wotagent/policy/          # RBAC、Scope 与确认策略
+│   ├── src/wotagent/gateway/         # MCP 与外部仿真网关
+│   ├── src/wotagent/wot/             # TD 模型与 Tool Compiler
+│   └── tests/                        # 单元、集成与可选真实模型测试
+├── frontend/wotagent-v2-console/     # Vue 3 Agent 运行控制台
+├── wot-device-simulator/             # 统一设备仿真服务
+├── scripts/                          # 服务栈启动、状态与停止脚本
+└── doc/                              # 架构、API、评测、实验与面试文档
+```
+
+## 测试
 
 ```powershell
+# Backend
 cd wotagent-prototype
 .\.venv\Scripts\python.exe -m pytest -q
 
+# Frontend
 cd ..\frontend\wotagent-v2-console
 npm test
 npm run build
 
+# Simulator
 cd ..\..\wot-device-simulator
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-推荐阅读：
+默认测试主要验证确定性组件和 Fake / Scripted LLM 契约。真实模型测试必须显式启用，
+并设置调用轮次、Token 与超时预算；Fake LLM 通过不等于真实中文请求链路已经通过。
+
+## 当前边界与路线图
+
+### 已实现
+
+- Run / Task / AgentRun 分层、Task DAG、有限并行与资源冲突检测
+- Supervisor 结构化决策与专业 Agent 委派
+- TD → MCP 能力链、Policy/RBAC、执行后验证与有限恢复
+- Conversation、Run、Event 与 LangGraph checkpoint 持久化
+- Villa / 养老照护 Deployment Profile 与独立 Monitor
+- Vue 对话工作台、领域运行中心和嵌套 Trace
+
+### 仍在演进
+
+- 外层 `RunCoordinator` 与 LangGraph 主图的职责边界
+- Care 与其他专业 Agent 的统一 ReAct / Finding 契约
+- 真实模型中文实体解析、失败分类与低成本冒烟测试
+- 更完整的 Principal 认证、关系授权与跨居民/跨空间负向测试
+- ESP32 等真实设备适配和 Simulator-backed 端到端评测
+- RunEvents 对模型 TTFT、专业 Agent Loop 和 ToolCall 的完整投影
+
+## 文档
 
 - [文档索引与版本状态](doc/README.md)
-- [面试表达与多主体抽象](doc/WOTAGENT_INTERVIEW_AND_AGENT_ABSTRACTION_GUIDE.md)
-- [当前真实技术地图](doc/TECHNICAL_GUIDE.md)
+- [当前技术手册](doc/TECHNICAL_GUIDE.md)
 - [Run / Task DAG 设计](doc/WOTAGENT_RUN_TASK_DAG_DESIGN.md)
 - [TD / MCP 契约](doc/WOTAGENT_2.0_TD_MCP_CONTRACT.md)
 - [API 指南](doc/API_GUIDE.md)
+- [面试表达与多主体抽象](doc/WOTAGENT_INTERVIEW_AND_AGENT_ABSTRACTION_GUIDE.md)
 
-旧的完整技术指南保留为历史设计材料；当前架构事实以
-[TECHNICAL_GUIDE.md](doc/TECHNICAL_GUIDE.md) 和实际代码为准。
+架构事实以当前代码、自动化测试和 [技术手册](doc/TECHNICAL_GUIDE.md) 为准；历史文档中的
+设计目标不自动代表当前版本已经实现。
