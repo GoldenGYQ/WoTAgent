@@ -1,6 +1,7 @@
 """Eldercare sensor monitoring and multi-agent delegation."""
 
 from .actions import EldercareActionService
+from .care_gateway import ScopedCareMCPClient
 from .chat import (
     ELDERCARE_PLAN_SCHEMA,
     EldercareChatAgent,
@@ -8,10 +9,9 @@ from .chat import (
     is_eldercare_request,
 )
 from .collector import EldercareDeviceCollector
-from .care_gateway import ScopedCareMCPClient
 from .event_source import EldercareDomainEventSource
-from .graph import LEGACY_DELEGATION_POLICIES, build_eldercare_butler_graph
 from .goal_graph import AVAILABLE_AGENTS, build_goal_driven_butler_graph
+from .graph import LEGACY_DELEGATION_POLICIES, build_eldercare_butler_graph
 from .health_agent import HealthAgentLoop
 from .health_gateway import ScopedHealthMCPClient
 from .mcp_server import build_eldercare_mcp

@@ -11,7 +11,6 @@ from jsonschema import ValidationError, validate
 from ..wot import get_device_by_id
 from .models import EvalAction, EvalCase
 
-
 _ROOM_DEVICE_IDS: dict[tuple[str, str], str] = {
     ("living_room", "light"): "light-001",
     ("living_room", "air_conditioner"): "ac-001",

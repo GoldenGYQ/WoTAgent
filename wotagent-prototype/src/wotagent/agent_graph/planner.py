@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable
+from typing import Any
 
-from jsonschema import ValidationError as JSONSchemaValidationError, validate
-from pydantic import BaseModel, Field, ValidationError as PydanticValidationError
+from jsonschema import ValidationError as JSONSchemaValidationError
+from jsonschema import validate
+from pydantic import BaseModel, Field
+from pydantic import ValidationError as PydanticValidationError
 
 from ..domain import TaskPlan
 from ..prompting import (

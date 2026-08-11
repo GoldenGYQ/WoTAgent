@@ -6,7 +6,6 @@ import os
 from dataclasses import dataclass
 from typing import Literal
 
-
 AgentDecisionMode = Literal["rule", "hybrid", "agentic"]
 
 
@@ -31,7 +30,7 @@ class AgenticSettings:
     supervisor_max_routes: int = 2
 
     @classmethod
-    def from_env(cls) -> "AgenticSettings":
+    def from_env(cls) -> AgenticSettings:
         mode = os.getenv("AGENT_DECISION_MODE", "hybrid").strip().lower()
         if mode not in {"rule", "hybrid", "agentic"}:
             mode = "hybrid"

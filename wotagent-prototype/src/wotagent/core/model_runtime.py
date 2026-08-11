@@ -11,7 +11,6 @@ from langchain_openai import ChatOpenAI
 
 from ..domain import TaskPlan
 
-
 PLAN_SCHEMA: dict[str, Any] = {
     "type": "function",
     "function": {

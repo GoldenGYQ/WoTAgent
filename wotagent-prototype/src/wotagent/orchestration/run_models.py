@@ -11,7 +11,6 @@ from ..agents.contracts import AgentFinding
 from ..identity import TaskPrincipal
 from ..telemetry import UsageSummary
 
-
 RunStatus = Literal[
     "accepted",
     "running",
@@ -143,7 +142,7 @@ class SupervisorTaskPlan(BaseModel):
     constraints: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def validate_local_graph(self) -> "SupervisorTaskPlan":
+    def validate_local_graph(self) -> SupervisorTaskPlan:
         ids = [item.local_id for item in self.tasks]
         if len(ids) != len(set(ids)):
             raise ValueError("task local_id values must be unique")
@@ -177,7 +176,7 @@ class SupervisorDecision(BaseModel):
     reason: str = Field(min_length=1)
 
     @model_validator(mode="after")
-    def validate_action(self) -> "SupervisorDecision":
+    def validate_action(self) -> SupervisorDecision:
         if self.action == "create_tasks":
             SupervisorTaskPlan(
                 goal=self.goal,

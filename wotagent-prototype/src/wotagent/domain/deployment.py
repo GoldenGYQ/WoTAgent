@@ -28,7 +28,7 @@ class DeploymentProfileCatalog(BaseModel):
     profiles: list[DeploymentProfile] = Field(min_length=1)
 
     @model_validator(mode="after")
-    def validate_catalog(self) -> "DeploymentProfileCatalog":
+    def validate_catalog(self) -> DeploymentProfileCatalog:
         ids = [profile.profile_id for profile in self.profiles]
         if len(ids) != len(set(ids)):
             raise ValueError("deployment profile IDs must be unique")
@@ -62,7 +62,7 @@ class DeploymentProfileRegistry:
         }
 
     @classmethod
-    def load(cls, path: str | Path | None = None) -> "DeploymentProfileRegistry":
+    def load(cls, path: str | Path | None = None) -> DeploymentProfileRegistry:
         source = Path(path) if path is not None else deployment_profile_path()
         payload = json.loads(source.read_text(encoding="utf-8"))
         return cls(DeploymentProfileCatalog.model_validate(payload))

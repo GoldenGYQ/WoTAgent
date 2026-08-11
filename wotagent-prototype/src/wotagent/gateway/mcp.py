@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from collections.abc import Iterator
 from typing import Any
 
 from ..tools.mcp_client import get_mcp_client
-
 
 _active_device_scope: ContextVar[frozenset[str] | None] = ContextVar(
     "wotagent_active_device_scope",

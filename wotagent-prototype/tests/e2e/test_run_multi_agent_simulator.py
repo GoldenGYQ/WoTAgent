@@ -21,7 +21,6 @@ from wotagent.orchestration import (
 )
 from wotagent.tools.mcp_client import reset_mcp_client
 
-
 pytestmark = pytest.mark.simulator
 
 

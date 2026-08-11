@@ -4,8 +4,8 @@ import asyncio
 
 from fastapi import BackgroundTasks
 
-from wotagent.application import DomainEventConsumer, RunService
 from wotagent.agents import AgentFinding, Evidence
+from wotagent.application import DomainEventConsumer, RunService
 from wotagent.conversation import ConversationStore
 from wotagent.domain import DomainEventEnvelope, InMemoryDomainEventStore
 from wotagent.domains.eldercare import (

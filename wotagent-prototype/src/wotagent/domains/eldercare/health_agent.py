@@ -7,8 +7,8 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from ...telemetry import InMemoryTraceStore
-from .health_gateway import ScopedHealthMCPClient
 from .health_freshness import apply_completed_health_freshness_guard
+from .health_gateway import ScopedHealthMCPClient
 from .models import (
     AgentFinding,
     Delegation,
@@ -16,7 +16,6 @@ from .models import (
     HealthAgentDecision,
     ToolExecutionResult,
 )
-
 
 HealthDecisionMaker = Callable[
     [dict[str, Any]],

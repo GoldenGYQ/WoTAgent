@@ -116,7 +116,7 @@ class SimuHomeMCPHarness:
         *,
         base_url: str = "http://127.0.0.1:18081/api",
         binding: SimuHomeBinding | None = None,
-    ) -> "SimuHomeMCPHarness":
+    ) -> SimuHomeMCPHarness:
         runtime_binding = binding or SimuHomeBinding(base_url)
         await runtime_binding.reset_episode(episode)
         runtime_binding.set_request(message)

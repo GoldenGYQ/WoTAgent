@@ -13,7 +13,6 @@ from ...orchestration.run_models import ResourceScope
 from .mcp_server import build_eldercare_mcp
 from .store import EldercareStore
 
-
 CARE_TOOLS = {
     "notify_caregiver",
     "notify_duty_caregiver",

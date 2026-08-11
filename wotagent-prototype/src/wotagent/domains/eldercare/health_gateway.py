@@ -14,7 +14,6 @@ from .mcp_server import build_eldercare_mcp
 from .models import HealthToolName, ToolExecutionResult
 from .store import EldercareStore
 
-
 HEALTH_RESOURCE_URIS: dict[HealthToolName, str] = {
     "read_health_summary": "elderly://{resident_id}/health/summary",
     "read_latest_vitals": "elderly://{resident_id}/vitals/latest",

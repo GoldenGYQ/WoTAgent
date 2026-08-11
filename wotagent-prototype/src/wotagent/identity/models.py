@@ -6,7 +6,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-
 PrincipalType = Literal["human", "service"]
 LoginMode = Literal["one_click", "pin", "password", "disabled"]
 

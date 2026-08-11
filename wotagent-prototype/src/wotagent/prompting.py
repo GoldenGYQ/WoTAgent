@@ -6,7 +6,6 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-
 PROMPT_KERNEL_VERSION = "prompt-kernel-v1"
 CONTEXT_PACK_VERSION = "context-pack-v1"
 

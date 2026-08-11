@@ -5,7 +5,6 @@ from __future__ import annotations
 from .contracts import AgentSpec
 from .registry import AgentRegistry
 
-
 AGENT_SPECS: dict[str, AgentSpec] = {
     "health_agent": AgentSpec(
         agent_id="health_agent",

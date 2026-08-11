@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from ...orchestration.run_models import TaskTarget
 from ...domain.entity_resolution import EntityResolutionError
+from ...orchestration.run_models import TaskTarget
 from .store import EldercareStore
 
 

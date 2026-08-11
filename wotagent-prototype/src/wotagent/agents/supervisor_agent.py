@@ -10,7 +10,6 @@ from langchain.agents import create_agent
 from ..orchestration.run_models import SupervisorDecision
 from .contracts import AgentSpec
 
-
 SUPERVISOR_TASK_DECOMPOSITION_RULES = (
     "条件工作流的 Task 边界规则：如果“观察或查询 → 计算、比较或条件判断 → "
     "选择动作 → 执行动作 → 验证结果”的完整链路都属于同一个专业 Agent 的能力"

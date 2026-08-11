@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from .models import RegistrationTarget, RoleTemplate
 
-
 ROLE_TEMPLATES = [
     RoleTemplate(
         template_id="eldercare_family_observer",

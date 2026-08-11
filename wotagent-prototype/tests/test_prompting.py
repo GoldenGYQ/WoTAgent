@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+from wotagent.agents import AGENT_SPECS
 from wotagent.prompting import (
     AGENT_PROMPT_PROFILES,
     CONTEXT_PACK_VERSION,
@@ -12,7 +13,6 @@ from wotagent.prompting import (
     profile_for,
     prompt_system,
 )
-from wotagent.agents import AGENT_SPECS
 
 
 def test_every_registered_agent_has_a_prompt_profile() -> None:

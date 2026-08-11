@@ -19,8 +19,7 @@ from ...prompting import (
 )
 from ...telemetry import InMemoryTraceStore, extract_usage_with_cost
 from .mcp_server import build_eldercare_mcp
-from .models import DelegatedAction, DelegatedTask, Resident
-from .models import Delegation
+from .models import DelegatedAction, DelegatedTask, Delegation, Resident
 from .runtime import EldercareRuntime
 
 

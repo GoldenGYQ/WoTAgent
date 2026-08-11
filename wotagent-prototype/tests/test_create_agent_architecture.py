@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 import pytest
 from langchain.agents.middleware.model_call_limit import (
@@ -17,7 +18,6 @@ from langchain_core.tools import BaseTool, tool
 from pydantic import Field
 
 from wotagent.agents import (
-    AgentFinding,
     AgentFindingPayload,
     Evidence,
     ToolExecutionResult,
@@ -47,7 +47,7 @@ class ScriptedChatModel(BaseChatModel):
         *,
         tool_choice: str | None = None,
         **kwargs: Any,
-    ) -> "ScriptedChatModel":
+    ) -> ScriptedChatModel:
         names = []
         for item in tools:
             if isinstance(item, dict):

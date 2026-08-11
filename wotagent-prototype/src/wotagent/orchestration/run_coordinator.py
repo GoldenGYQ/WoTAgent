@@ -26,7 +26,6 @@ from .run_models import (
 from .run_store import RunStore
 from .scheduler import TaskScheduler
 
-
 SupervisorDecider = Callable[
     [dict[str, Any]],
     SupervisorDecision | Awaitable[SupervisorDecision],

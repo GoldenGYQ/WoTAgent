@@ -32,8 +32,8 @@ from ..runtime import (
 )
 from ..speech import SpeechTranscriber
 from .routers.conversations import create_conversation_router
-from .routers.domains import create_domain_router
 from .routers.deployment import create_deployment_router
+from .routers.domains import create_domain_router
 from .routers.eldercare import create_eldercare_router
 from .routers.principals import create_principal_router
 from .routers.runs import create_run_router, create_run_websocket_handler

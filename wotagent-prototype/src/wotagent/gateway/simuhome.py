@@ -6,7 +6,6 @@ from typing import Any
 
 import httpx
 
-
 _EMPTY_SCHEMA = {"type": "object", "properties": {}, "additionalProperties": False}
 _MODE_TO_MATTER = {"off": 0, "auto": 1, "cool": 3, "heat": 4, "fan": 7, "dry": 8}
 _MATTER_TO_MODE = {value: key for key, value in _MODE_TO_MATTER.items()}

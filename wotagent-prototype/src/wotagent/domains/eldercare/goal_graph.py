@@ -26,7 +26,6 @@ from .strategies.rule_based import (
     RuleBasedGoalPlanner,
 )
 
-
 GoalPlanner = Callable[
     [RiskEvent, list[str]],
     GoalPlan | Awaitable[GoalPlan],

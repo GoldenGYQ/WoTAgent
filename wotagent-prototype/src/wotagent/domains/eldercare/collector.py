@@ -10,7 +10,6 @@ from typing import Any
 from .models import Resident, SensorReading
 from .store import EldercareStore
 
-
 DEVICE_FIELDS = (
     "wristband_device_id",
     "mattress_device_id",

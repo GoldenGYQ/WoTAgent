@@ -5,10 +5,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from wotagent.domain import DeploymentProfileRegistry
 from wotagent.domains.eldercare.entity_resolution import ResidentEntityResolver
 from wotagent.domains.eldercare.health_gateway import ScopedHealthMCPClient
 from wotagent.domains.eldercare.store import EldercareStore
-from wotagent.domain import DeploymentProfileRegistry
 from wotagent.identity import DEFAULT_PRINCIPAL_DIRECTORY
 from wotagent.orchestration import (
     AgentTask,

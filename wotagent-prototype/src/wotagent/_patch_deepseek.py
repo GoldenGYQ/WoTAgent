@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import langchain_openai.chat_models.base as _chat_base
 
-
 # ---------------------------------------------------------------------------
 # Helper: capture reasoning_content into additional_kwargs
 # ---------------------------------------------------------------------------

@@ -9,10 +9,16 @@ from uuid import uuid4
 from pydantic import BaseModel, Field, model_validator
 
 from ...agents.contracts import (
-    AgentFinding,
+    AgentFinding as AgentFinding,
+)
+from ...agents.contracts import (
     Delegation,
-    Evidence,
-    ToolExecutionResult,
+)
+from ...agents.contracts import (
+    Evidence as Evidence,
+)
+from ...agents.contracts import (
+    ToolExecutionResult as ToolExecutionResult,
 )
 
 
@@ -63,7 +69,7 @@ class SensorReading(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def validate_value(self) -> "SensorReading":
+    def validate_value(self) -> SensorReading:
         if self.sensor_type == "blood_pressure":
             value = str(self.value).strip()
             parts = value.split("/")
@@ -175,7 +181,7 @@ class HealthAgentDecision(BaseModel):
     unresolved_questions: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def validate_decision(self) -> "HealthAgentDecision":
+    def validate_decision(self) -> HealthAgentDecision:
         if self.action == "use_tool" and self.tool_name is None:
             raise ValueError("tool_name is required when action=use_tool")
         if self.action == "finish" and not self.finding:

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage, message_chunk_to_message
+
 from ..prompting import RESPONSE_CONTRACT, context_message
 from ..telemetry import InMemoryTraceStore, extract_usage_with_cost
 

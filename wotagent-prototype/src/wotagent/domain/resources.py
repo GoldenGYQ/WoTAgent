@@ -7,7 +7,6 @@ from collections.abc import Callable, Iterable
 from ..identity import TaskPrincipal
 from ..wot import ThingDescription, locations_match
 
-
 ResourceLocationResolver = Callable[[str], str | None]
 
 

@@ -280,19 +280,20 @@ class RunService:
                 },
             )
         except Exception as exc:
+            error_message = str(exc)
             failed = await self.run_store.update_run(
                 run_id,
-                lambda item: _fail_run(item, str(exc)),
+                lambda item: _fail_run(item, error_message),
             )
             await self.run_store.record_event(
                 run_id,
                 "run.failed",
                 node="run_service",
-                data={"error": str(exc)},
+                data={"error": error_message},
             )
             self.conversation_store.finish_turn(
                 run_id,
-                response=str(exc),
+                response=error_message,
                 status="failed",
                 result=failed.model_dump(mode="json"),
             )

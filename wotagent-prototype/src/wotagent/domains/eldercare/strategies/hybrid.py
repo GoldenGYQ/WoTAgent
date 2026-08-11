@@ -18,7 +18,6 @@ from ..models import (
     RiskEvent,
 )
 
-
 GOAL_PLAN_SCHEMA: dict[str, Any] = {
     "type": "function",
     "function": {

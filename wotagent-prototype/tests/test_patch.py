@@ -12,10 +12,10 @@ class TestPatchModule:
 
     def test_patches_applied(self):
         """All expected patches are applied correctly."""
-        import wotagent._patch_deepseek  # noqa: F401
         import langchain_openai.chat_models.base as base
 
-        orig_convert = base._convert_dict_to_message
+        import wotagent._patch_deepseek  # noqa: F401
+
         # The patched function should NOT be the original one
         # (original was stored as _original_convert_dict at module level)
         import wotagent._patch_deepseek as patch_mod

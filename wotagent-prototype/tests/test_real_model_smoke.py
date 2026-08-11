@@ -15,7 +15,6 @@ from wotagent.domains.eldercare.models import SensorReading
 from wotagent.orchestration import InMemoryRunStore, RunRecord
 from wotagent.runtime import build_run_coordinator, create_runtime_container
 
-
 ACK = "I_UNDERSTAND_THIS_USES_EXTERNAL_TOKENS"
 
 

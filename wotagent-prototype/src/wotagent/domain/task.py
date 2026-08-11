@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -11,10 +11,10 @@ from pydantic import BaseModel, Field, model_validator
 
 
 def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
-class TaskStatus(str, Enum):
+class TaskStatus(StrEnum):
     PLANNED = "planned"
     DENIED = "denied"
     WAITING_CONFIRMATION = "waiting_confirmation"
@@ -64,7 +64,7 @@ class PlanStep(BaseModel):
     postconditions: list[Condition] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def infer_standard_postconditions(self) -> "PlanStep":
+    def infer_standard_postconditions(self) -> PlanStep:
         """Make verification mandatory for known state-changing WoT actions."""
         if self.kind != "action":
             # A query observes an unknown value; it cannot assert a target
@@ -122,7 +122,7 @@ class TaskPlan(BaseModel):
     steps: list[PlanStep] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def validate_graph(self) -> "TaskPlan":
+    def validate_graph(self) -> TaskPlan:
         if self.intent in {"query", "control"} and not self.steps:
             raise ValueError(f"intent={self.intent} requires at least one executable step")
         if self.intent in {"chat", "clarify"} and self.steps:

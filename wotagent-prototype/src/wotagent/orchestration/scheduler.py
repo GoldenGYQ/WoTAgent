@@ -7,7 +7,6 @@ from uuid import uuid4
 
 from .run_models import AgentTask, SupervisorTaskPlan, TaskPrincipal
 
-
 TaskIdFactory = Callable[[], str]
 
 

@@ -5,8 +5,8 @@ import asyncio
 import pytest
 from fastapi import BackgroundTasks, HTTPException
 
-from wotagent.application import RunService
 from wotagent.agents import DEFAULT_AGENT_REGISTRY
+from wotagent.application import RunService
 from wotagent.conversation import ConversationStore
 from wotagent.domain import DeploymentProfileRegistry
 from wotagent.gateway import MCPDeviceGateway, deployment_device_scope

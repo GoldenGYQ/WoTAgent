@@ -15,7 +15,6 @@ from wotagent.orchestration import TaskOrchestrator
 from wotagent.policy import PolicyEngine
 from wotagent.telemetry import InMemoryTraceStore
 
-
 DATASET = Path(__file__).parents[1] / "data" / "evaluation" / "agent_loop_v2.json"
 
 

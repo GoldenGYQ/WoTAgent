@@ -25,7 +25,6 @@ from ...domain.operations import (
 )
 from ...identity import DEFAULT_PRINCIPAL_DIRECTORY, PrincipalDirectory
 
-
 SITE_RESOURCE_ID = "site:villa-demo"
 
 VILLA_AGENT_SCENARIOS: dict[str, DomainScenarioRunRequest] = {

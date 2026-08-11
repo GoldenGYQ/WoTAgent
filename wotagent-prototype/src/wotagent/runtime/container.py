@@ -5,8 +5,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..agent_graph import (
-    AgentGraphDependencies,
     CONDITIONAL_PLAN_REVIEW_SCHEMA,
+    AgentGraphDependencies,
     DecisionModeTaskPlanner,
     LangChainResponseComposer,
     LangChainTaskPlanner,
@@ -16,8 +16,8 @@ from ..agent_graph import (
 from ..agentic_config import AgenticSettings
 from ..agents import (
     DEFAULT_AGENT_REGISTRY,
-    AgentRegistry,
     AgentFindingPayload,
+    AgentRegistry,
     build_care_react_agent,
     build_health_react_agent,
     build_run_supervisor_agent,
@@ -30,8 +30,8 @@ from ..domains.eldercare import (
     EldercareCommandPlanner,
     EldercareRuntime,
     EldercareStore,
-    ScopedHealthMCPClient,
     ScopedCareMCPClient,
+    ScopedHealthMCPClient,
 )
 from ..domains.eldercare.strategies import (
     GOAL_EVALUATION_SCHEMA,
@@ -47,7 +47,6 @@ from ..orchestration import TaskOrchestrator
 from ..policy import PolicyEngine
 from ..prompting import profile_for
 from ..telemetry import InMemoryTraceStore
-
 
 DOMAIN_GRAPH_AGENTS = DEFAULT_AGENT_REGISTRY.ids(
     runtime="langgraph_subgraph"

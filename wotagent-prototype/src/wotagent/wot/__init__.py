@@ -1,12 +1,12 @@
 from .td import (
-    ThingDescription,
     TDAction,
     TDProperty,
-    load_tds,
+    ThingDescription,
     find_devices,
     get_device_by_id,
-    locations_match,
+    load_tds,
     location_aliases,
+    locations_match,
 )
 from .tool_compiler import TDToolDefinition, compile_td_tools, compile_tool_catalog
 

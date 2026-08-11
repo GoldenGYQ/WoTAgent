@@ -11,18 +11,18 @@ from wotagent.conversation import ConversationStore
 from wotagent.domains.eldercare import (
     EldercareMonitorService,
     EldercareRuntime,
-    SensorReading,
     EldercareStore,
     Resident,
     RiskEvent,
+    SensorReading,
 )
-from wotagent.telemetry import InMemoryTraceStore
 from wotagent.orchestration import (
     InMemoryRunStore,
     RunCoordinator,
     SupervisorDecision,
     TaskScheduler,
 )
+from wotagent.telemetry import InMemoryTraceStore
 
 app_module = importlib.import_module("wotagent.api.app")
 
@@ -47,7 +47,6 @@ def test_eldercare_api_simulates_event_and_reuses_trace_api(monkeypatch, tmp_pat
             "resident_id": "elderly-001",
             "scenario": "fall",
         })
-        task_id = simulated.json()["tasks"][0]["task_id"]
         actions = client.get(
             "/api/v2/eldercare/actions",
             params={"resident_id": "elderly-001"},

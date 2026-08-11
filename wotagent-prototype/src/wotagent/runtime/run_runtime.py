@@ -20,12 +20,14 @@ from ..agents import (
     ToolExecutionResult,
 )
 from ..auth import DEMO_RESIDENT_ASSIGNMENTS, RelationshipAuthorizationService
+from ..domain import DeploymentResourceResolver
+from ..domain.entity_resolution import EntityResolutionError
 from ..domains.eldercare.entity_resolution import ResidentEntityResolver
 from ..domains.eldercare.health_freshness import (
     apply_completed_health_freshness_guard,
     has_actionable_health_alert_language,
 )
-from ..domain import DeploymentResourceResolver
+from ..gateway import deployment_device_scope
 from ..orchestration import (
     AgentTask,
     PendingConfirmation,
@@ -35,15 +37,12 @@ from ..orchestration import (
     SupervisorDecision,
     TaskFailure,
     TaskPreparationError,
-    TaskTarget,
     TaskScheduler,
+    TaskTarget,
 )
-from ..domain.entity_resolution import EntityResolutionError
-from ..gateway import deployment_device_scope
 from ..prompting import compact_history
 from ..telemetry import TraceEvent, extract_usage_with_cost
 from ..wot import load_tds
-
 
 SUPERVISOR_HISTORY_MESSAGES = 6
 SUPERVISOR_HISTORY_CHARACTERS = 400

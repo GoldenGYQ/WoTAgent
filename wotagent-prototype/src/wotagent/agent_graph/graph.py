@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Literal, Protocol, TypedDict
+from typing import Any, Literal, Protocol, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
@@ -15,7 +16,7 @@ from ..telemetry import InMemoryTraceStore
 
 
 class Planner(Protocol):
-    async def __call__(self, state: "AgentState") -> TaskPlan: ...
+    async def __call__(self, state: AgentState) -> TaskPlan: ...
 
 
 ResponseComposer = Callable[["AgentState"], str | Awaitable[str]]
