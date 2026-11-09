@@ -1,15 +1,21 @@
 # WoTAgent 项目交接文档
 
-最后更新：2026-07-23
+最后更新：2026-11-09
 
-当前分支：`trae/run-task-dag`
+当前主线：`main`
 
-当前发布基线：`v2.8.0`
+当前发布基线：`v3.0.1`
 
-当前实现目标：`v3.0.0` 场景隔离与 P1 授权
+下一阶段目标：真实模型链路复验、P1 资源级授权完善与运行稳定性提升
 
 本次文档同步前源码基线：
-`4b8f954 docs: add agent abstraction interview guide`
+`1a79807 fix: restore CI for current project layout`
+
+最近验证：GitHub CI 已通过；Python 3.11/3.12 均为
+`273 passed, 3 skipped`，前端 `45 passed` 且 typecheck/build 通过。
+
+分支策略：`main` 是唯一开发主线；`codex/release-backup` 只保存最近发布点，功能
+开发使用短期分支并在合并后删除。
 
 > 本文是当前交接基线。代码与自动化测试优先于旧设计文档；本文后面的历史问题
 > 只用于解释演进，不表示故障仍然存在。

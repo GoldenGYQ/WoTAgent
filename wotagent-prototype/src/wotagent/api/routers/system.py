@@ -27,7 +27,7 @@ def create_system_router(
 
     @router.get("/")
     async def root() -> dict[str, str]:
-        return {"name": "WoTAgent 2.0", "status": "ok", "docs": "/docs"}
+        return {"name": "WoTAgent 3.0", "version": "3.0.1", "status": "ok", "docs": "/docs"}
 
     @router.get("/api/health", response_model=HealthResponse)
     async def health() -> HealthResponse:

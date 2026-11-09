@@ -129,7 +129,7 @@ _lifespan = create_lifespan(
 app = FastAPI(
     title="WoTAgent 3.0",
     description="Goal-driven Run/Task DAG over constrained IoT agents",
-    version="3.0.0",
+    version="3.0.1",
     lifespan=_lifespan,
 )
 app.state.runtime = _runtime

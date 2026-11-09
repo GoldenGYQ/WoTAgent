@@ -10,12 +10,12 @@
     <img src="https://img.shields.io/badge/FastAPI-0.110%2B-009688?logo=fastapi&logoColor=white" alt="FastAPI" />
     <img src="https://img.shields.io/badge/Vue-3.5-42B883?logo=vuedotjs&logoColor=white" alt="Vue 3" />
     <img src="https://img.shields.io/badge/WoT-TD%20%2B%20MCP-2563EB" alt="WoT TD + MCP" />
-    <img src="https://img.shields.io/badge/Baseline-v2.8.0-16A34A" alt="v2.8.0" />
+    <img src="https://img.shields.io/badge/Release-v3.0.1-16A34A" alt="v3.0.1" />
   </p>
 </div>
 
-> WoTAgent 是一个实验型 AI + IoT 工程项目。当前发布基线为 `v2.8.0`，正在向
-> `v3.0.0` 演进。项目重点不是让大模型绕过规则直接控制设备，而是在可审计、可授权、
+> WoTAgent 是一个实验型 AI + IoT 工程项目。当前稳定实验基线为 `v3.0.1`。
+> 项目重点不是让大模型绕过规则直接控制设备，而是在可审计、可授权、
 > 可验证的边界内，将设备操作升级为目标驱动的多 Agent 协作。
 
 ## 为什么做这个项目
